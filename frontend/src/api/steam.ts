@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, tokenQs } from './client';
 
 export interface SteamValidateResponse {
   valid: boolean;
@@ -18,6 +18,14 @@ export interface SteamCredentials {
   user_id: string;
   steam_login_secure?: string;
   session_id?: string;
+}
+
+export interface SteamApiKeyStatus {
+  has_api_key: boolean;
+}
+
+export async function checkApiKeyStatus(): Promise<SteamApiKeyStatus> {
+  return api.get('/steam/api-key-status');
 }
 
 export async function validateSteam(data: SteamCredentials): Promise<SteamValidateResponse> {
@@ -44,7 +52,7 @@ export function connectImportProgress(
   onError?: (e: Event) => void,
 ): EventSource {
   const baseUrl = '/api';
-  const url = `${baseUrl}/steam/import/${sessionId}/progress`;
+  const url = `${baseUrl}/steam/import/${sessionId}/progress${tokenQs()}`;
 
   const eventSource = new EventSource(url);
 

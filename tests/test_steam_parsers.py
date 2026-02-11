@@ -1,8 +1,12 @@
-"""Tests for Steam scraper HTML parsers using saved fixtures.
+"""Tests for Steam scraper parsers and data structures.
 
-These tests validate that our parser correctly handles real Steam Community
-HTML structures. When Steam changes their layout, failing tests here will
-pinpoint exactly what broke.
+These tests validate:
+1. HTML parsers for Steam Community pages (fallback path)
+2. Data class construction for both API and scraping paths
+3. Helper functions (date parsing, URL building, cookie construction)
+
+When Steam changes their HTML layout, failing tests here will
+pinpoint exactly what broke in the fallback path.
 """
 
 import pytest
@@ -11,6 +15,8 @@ from bs4 import BeautifulSoup
 from backend.services.steam_scraper import (
     SteamScraper,
     SteamScreenshot,
+    SteamGameScreenshots,
+    SteamProfile,
     _build_cookies,
     _extract_full_image_url,
     _get_profile_url,
@@ -367,3 +373,109 @@ class TestSteamScraperInit:
         scraper.is_numeric = True
         scraper.profile_url = _get_profile_url("76561198012345678", is_numeric=True)
         assert "/profiles/76561198012345678" in scraper.profile_url
+
+    def test_has_api_key_true(self):
+        scraper = SteamScraper.__new__(SteamScraper)
+        scraper.api_key = "ABC123DEF456"
+        assert scraper.has_api_key is True
+
+    def test_has_api_key_false(self):
+        scraper = SteamScraper.__new__(SteamScraper)
+        scraper.api_key = ""
+        assert scraper.has_api_key is False
+
+    def test_has_api_key_none(self):
+        scraper = SteamScraper.__new__(SteamScraper)
+        scraper.api_key = None
+        assert scraper.has_api_key is False
+
+
+# ── API Data Structure Tests ────────────────────────────────────────────────
+
+
+class TestSteamScreenshotDataclass:
+    """Test SteamScreenshot data class used by both API and HTML paths."""
+
+    def test_api_style_screenshot(self):
+        """Screenshot populated from API response."""
+        ss = SteamScreenshot(
+            screenshot_id="3426813993",
+            app_id=1245620,
+            thumbnail_url="https://steamuserimages-a.akamaihd.net/ugc/preview.jpg",
+            full_image_url="https://steamuserimages-a.akamaihd.net/ugc/full.jpg",
+            title="Epic boss fight",
+            description="Defeated Malenia on first try",
+            date_taken="2024-01-21T15:44:00+00:00",
+            file_size=2516582,
+            width=1920,
+            height=1080,
+        )
+        assert ss.screenshot_id == "3426813993"
+        assert ss.app_id == 1245620
+        assert ss.full_image_url is not None
+        assert ss.width == 1920
+        assert ss.height == 1080
+        assert ss.detail_url == ""  # Not set in API path
+
+    def test_html_style_screenshot(self):
+        """Screenshot populated from HTML scraping (minimal data)."""
+        ss = SteamScreenshot(
+            screenshot_id="111222333",
+            app_id=1245620,
+            detail_url="https://steamcommunity.com/sharedfiles/filedetails/?id=111222333",
+            thumbnail_url="https://steamuserimages-a.akamaihd.net/ugc/thumb.jpg",
+            full_image_url="https://steamuserimages-a.akamaihd.net/ugc/thumb.jpg",
+        )
+        assert ss.screenshot_id == "111222333"
+        assert ss.detail_url != ""
+        assert ss.date_taken is None  # Not set until detail page fetched
+        assert ss.width is None
+
+
+class TestSteamGameScreenshots:
+    """Test SteamGameScreenshots grouping."""
+
+    def test_game_with_screenshots(self):
+        ss1 = SteamScreenshot(screenshot_id="1", app_id=1245620)
+        ss2 = SteamScreenshot(screenshot_id="2", app_id=1245620)
+        game = SteamGameScreenshots(
+            app_id=1245620,
+            name="ELDEN RING",
+            screenshot_count=2,
+            screenshots=[ss1, ss2],
+        )
+        assert game.app_id == 1245620
+        assert game.name == "ELDEN RING"
+        assert game.screenshot_count == 2
+        assert len(game.screenshots) == 2
+
+    def test_empty_game(self):
+        game = SteamGameScreenshots(app_id=0, name="Unknown")
+        assert game.screenshot_count == 0
+        assert game.screenshots == []
+
+
+class TestSteamProfile:
+    """Test SteamProfile data class."""
+
+    def test_profile_with_steam64(self):
+        profile = SteamProfile(
+            user_id="76561198012345678",
+            profile_name="TestGamer42",
+            avatar_url="https://avatars.akamai.steamstatic.com/abc123.jpg",
+            is_numeric_id=True,
+            profile_url="https://steamcommunity.com/profiles/76561198012345678",
+            steam64_id="76561198012345678",
+        )
+        assert profile.steam64_id == "76561198012345678"
+        assert profile.is_numeric_id is True
+
+    def test_profile_vanity_url(self):
+        profile = SteamProfile(
+            user_id="coolgamer",
+            profile_name="Cool Gamer",
+            is_numeric_id=False,
+            profile_url="https://steamcommunity.com/id/coolgamer",
+        )
+        assert profile.steam64_id is None
+        assert profile.is_numeric_id is False

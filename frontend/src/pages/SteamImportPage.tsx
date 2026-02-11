@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { ProgressBar } from '@/components/shared/ProgressBar';
 import {
+  checkApiKeyStatus,
   validateSteam,
   listSteamGames,
   startSteamImport,
@@ -44,6 +45,9 @@ interface ImportResult {
 export function SteamImportPage() {
   const [step, setStep] = useState<Step>('credentials');
 
+  // API key status
+  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+
   // Credentials
   const [userId, setUserId] = useState('');
   const [steamLoginSecure, setSteamLoginSecure] = useState('');
@@ -79,6 +83,13 @@ export function SteamImportPage() {
     return () => {
       eventSourceRef.current?.close();
     };
+  }, []);
+
+  // Check API key status on mount
+  useEffect(() => {
+    checkApiKeyStatus()
+      .then(status => setHasApiKey(status.has_api_key))
+      .catch(() => setHasApiKey(false));
   }, []);
 
   // ── Step 1: Validate credentials ─────────────────────────────────────────
@@ -143,7 +154,6 @@ export function SteamImportPage() {
         steam_login_secure: steamLoginSecure.trim() || undefined,
         session_id: sessionIdCookie.trim() || undefined,
         game_ids: Array.from(selectedGames),
-        is_numeric_id: validationResult?.is_numeric_id || false,
       });
 
       setSessionId(result.session_id);
@@ -397,10 +407,40 @@ export function SteamImportPage() {
               <div>
                 <h2 className="text-lg font-medium text-text-primary">Connect to Steam</h2>
                 <p className="text-sm text-text-secondary mt-1">
-                  Enter your Steam profile URL or ID. Add cookies to access private screenshots.
+                  Enter your Steam profile URL or ID.{hasApiKey ? ' Cookies are optional but enable access to private screenshots.' : ' Add cookies to access private screenshots.'}
                 </p>
               </div>
             </div>
+
+            {/* API key status banner */}
+            {hasApiKey === true && (
+              <div className="flex items-start gap-2 p-3 bg-accent-success/10 border border-accent-success/30 rounded-md">
+                <CheckCircle2 className="h-4 w-4 text-accent-success flex-shrink-0 mt-0.5" />
+                <div className="text-xs text-accent-success">
+                  <p className="font-medium">Steam API key configured</p>
+                  <p className="mt-0.5 opacity-80">
+                    Using the Steam Web API for fast, reliable screenshot discovery with exact counts.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {hasApiKey === false && (
+              <div className="flex items-start gap-2 p-3 bg-accent-warning/10 border border-accent-warning/30 rounded-md">
+                <AlertTriangle className="h-4 w-4 text-accent-warning flex-shrink-0 mt-0.5" />
+                <div className="text-xs text-accent-warning">
+                  <p className="font-medium">No Steam API key configured</p>
+                  <p className="mt-0.5 opacity-80">
+                    Import will use HTML scraping (slower, less reliable). For the best experience, add a free
+                    Steam API key in <a href="/settings" className="underline hover:no-underline">Settings</a>.
+                    Get one at{' '}
+                    <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener noreferrer" className="underline hover:no-underline">
+                      steamcommunity.com/dev/apikey
+                    </a>.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* User ID input */}
             <div>

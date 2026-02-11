@@ -154,3 +154,12 @@ export class ApiError extends Error {
 }
 
 export const api = new ApiClient();
+
+/**
+ * Return a query string with the auth token for use in URLs that can't
+ * send Authorization headers (img src, EventSource, download links).
+ */
+export function tokenQs(): string {
+  const token = localStorage.getItem('gamevault_token');
+  return token ? `?token=${encodeURIComponent(token)}` : '';
+}

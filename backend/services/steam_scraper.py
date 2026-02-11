@@ -1,20 +1,23 @@
-"""Steam Community screenshot scraper.
+"""Steam screenshot fetcher using the Steam Web API.
 
-Re-implementation of steamscrd logic in async Python using httpx + BeautifulSoup.
-Scrapes steamcommunity.com grid pages to discover and download screenshots.
+Game discovery uses HTML scraping (the game filter dropdown on Steam Community).
+Per-game screenshot fetching uses the Steam Web API (IPublishedFileService/GetUserFiles)
+when an API key is available, with HTML scraping as fallback.
 """
 
 import asyncio
+import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
-from urllib.parse import urljoin, urlparse, parse_qs
+from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 
 from backend.config import settings
 
+logger = logging.getLogger(__name__)
 
 # ── Data Classes ─────────────────────────────────────────────────────────────
 
@@ -25,18 +28,24 @@ class SteamProfile:
     avatar_url: str | None = None
     is_numeric_id: bool = False
     profile_url: str = ""
+    steam64_id: str | None = None
 
 
 @dataclass
 class SteamScreenshot:
     screenshot_id: str
-    detail_url: str
-    thumbnail_url: str
+    app_id: int = 0
+    thumbnail_url: str = ""
     full_image_url: str | None = None
     title: str = ""
     description: str = ""
     date_taken: str | None = None
     file_size: int | None = None
+    width: int | None = None
+    height: int | None = None
+
+    # Legacy field kept for compatibility; not used by API path
+    detail_url: str = ""
 
 
 @dataclass
@@ -50,24 +59,31 @@ class SteamGameScreenshots:
 # ── Constants ────────────────────────────────────────────────────────────────
 
 STEAM_COMMUNITY_URL = "https://steamcommunity.com"
+STEAM_API_URL = "https://api.steampowered.com"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/120.0.0.0 Safari/537.36"
 )
 
-# Privacy bitmask: 14 = private + friends only + public
+# Privacy bitmask for HTML scraping: 14 = private + friends only + public
 PRIVACY_FILTER = 14
 
-# Steam date formats
+# Steam date formats (used in HTML scraping fallback)
 DATE_FORMATS = [
-    "%b %d, %Y @ %I:%M%p",  # "Jan 01, 2024 @ 12:00pm"
-    "%b %d, %Y, %I:%M%p",   # "Jan 01, 2024, 12:00pm"
-    "%d %b, %Y @ %I:%M%p",  # "01 Jan, 2024 @ 12:00pm"
-    "%d %b, %Y, %I:%M%p",   # "01 Jan, 2024, 12:00pm"
-    "%b %d, %Y @ %I:%M %p", # "Jan 01, 2024 @ 12:00 pm"
-    "%d %b, %Y @ %I:%M %p", # "01 Jan, 2024 @ 12:00 pm"
+    "%b %d, %Y @ %I:%M%p",
+    "%b %d, %Y, %I:%M%p",
+    "%d %b, %Y @ %I:%M%p",
+    "%d %b, %Y, %I:%M%p",
+    "%b %d, %Y @ %I:%M %p",
+    "%d %b, %Y @ %I:%M %p",
 ]
+
+# How many screenshots to fetch per API page
+API_PAGE_SIZE = 100
+
+# Steam Screenshots creator app ID
+STEAM_SCREENSHOTS_APP_ID = 760
 
 
 # ── Helper Functions ─────────────────────────────────────────────────────────
@@ -79,7 +95,6 @@ def _build_cookies(steam_login_secure: str = "", session_id: str = "") -> dict:
         cookies["steamLoginSecure"] = steam_login_secure
     if session_id:
         cookies["sessionid"] = session_id
-    # Mature content cookie for games with age gates
     cookies["birthtime"] = "0"
     cookies["mature_content"] = "1"
     cookies["lastagecheckage"] = "1-0-1990"
@@ -97,7 +112,6 @@ def _parse_steam_date(date_str: str) -> datetime | None:
     """Try to parse a Steam date string using known formats."""
     if not date_str:
         return None
-    # Clean up whitespace
     cleaned = " ".join(date_str.strip().split())
     for fmt in DATE_FORMATS:
         try:
@@ -108,15 +122,9 @@ def _parse_steam_date(date_str: str) -> datetime | None:
 
 
 def _extract_full_image_url(thumbnail_url: str) -> str:
-    """Convert a Steam thumbnail URL to the full-size image URL.
-
-    Steam thumbnails use URLs like:
-    https://steamuserimages-a.akamaihd.net/ugc/ID/HASH/?imw=NNN
-    The full image is accessed without the resize parameters.
-    """
+    """Convert a Steam thumbnail URL to the full-size image URL."""
     if not thumbnail_url:
         return thumbnail_url
-    # Remove query parameters to get full-size image
     parsed = urlparse(thumbnail_url)
     return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
 
@@ -124,7 +132,12 @@ def _extract_full_image_url(thumbnail_url: str) -> str:
 # ── Scraper Class ────────────────────────────────────────────────────────────
 
 class SteamScraper:
-    """Async Steam Community screenshot scraper."""
+    """Steam screenshot fetcher with API-first approach and HTML fallback.
+
+    Game discovery always uses HTML scraping (parses the game filter dropdown).
+    Per-game screenshot fetching uses the Steam Web API when an API key is
+    available, falling back to HTML grid scraping otherwise.
+    """
 
     def __init__(
         self,
@@ -132,13 +145,18 @@ class SteamScraper:
         steam_login_secure: str = "",
         session_id: str = "",
         is_numeric_id: bool = False,
+        api_key: str = "",
     ):
         self.user_id = user_id
         self.is_numeric = is_numeric_id or user_id.isdigit()
         self.profile_url = _get_profile_url(user_id, self.is_numeric)
         self.cookies = _build_cookies(steam_login_secure, session_id)
+        self.api_key = api_key
         self.rate_limit_ms = settings.import_rate_limit_ms
         self._client: httpx.AsyncClient | None = None
+
+        # Resolved Steam64 numeric ID (set during validate_profile)
+        self._steam64_id: str | None = user_id if self.is_numeric else None
 
     async def __aenter__(self):
         self._client = httpx.AsyncClient(
@@ -153,57 +171,81 @@ class SteamScraper:
         if self._client:
             await self._client.aclose()
 
-    async def _get(self, url: str) -> httpx.Response:
-        """Make a rate-limited GET request."""
+    async def _get(self, url: str, rate_limit: bool = True) -> httpx.Response:
+        """Make a GET request, optionally rate-limited."""
         resp = await self._client.get(url)
-        if self.rate_limit_ms > 0:
+        if rate_limit and self.rate_limit_ms > 0:
             await asyncio.sleep(self.rate_limit_ms / 1000)
         return resp
+
+    @property
+    def has_api_key(self) -> bool:
+        return bool(self.api_key)
 
     # ── Profile Validation ───────────────────────────────────────────────
 
     async def validate_profile(self) -> SteamProfile:
         """Validate that the Steam profile exists and is accessible.
 
-        Returns profile info or raises an error. Also resolves the
-        Steam64 numeric ID if a vanity URL was provided.
+        Also resolves the Steam64 numeric ID (needed for API calls).
         """
         url = self.profile_url
+        logger.info("validate_profile: fetching %s", url)
         resp = await self._get(url)
 
         if resp.status_code != 200:
+            logger.error("validate_profile: HTTP %d for %s", resp.status_code, url)
             raise ValueError(f"Could not access Steam profile (HTTP {resp.status_code})")
 
         soup = BeautifulSoup(resp.text, "lxml")
 
-        # Check for error page
         error_elem = soup.select_one(".error_ctn")
         if error_elem:
+            error_text = error_elem.get_text(strip=True)[:200]
+            logger.error("validate_profile: error_ctn found: %s", error_text)
             raise ValueError("Steam profile not found or is private")
 
-        # Extract profile name
         name_elem = soup.select_one(".actual_persona_name")
         profile_name = name_elem.get_text(strip=True) if name_elem else None
 
-        # Extract avatar
         avatar_elem = soup.select_one(".playerAvatarAutoSizeInner img")
         avatar_url = avatar_elem.get("src") if avatar_elem else None
 
-        # Resolve Steam64 numeric ID (needed for API calls)
-        steam64_id = self.user_id if self.is_numeric else None
-        if not steam64_id:
-            steam64_id = await self._resolve_steam64_id()
+        # Resolve Steam64 numeric ID
+        if not self._steam64_id:
+            self._steam64_id = await self._resolve_steam64_id()
 
         return SteamProfile(
-            user_id=steam64_id or self.user_id,
+            user_id=self._steam64_id or self.user_id,
             profile_name=profile_name,
             avatar_url=avatar_url,
-            is_numeric_id=True if steam64_id else self.is_numeric,
+            is_numeric_id=True if self._steam64_id else self.is_numeric,
             profile_url=self.profile_url,
+            steam64_id=self._steam64_id,
         )
 
     async def _resolve_steam64_id(self) -> str | None:
-        """Resolve a vanity URL to a Steam64 numeric ID using the XML profile."""
+        """Resolve a vanity URL to a Steam64 numeric ID.
+
+        Tries the ResolveVanityURL API first (if API key available),
+        falls back to the XML profile endpoint.
+        """
+        if self.api_key:
+            try:
+                url = (
+                    f"{STEAM_API_URL}/ISteamUser/ResolveVanityURL/v1/"
+                    f"?key={self.api_key}&vanityurl={self.user_id}"
+                )
+                resp = await self._get(url, rate_limit=False)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    response = data.get("response", {})
+                    if response.get("success") == 1:
+                        return response.get("steamid")
+            except Exception:
+                pass
+
+        # Fallback: XML profile
         try:
             resp = await self._get(f"{self.profile_url}/?xml=1")
             if resp.status_code == 200:
@@ -212,19 +254,18 @@ class SteamScraper:
                     return match.group(1)
         except Exception:
             pass
+
         return None
 
-    # ── Game Discovery ───────────────────────────────────────────────────
+    # ── Game Discovery (always HTML) ─────────────────────────────────────
 
     async def discover_games(self, fetch_counts: bool = False) -> list[SteamGameScreenshots]:
         """Discover all games that have screenshots on this profile.
 
-        Scrapes the screenshot grid with appid=0 (all games view) and
-        parses the game filter dropdown to get the list of games.
-
-        Args:
-            fetch_counts: If True, make an additional request per game to
-                get the screenshot count. This is slow for large libraries.
+        Always uses HTML scraping — the Steam Community game filter dropdown
+        is the only reliable way to get the full list of games with screenshots.
+        When an API key is available, we then fetch exact counts per game via
+        the API (fast, one request per game vs scraping grid pages).
         """
         url = (
             f"{self.profile_url}/screenshots/"
@@ -238,12 +279,9 @@ class SteamScraper:
         soup = BeautifulSoup(resp.text, "lxml")
         games = []
 
-        # Steam's current layout uses a custom dropdown for game filtering.
-        # Each game is a div.option.ellipsis inside #sharedfiles_filterselect_app_filterable
-        # with the app ID embedded in an onclick attribute like:
-        #   onclick="javascript:SelectSharedFilesContentFilter({ 'appid': '292030' });"
-        # and the game name as the element's text content.
+        # Current layout: custom dropdown for game filtering
         filterable = soup.find(id="sharedfiles_filterselect_app_filterable")
+        logger.info("discover_games: filterable dropdown found = %s", bool(filterable))
         if filterable:
             options = filterable.select("div.option")
             for opt in options:
@@ -251,27 +289,30 @@ class SteamScraper:
                 match = re.search(r"'appid'\s*:\s*'(\d+)'", onclick)
                 if not match:
                     continue
-
                 app_id = int(match.group(1))
                 if app_id == 0:
-                    continue  # "All games" entry
-
+                    continue
                 name = opt.get_text(strip=True) or f"App {app_id}"
-
                 games.append(SteamGameScreenshots(
                     app_id=app_id,
                     name=name,
-                    screenshot_count=0,  # Populated below
+                    screenshot_count=0,
                 ))
 
-        # If the new dropdown wasn't found, try legacy sidebar selectors
+        # Fallback: legacy sidebar
         if not games:
             games = self._parse_legacy_sidebar(soup)
 
-        # Optionally get screenshot counts by parsing the "Showing X of N" text
-        # on each game's screenshot page. This is slow for large libraries.
-        if games and fetch_counts:
-            await self._populate_screenshot_counts(games)
+        logger.info("discover_games: found %d games from HTML dropdown", len(games))
+
+        # Get screenshot counts — via API (fast) or HTML scraping (slow)
+        if games:
+            if self.has_api_key and self._steam64_id:
+                logger.info("discover_games: populating counts via API (steam64=%s)", self._steam64_id)
+                await self._populate_screenshot_counts_api(games)
+            elif fetch_counts:
+                logger.info("discover_games: populating counts via HTML scraping")
+                await self._populate_screenshot_counts_html(games)
 
         return games
 
@@ -315,11 +356,31 @@ class SteamScraper:
 
         return games
 
-    async def _populate_screenshot_counts(self, games: list[SteamGameScreenshots]) -> None:
-        """Fetch screenshot counts for each game by loading page 1 and reading
-        the 'Showing X - Y of Z' text. Processes games sequentially with rate
-        limiting to be respectful to Steam servers.
-        """
+    async def _populate_screenshot_counts_api(self, games: list[SteamGameScreenshots]) -> None:
+        """Get screenshot counts using the Steam API (one request per game, totalonly)."""
+        steam_id = self._steam64_id or self.user_id
+        for game in games:
+            try:
+                url = (
+                    f"{STEAM_API_URL}/IPublishedFileService/GetUserFiles/v1/"
+                    f"?key={self.api_key}"
+                    f"&steamid={steam_id}"
+                    f"&appid={game.app_id}"
+                    f"&filetype=4"
+                    f"&totalonly=true"
+                    f"&numperpage=1"
+                    f"&page=1"
+                )
+                resp = await self._get(url, rate_limit=False)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    total = data.get("response", {}).get("total", 0)
+                    game.screenshot_count = total
+            except Exception:
+                continue
+
+    async def _populate_screenshot_counts_html(self, games: list[SteamGameScreenshots]) -> None:
+        """Fetch screenshot counts for each game by loading page 1 (slow)."""
         for game in games:
             try:
                 url = (
@@ -331,7 +392,6 @@ class SteamScraper:
                 if resp.status_code != 200:
                     continue
 
-                # Look for "Showing X - Y of Z" in the page
                 match = re.search(
                     r"Showing\s+\d+\s*-\s*\d+\s+of\s+([\d,]+)",
                     resp.text,
@@ -339,25 +399,176 @@ class SteamScraper:
                 if match:
                     game.screenshot_count = int(match.group(1).replace(",", ""))
                 else:
-                    # If no paging text, count thumbnails on the page
                     soup = BeautifulSoup(resp.text, "lxml")
                     cards = soup.select("a[href*='filedetails']")
                     game.screenshot_count = len(cards)
             except Exception:
-                # Don't fail the whole discovery if one game errors
                 continue
 
-    # ── Screenshot Grid Scraping ─────────────────────────────────────────
+    # ── Per-Game Screenshot Fetching ─────────────────────────────────────
 
-    async def scrape_game_screenshots(
+    async def get_game_screenshots(
         self,
         app_id: int,
         on_progress: callable = None,
     ) -> list[SteamScreenshot]:
-        """Scrape all screenshots for a specific game.
+        """Get all screenshots for a specific game.
 
-        Paginates through the grid pages until no more screenshots are found.
+        Uses the Steam Web API if an API key is available (returns direct
+        CDN URLs with metadata). Falls back to HTML grid scraping otherwise.
         """
+        if self.has_api_key and self._steam64_id:
+            screenshots = await self._fetch_game_screenshots_api(app_id)
+            if screenshots is not None:
+                if on_progress:
+                    on_progress(len(screenshots))
+                return screenshots
+            # API returned None (failed), fall through to HTML
+
+        return await self._scrape_game_screenshots_html(app_id, on_progress)
+
+    async def _fetch_game_screenshots_api(self, app_id: int) -> list[SteamScreenshot] | None:
+        """Fetch all screenshots for a specific game via the Steam Web API.
+
+        Uses IPublishedFileService/GetUserFiles with the game's appid.
+        filetype=4 is the EPublishedFileInfoMatchingFileType value for screenshots
+        (NOT 5, which is EWorkshopFileType — a different enum used in responses).
+        Returns None if the API call fails (caller should fall back to HTML).
+        """
+        steam_id = self._steam64_id or self.user_id
+        all_screenshots: list[SteamScreenshot] = []
+        page = 1
+        total_fetched = 0
+
+        logger.info(
+            "API: fetching screenshots for app %d, steam_id=%s",
+            app_id, steam_id,
+        )
+
+        while True:
+            url = (
+                f"{STEAM_API_URL}/IPublishedFileService/GetUserFiles/v1/"
+                f"?key={self.api_key}"
+                f"&steamid={steam_id}"
+                f"&appid={app_id}"
+                f"&filetype=4"
+                f"&numperpage={API_PAGE_SIZE}"
+                f"&page={page}"
+            )
+
+            try:
+                resp = await self._get(url, rate_limit=True)
+            except Exception as e:
+                logger.error("API request failed for app %d page %d: %s", app_id, page, e)
+                return None if page == 1 else all_screenshots
+
+            if resp.status_code != 200:
+                logger.error("API returned HTTP %d for app %d page %d", resp.status_code, app_id, page)
+                return None if page == 1 else all_screenshots
+
+            try:
+                data = resp.json()
+            except Exception:
+                logger.error("API returned invalid JSON for app %d page %d", app_id, page)
+                return None if page == 1 else all_screenshots
+
+            response = data.get("response", {})
+            files = response.get("publishedfiledetails", [])
+            total = response.get("total", 0)
+
+            logger.info(
+                "API app %d page %d: response has %d files, total=%d",
+                app_id, page, len(files), total,
+            )
+
+            if not files:
+                if page == 1:
+                    logger.info("API app %d: no files returned on first page", app_id)
+                break
+
+            # Log first file's structure for debugging
+            if page == 1 and files:
+                first = files[0]
+                logger.info(
+                    "API app %d: first file sample — publishedfileid=%s, "
+                    "file_type=%s, file_url=%s, preview_url=%s",
+                    app_id,
+                    first.get("publishedfileid"),
+                    first.get("file_type"),
+                    (first.get("file_url", "") or "")[:80],
+                    (first.get("preview_url", "") or "")[:80],
+                )
+
+            for f in files:
+                published_id = str(f.get("publishedfileid", ""))
+                file_url = f.get("file_url", "")
+                preview_url = f.get("preview_url", "")
+                time_created = f.get("time_created", 0)
+                file_size = f.get("file_size", 0)
+                title = f.get("title", "")
+                description = f.get("file_description", "")
+                img_width = f.get("image_width", None)
+                img_height = f.get("image_height", None)
+
+                if not published_id:
+                    continue
+
+                # Convert Unix timestamp to ISO
+                date_taken = None
+                if time_created:
+                    date_taken = datetime.fromtimestamp(
+                        time_created, tz=timezone.utc
+                    ).isoformat()
+
+                # With filetype=4, the API returns file_url (direct CDN link).
+                # If file_url is empty for some reason, set detail_url so the
+                # import service can fall back to scraping the detail page.
+                detail_url = (
+                    f"{STEAM_COMMUNITY_URL}/sharedfiles/filedetails/?id={published_id}"
+                )
+
+                screenshot = SteamScreenshot(
+                    screenshot_id=published_id,
+                    app_id=app_id,
+                    thumbnail_url=preview_url,
+                    full_image_url=file_url if file_url else None,
+                    detail_url=detail_url,
+                    title=title,
+                    description=description,
+                    date_taken=date_taken,
+                    file_size=int(file_size) if file_size else None,
+                    width=int(img_width) if img_width else None,
+                    height=int(img_height) if img_height else None,
+                )
+
+                all_screenshots.append(screenshot)
+
+            total_fetched += len(files)
+            logger.info(
+                "API app %d page %d: parsed %d screenshots (%d/%d total fetched)",
+                app_id, page, len(all_screenshots), total_fetched, total,
+            )
+
+            if total_fetched >= total or len(files) < API_PAGE_SIZE:
+                break
+
+            page += 1
+            if page > 500:
+                logger.warning("Hit API page safety limit for app %d", app_id)
+                break
+
+        logger.info(
+            "API app %d: finished with %d screenshots total",
+            app_id, len(all_screenshots),
+        )
+        return all_screenshots
+
+    async def _scrape_game_screenshots_html(
+        self,
+        app_id: int,
+        on_progress: callable = None,
+    ) -> list[SteamScreenshot]:
+        """Scrape all screenshots for a game via HTML grid pages."""
         all_screenshots = []
         page = 1
 
@@ -384,8 +595,6 @@ class SteamScraper:
                 on_progress(len(all_screenshots))
 
             page += 1
-
-            # Safety limit to prevent infinite loops
             if page > 200:
                 break
 
@@ -395,7 +604,6 @@ class SteamScraper:
         """Parse a single grid page to extract screenshot entries."""
         screenshots = []
 
-        # Grid items are <a> links with class "profile_media_item" or similar
         items = soup.select(
             "a.profile_media_item, "
             "a.apphub_Card, "
@@ -407,7 +615,6 @@ class SteamScraper:
             if not href or "filedetails" not in href:
                 continue
 
-            # Extract screenshot ID from URL or data attribute
             screenshot_id = item.get("data-publishedfileid", "")
             if not screenshot_id:
                 id_match = re.search(r"id=(\d+)", href)
@@ -415,12 +622,10 @@ class SteamScraper:
                     continue
                 screenshot_id = id_match.group(1)
 
-            # Current Steam layout (2024+): thumbnails are CSS background-image
-            # on a div.imgWallItem child, not <img> tags.
             thumbnail_url = ""
             full_url = None
 
-            # Try the new div.imgWallItem background-image approach
+            # Current layout (2024+): CSS background-image on div.imgWallItem
             wall_item = item.select_one(".imgWallItem, .imgWallHoverItem")
             if wall_item:
                 style = wall_item.get("style", "")
@@ -429,7 +634,7 @@ class SteamScraper:
                     thumbnail_url = bg_match.group(1)
                     full_url = _extract_full_image_url(thumbnail_url)
 
-            # Fallback: try <img> tag (older layout)
+            # Fallback: <img> tag
             if not thumbnail_url:
                 img = item.select_one("img")
                 if img:
@@ -439,6 +644,7 @@ class SteamScraper:
 
             screenshots.append(SteamScreenshot(
                 screenshot_id=screenshot_id,
+                app_id=app_id,
                 detail_url=href,
                 thumbnail_url=thumbnail_url,
                 full_image_url=full_url,
@@ -446,13 +652,16 @@ class SteamScraper:
 
         return screenshots
 
-    # ── Screenshot Detail Page ───────────────────────────────────────────
+    # ── Screenshot Detail Page (HTML fallback only) ──────────────────────
 
     async def get_screenshot_details(self, screenshot: SteamScreenshot) -> SteamScreenshot:
-        """Fetch the detail page for a screenshot to get the full-size image URL,
-        description, and date.
+        """Fetch detail page for a screenshot (HTML scraping fallback only).
+
+        Not needed when using the API path — the API returns all metadata directly.
         """
         url = screenshot.detail_url
+        if not url:
+            return screenshot
         if not url.startswith("http"):
             url = f"{STEAM_COMMUNITY_URL}{url}"
 
@@ -462,7 +671,7 @@ class SteamScraper:
 
         soup = BeautifulSoup(resp.text, "lxml")
 
-        # Get full-size image URL from the detail page
+        # Full-size image URL
         actual_img = soup.select_one(
             ".actualmediactn a img, "
             ".screenshotActualSize img, "
@@ -473,17 +682,14 @@ class SteamScraper:
             if src:
                 screenshot.full_image_url = _extract_full_image_url(src)
 
-        # Also check for a direct link to full size
-        full_link = soup.select_one(
-            ".actualmediactn a, "
-            "a[href*='ugc']"
-        )
-        if full_link and not screenshot.full_image_url:
-            href = full_link.get("href", "")
-            if "akamaihd.net" in href or "ugc" in href:
-                screenshot.full_image_url = _extract_full_image_url(href)
+        if not screenshot.full_image_url:
+            full_link = soup.select_one(".actualmediactn a, a[href*='ugc']")
+            if full_link:
+                href = full_link.get("href", "")
+                if "akamaihd.net" in href or "ugc" in href:
+                    screenshot.full_image_url = _extract_full_image_url(href)
 
-        # Get description/caption
+        # Description
         desc_elem = soup.select_one(
             ".screenshotDescription, "
             ".nonSelectedScreenshotDescription, "
@@ -492,7 +698,7 @@ class SteamScraper:
         if desc_elem:
             screenshot.description = desc_elem.get_text(strip=True)
 
-        # Get date taken
+        # Date
         date_elem = soup.select_one(
             ".detailsStatsContainerRight .detailsStatRight, "
             ".screenshotDate"
@@ -503,7 +709,7 @@ class SteamScraper:
             if parsed:
                 screenshot.date_taken = parsed.isoformat()
 
-        # Get file size from details
+        # File size
         stats = soup.select(".detailsStatRight")
         for stat in stats:
             text = stat.get_text(strip=True)
@@ -522,8 +728,9 @@ class SteamScraper:
     # ── Image Download ───────────────────────────────────────────────────
 
     async def download_image(self, url: str) -> bytes | None:
-        """Download a screenshot image from Akamai CDN."""
+        """Download a screenshot image from Akamai / Steam CDN."""
         if not url:
+            logger.warning("download_image: empty URL")
             return None
 
         try:
@@ -531,7 +738,20 @@ class SteamScraper:
             if resp.status_code == 200:
                 content_type = resp.headers.get("content-type", "")
                 if "image" in content_type or len(resp.content) > 1000:
+                    logger.info(
+                        "download_image: success, %d bytes, type=%s",
+                        len(resp.content), content_type,
+                    )
                     return resp.content
-        except Exception:
-            pass
+                else:
+                    logger.warning(
+                        "download_image: unexpected content — type=%s, size=%d",
+                        content_type, len(resp.content),
+                    )
+            else:
+                logger.warning(
+                    "download_image: HTTP %d for %s", resp.status_code, url[:100],
+                )
+        except Exception as e:
+            logger.error("download_image: exception for %s: %s", url[:100], e)
         return None

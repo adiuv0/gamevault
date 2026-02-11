@@ -10,10 +10,11 @@ from backend.auth import require_auth
 from backend.models.steam_import import (
     SteamValidateRequest,
     SteamValidateResponse,
-    SteamImportRequest,
     SteamGameInfo,
+    SteamImportRequest,
     SteamImportSessionResponse,
 )
+from backend.routers.settings import get_effective_key
 from backend.services.steam_scraper import SteamScraper
 from backend.services.steam_import_service import (
     create_import_session,
@@ -27,16 +28,27 @@ from backend.services.steam_import_service import (
 router = APIRouter(prefix="/api/steam", tags=["steam"], dependencies=[Depends(require_auth)])
 
 
+# ── Check API key status ─────────────────────────────────────────────────────
+
+@router.get("/api-key-status")
+async def api_key_status():
+    """Check whether a Steam API key is configured."""
+    key = await get_effective_key("steam_api_key")
+    return {"has_api_key": bool(key)}
+
+
 # ── Validate credentials ─────────────────────────────────────────────────────
 
 @router.post("/validate", response_model=SteamValidateResponse)
 async def validate_steam(req: SteamValidateRequest):
     """Validate that a Steam profile exists and cookies are working."""
+    api_key = await get_effective_key("steam_api_key")
     try:
         async with SteamScraper(
             user_id=req.user_id,
             steam_login_secure=req.steam_login_secure,
             session_id=req.session_id,
+            api_key=api_key,
         ) as scraper:
             profile = await scraper.validate_profile()
             return SteamValidateResponse(
@@ -62,11 +74,13 @@ async def validate_steam(req: SteamValidateRequest):
 @router.post("/games", response_model=list[SteamGameInfo])
 async def list_steam_games(req: SteamValidateRequest):
     """List all games with screenshots on the user's Steam profile."""
+    api_key = await get_effective_key("steam_api_key")
     try:
         async with SteamScraper(
             user_id=req.user_id,
             steam_login_secure=req.steam_login_secure,
             session_id=req.session_id,
+            api_key=api_key,
         ) as scraper:
             games = await scraper.discover_games()
             return [

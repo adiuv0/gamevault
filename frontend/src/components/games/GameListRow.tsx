@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { ImageOff, ChevronRight } from 'lucide-react';
+import { getCoverUrl } from '@/api/games';
 import { formatCount, formatDate } from '@/lib/formatters';
 import type { Game } from '@/lib/types';
 
@@ -9,7 +10,7 @@ interface GameListRowProps {
 
 export function GameListRow({ game }: GameListRowProps) {
   const coverUrl = game.cover_image_path
-    ? `/api/games/${game.id}/cover`
+    ? getCoverUrl(game.id)
     : null;
 
   return (

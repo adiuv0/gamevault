@@ -93,11 +93,19 @@ async def require_auth(request: Request) -> dict | None:
         )
 
     # Extract and validate token
+    token = None
     auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
+
+    # Fallback: token query parameter (needed for SSE EventSource which
+    # cannot set custom headers)
+    if not token:
+        token = request.query_params.get("token")
+
+    if not token:
         raise HTTPException(status_code=401, detail="Missing authentication token")
 
-    token = auth_header.split(" ", 1)[1]
     try:
         payload = decode_token(token)
         return payload

@@ -1,5 +1,9 @@
-import { api } from './client';
+import { api, tokenQs } from './client';
 import type { Game } from '@/lib/types';
+
+export function getCoverUrl(gameId: number): string {
+  return `/api/games/${gameId}/cover${tokenQs()}`;
+}
 
 export async function listGames(sort = 'name'): Promise<{ games: Game[]; total: number }> {
   return api.get(`/games?sort=${sort}`);

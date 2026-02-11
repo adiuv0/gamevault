@@ -5,7 +5,7 @@ import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { ScreenshotGallery } from '@/components/screenshots/ScreenshotGallery';
 import { ScreenshotViewer } from '@/components/screenshots/ScreenshotViewer';
-import { getGame, deleteGame } from '@/api/games';
+import { getGame, deleteGame, getCoverUrl } from '@/api/games';
 import { listScreenshots } from '@/api/screenshots';
 import { fetchGameMetadata } from '@/api/metadata';
 import { formatCount, formatDate } from '@/lib/formatters';
@@ -154,7 +154,7 @@ export function GamePage() {
             {/* Cover */}
             {game.cover_image_path ? (
               <img
-                src={`/api/games/${game.id}/cover`}
+                src={getCoverUrl(game.id)}
                 alt={game.name}
                 className="w-16 h-24 rounded-lg object-cover flex-shrink-0 hidden sm:block"
               />

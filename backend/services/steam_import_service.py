@@ -9,6 +9,7 @@ from pathlib import Path
 
 from backend.config import settings
 from backend.database import get_db
+from backend.routers.settings import get_effective_key
 from backend.services.steam_scraper import (
     SteamScraper,
     SteamScreenshot,
@@ -30,6 +31,7 @@ from backend.services.filesystem import (
     sanitize_filename,
     get_screenshots_dir,
 )
+from backend.services.metadata_service import fetch_and_apply_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -147,8 +149,8 @@ async def run_import(
     """Run the full Steam import pipeline as a background task.
 
     1. Validate profile
-    2. Discover games with screenshots
-    3. For each game: scrape grid pages → download screenshots → save to DB
+    2. Discover games with screenshots (API if key available, HTML fallback)
+    3. For each game: fetch screenshot list → download images → save to DB
     4. Emit SSE progress events throughout
     """
     try:
@@ -162,18 +164,28 @@ async def run_import(
             "status": "running",
         })
 
+        # Retrieve Steam API key (DB override → env var)
+        api_key = await get_effective_key("steam_api_key")
+
         async with SteamScraper(
             user_id=user_id,
             steam_login_secure=steam_login_secure,
             session_id=session_id_cookie,
             is_numeric_id=is_numeric_id,
+            api_key=api_key,
         ) as scraper:
 
             # Step 1: Validate profile
             await emit_progress(session_id, "status", {"message": "Validating Steam profile..."})
+            logger.info(
+                "Import %d: validating profile for user_id=%s, is_numeric=%s, has_cookies=%s, has_api_key=%s",
+                session_id, user_id, is_numeric_id,
+                bool(steam_login_secure), bool(api_key),
+            )
             try:
                 profile = await scraper.validate_profile()
             except ValueError as e:
+                logger.error("Import %d: profile validation failed: %s", session_id, e)
                 await _fail_import(session_id, str(e))
                 return
 
@@ -184,11 +196,15 @@ async def run_import(
 
             # Step 2: Discover games
             await emit_progress(session_id, "status", {"message": "Discovering games..."})
+            logger.info("Import %d: discovering games...", session_id)
             try:
                 all_games = await scraper.discover_games()
             except ValueError as e:
+                logger.error("Import %d: game discovery failed: %s", session_id, e)
                 await _fail_import(session_id, f"Failed to discover games: {e}")
                 return
+
+            logger.info("Import %d: found %d games", session_id, len(all_games))
 
             if not all_games:
                 await _fail_import(session_id, "No games with screenshots found on this profile.")
@@ -339,11 +355,11 @@ async def _import_game(
     game_id = game["id"]
     game_folder = game["folder_name"]
 
-    # Scrape all screenshot entries from grid pages
+    # Get all screenshot entries (API cache or HTML scraping fallback)
     try:
-        screenshots = await scraper.scrape_game_screenshots(game_info.app_id)
+        screenshots = await scraper.get_game_screenshots(game_info.app_id)
     except Exception as e:
-        error_msg = f"Failed to scrape screenshots for {game_info.name}: {e}"
+        error_msg = f"Failed to fetch screenshots for {game_info.name}: {e}"
         logger.error(error_msg)
         await append_error_log(session_id, error_msg)
         await emit_progress(session_id, "game_error", {
@@ -385,6 +401,17 @@ async def _import_game(
     # Update game stats after all screenshots imported
     await update_screenshot_stats(game_id)
 
+    # Auto-fetch metadata (cover art, description, etc.) for new games
+    try:
+        meta = await fetch_and_apply_metadata(game_id)
+        if meta.get("fields_updated") or meta.get("cover_downloaded"):
+            logger.info(
+                "Auto-fetched metadata for %s: fields=%s, cover=%s",
+                game_info.name, meta.get("fields_updated"), meta.get("cover_downloaded"),
+            )
+    except Exception as e:
+        logger.warning("Auto-metadata fetch failed for %s: %s", game_info.name, e)
+
     return completed, skipped, failed
 
 
@@ -403,6 +430,12 @@ async def _import_single_screenshot(
     """Import a single screenshot. Returns 'completed', 'skipped', or 'failed'."""
 
     steam_id = screenshot.screenshot_id
+    logger.info(
+        "Importing screenshot %s (%d/%d for %s): full_url=%s, detail_url=%s",
+        steam_id, index + 1, total_for_game, game_name,
+        (screenshot.full_image_url or "")[:80],
+        (screenshot.detail_url or "")[:80],
+    )
 
     # Check if already imported (by Steam ID)
     if await check_duplicate_steam_id(steam_id):
@@ -417,14 +450,18 @@ async def _import_single_screenshot(
         })
         return "skipped"
 
-    # Fetch detail page for full-res URL and metadata
-    try:
-        screenshot = await scraper.get_screenshot_details(screenshot)
-    except Exception as e:
-        logger.warning("Could not fetch details for %s: %s", steam_id, e)
+    # If we don't have a full image URL yet, fetch the detail page
+    # to get the full-res URL. This applies to both the API path
+    # (where file_url is typically empty) and the HTML scraping path.
+    if not screenshot.full_image_url and screenshot.detail_url:
+        try:
+            screenshot = await scraper.get_screenshot_details(screenshot)
+        except Exception as e:
+            logger.warning("Could not fetch details for %s: %s", steam_id, e)
 
     # Determine which URL to download
     image_url = screenshot.full_image_url or screenshot.thumbnail_url
+    logger.info("Screenshot %s: download URL = %s", steam_id, (image_url or "NONE")[:100])
     if not image_url:
         await emit_progress(session_id, "screenshot_failed", {
             "steam_id": steam_id,

@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, tokenQs } from './client';
 import type { Screenshot, Annotation, ShareLink } from '@/lib/types';
 
 export async function listScreenshots(
@@ -31,11 +31,11 @@ export async function deleteAnnotation(screenshotId: number): Promise<void> {
 }
 
 export function getScreenshotImageUrl(id: number): string {
-  return `/api/screenshots/${id}/image`;
+  return `/api/screenshots/${id}/image${tokenQs()}`;
 }
 
 export function getThumbnailUrl(id: number, size: 'sm' | 'md'): string {
-  return `/api/screenshots/${id}/thumb/${size}`;
+  return `/api/screenshots/${id}/thumb/${size}${tokenQs()}`;
 }
 
 // ── Share link management ─────────────────────────────────────────────
