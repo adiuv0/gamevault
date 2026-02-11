@@ -1,6 +1,7 @@
 """Upload processing service with progress tracking."""
 
 import asyncio
+import logging
 import re
 import shutil
 from datetime import datetime
@@ -8,6 +9,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from backend.config import settings
+
+logger = logging.getLogger(__name__)
 from backend.services.filesystem import get_screenshots_dir, sanitize_filename
 from backend.services.game_service import get_game
 from backend.services.image_processor import get_image_format, validate_image
@@ -107,6 +110,7 @@ async def process_upload(
     """
     game = await get_game(game_id)
     if not game:
+        logger.error("process_upload: game_id=%d not found", game_id)
         await emit_progress(task_id, {
             "type": "error",
             "message": f"Game ID {game_id} not found",
@@ -120,6 +124,8 @@ async def process_upload(
 
     total = len(temp_files)
     results = []
+    logger.info("process_upload: game=%s (%d), %d files, dir=%s",
+                game["name"], game_id, total, screenshots_dir)
 
     await emit_progress(task_id, {
         "type": "start",
@@ -138,6 +144,8 @@ async def process_upload(
 
             # Validate image
             if not validate_image(temp_path):
+                logger.warning("process_upload: INVALID IMAGE %s (size=%d)",
+                               original_name, temp_path.stat().st_size if temp_path.exists() else -1)
                 await emit_progress(task_id, {
                     "type": "file_error",
                     "file_index": i,
@@ -184,6 +192,8 @@ async def process_upload(
             # Check for duplicates by hash BEFORE generating thumbnails
             dup = await check_duplicate_hash(img_data["sha256_hash"])
             if dup:
+                logger.info("process_upload: DUPLICATE %s (hash=%s, dup_of=%s)",
+                            original_name, img_data["sha256_hash"][:12], dup['filename'])
                 await emit_progress(task_id, {
                     "type": "file_skipped",
                     "file_index": i,
@@ -208,6 +218,8 @@ async def process_upload(
             final_path = screenshots_dir / filename
 
             shutil.copy2(str(temp_path), str(final_path))
+            logger.info("process_upload: SAVED %s -> %s (%d bytes)",
+                        original_name, final_path, final_path.stat().st_size)
 
             # Regenerate thumbnails with final filename stem
             from backend.services.image_processor import generate_thumbnails
@@ -245,6 +257,7 @@ async def process_upload(
             })
 
         except Exception as e:
+            logger.exception("process_upload: EXCEPTION for %s", original_name)
             await emit_progress(task_id, {
                 "type": "file_error",
                 "file_index": i,

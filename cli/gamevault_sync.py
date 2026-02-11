@@ -533,13 +533,24 @@ def run_cli(args: argparse.Namespace) -> None:
 
             for ss in new_shots:
                 try:
-                    client.upload_screenshot(gv_game_id, ss.path, ss.filename)
-                    uploaded += 1
-                    print(
-                        f"\r  [{uploaded}/{total_new}] {game_name} — {ss.filename}",
-                        end="",
-                        flush=True,
-                    )
+                    result = client.upload_screenshot(gv_game_id, ss.path, ss.filename)
+                    server_uploaded = result.get("uploaded", 0)
+                    if server_uploaded > 0:
+                        uploaded += 1
+                        print(
+                            f"\r  [{uploaded}/{total_new}] {game_name} — {ss.filename}",
+                            end="",
+                            flush=True,
+                        )
+                    else:
+                        # Server accepted the request but didn't save the file
+                        # (e.g. duplicate hash, invalid image, etc.)
+                        failed += 1
+                        screenshots = result.get("screenshots", [])
+                        print(
+                            f"\n  SKIP: {ss.filename}: server returned uploaded=0 (response: {result})",
+                            file=sys.stderr,
+                        )
                 except Exception as exc:
                     failed += 1
                     print(
@@ -889,8 +900,13 @@ def run_gui() -> None:
                             gv_game = client.get_or_create_game(app_id)
                             gv_game_cache[app_id] = gv_game["id"]
                         gv_id = gv_game_cache[app_id]
-                        client.upload_screenshot(gv_id, ss.path, ss.filename)
-                        uploaded += 1
+                        result = client.upload_screenshot(gv_id, ss.path, ss.filename)
+                        if result.get("uploaded", 0) > 0:
+                            uploaded += 1
+                        else:
+                            failed += 1
+                            last_error = f"Server skipped: {result}"
+                            print(f"Server skipped ({ss.filename}): {result}", file=sys.stderr)
                     except Exception as exc:
                         failed += 1
                         last_error = str(exc)
