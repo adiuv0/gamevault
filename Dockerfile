@@ -53,7 +53,8 @@ EXPOSE 8080
 LABEL org.opencontainers.image.title="GameVault" \
       org.opencontainers.image.description="Self-hosted game screenshot manager. Import from Steam, upload, annotate, search, and share." \
       org.opencontainers.image.url="https://github.com/adiuv0/gamevault" \
-      org.opencontainers.image.source="https://github.com/adiuv0/gamevault"
+      org.opencontainers.image.source="https://github.com/adiuv0/gamevault" \
+      net.unraid.docker.templateurl="https://raw.githubusercontent.com/adiuv0/unraid-templates/main/templates/gamevault.xml"
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health')" || exit 1
