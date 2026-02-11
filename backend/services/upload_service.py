@@ -8,12 +8,23 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+import json as _json
+
 from backend.config import settings
 
 logger = logging.getLogger(__name__)
+
 from backend.services.filesystem import get_screenshots_dir, sanitize_filename
 from backend.services.game_service import get_game
-from backend.services.image_processor import get_image_format, validate_image
+from backend.services.image_processor import (
+    compute_sha256,
+    extract_date_taken,
+    extract_exif,
+    generate_thumbnails,
+    get_image_dimensions,
+    get_image_format,
+    validate_image,
+)
 from backend.services.screenshot_service import (
     check_duplicate_hash,
     create_screenshot,
@@ -166,11 +177,6 @@ async def process_upload(
                 })
                 continue
             ext = ALLOWED_IMAGE_FORMATS[detected_format]
-            from backend.services.image_processor import (
-                get_image_dimensions, get_image_format, compute_sha256,
-                extract_exif, extract_date_taken,
-            )
-            import json as _json
 
             img_dims = get_image_dimensions(temp_path)
             img_format = get_image_format(temp_path)
@@ -221,8 +227,7 @@ async def process_upload(
             logger.info("process_upload: SAVED %s -> %s (%d bytes)",
                         original_name, final_path, final_path.stat().st_size)
 
-            # Regenerate thumbnails with final filename stem
-            from backend.services.image_processor import generate_thumbnails
+            # Generate thumbnails
             sm, md = generate_thumbnails(final_path, folder_name, Path(filename).stem)
 
             # Create file_path relative to library
