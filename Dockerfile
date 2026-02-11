@@ -10,7 +10,7 @@ RUN npm run build
 FROM python:3.12-slim
 WORKDIR /app
 
-# System dependencies for Pillow image processing + lxml
+# System dependencies for Pillow image processing + lxml + gosu for privilege drop
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg62-turbo-dev \
     libpng-dev \
@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxml2-dev \
     libxslt1-dev \
     gcc \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies (separate layer for Docker caching)
@@ -33,13 +34,15 @@ COPY backend/ ./backend/
 # Copy built frontend from stage 1
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# Create data directory
-RUN mkdir -p /data/library
-
-# Non-root user for security
-RUN groupadd -r gamevault && useradd -r -g gamevault -d /app gamevault \
+# Create data directory and non-root user
+RUN mkdir -p /data/library \
+    && groupadd -r gamevault && useradd -r -g gamevault -d /app gamevault \
     && chown -R gamevault:gamevault /app /data
-USER gamevault
+
+# Entrypoint fixes permissions on mounted volumes, then drops to gamevault user
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
 
 # Environment defaults
 ENV GAMEVAULT_DATA_DIR=/data
