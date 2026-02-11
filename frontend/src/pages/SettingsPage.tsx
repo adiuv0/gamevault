@@ -17,8 +17,9 @@ import {
   Share2,
   Download,
 } from 'lucide-react';
-import { getSettings, changePassword } from '@/api/settings';
+import { getSettings, changePassword, saveApiKey, deleteApiKey } from '@/api/settings';
 import type { AppSettings } from '@/api/settings';
+import { Save, Trash2 } from 'lucide-react';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 
 export function SettingsPage() {
@@ -154,30 +155,41 @@ export function SettingsPage() {
           </div>
           <p className="text-sm text-text-secondary mb-4">
             API keys enhance metadata fetching for game covers, descriptions, and details.
-            Set them as environment variables.
+            Save them here or set via environment variables.
           </p>
 
           <div className="space-y-3">
             <ApiKeyRow
               name="Steam Web API"
-              envVar="GAMEVAULT_STEAM_API_KEY"
+              keyName="steam_api_key"
               isSet={settings.has_steam_api_key}
               description="Fetches game metadata from the Steam Store API"
               docUrl="https://steamcommunity.com/dev/apikey"
+              onSaved={loadSettings}
             />
             <ApiKeyRow
               name="SteamGridDB"
-              envVar="GAMEVAULT_STEAMGRIDDB_API_KEY"
+              keyName="steamgriddb_api_key"
               isSet={settings.has_steamgriddb_api_key}
               description="High-quality game cover art from the community"
               docUrl="https://www.steamgriddb.com/profile/preferences/api"
+              onSaved={loadSettings}
             />
             <ApiKeyRow
-              name="IGDB (Twitch)"
-              envVar="GAMEVAULT_IGDB_CLIENT_ID + SECRET"
+              name="IGDB Client ID"
+              keyName="igdb_client_id"
               isSet={settings.has_igdb_credentials}
-              description="Fallback metadata source for non-Steam games"
+              description="Twitch/IGDB client ID for non-Steam game metadata"
               docUrl="https://api-docs.igdb.com/#getting-started"
+              onSaved={loadSettings}
+            />
+            <ApiKeyRow
+              name="IGDB Client Secret"
+              keyName="igdb_client_secret"
+              isSet={settings.has_igdb_credentials}
+              description="Twitch/IGDB client secret (paired with Client ID)"
+              docUrl="https://api-docs.igdb.com/#getting-started"
+              onSaved={loadSettings}
             />
           </div>
         </section>
@@ -355,52 +367,159 @@ function ConfigRow({
 
 function ApiKeyRow({
   name,
-  envVar,
+  keyName,
   isSet,
   description,
   docUrl,
+  onSaved,
 }: {
   name: string;
-  envVar: string;
+  keyName: string;
   isSet: boolean;
   description: string;
   docUrl: string;
+  onSaved: () => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const handleSave = async () => {
+    if (!value.trim()) return;
+    try {
+      setSaving(true);
+      setResult(null);
+      await saveApiKey(keyName, value.trim());
+      setResult({ ok: true, message: 'Saved' });
+      setValue('');
+      setEditing(false);
+      onSaved();
+    } catch (err) {
+      setResult({ ok: false, message: err instanceof Error ? err.message : 'Failed to save' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    try {
+      setDeleting(true);
+      setResult(null);
+      await deleteApiKey(keyName);
+      setResult({ ok: true, message: 'Removed' });
+      onSaved();
+    } catch (err) {
+      setResult({ ok: false, message: err instanceof Error ? err.message : 'Failed to remove' });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
-    <div className="flex items-start gap-3 p-3 bg-bg-primary border border-border rounded-lg">
-      <div className="flex-shrink-0 mt-0.5">
-        {isSet ? (
-          <CheckCircle2 className="h-5 w-5 text-accent-success" />
-        ) : (
-          <XCircle className="h-5 w-5 text-text-muted" />
-        )}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-text-primary">{name}</span>
+    <div className="p-3 bg-bg-primary border border-border rounded-lg">
+      <div className="flex items-start gap-3">
+        <div className="flex-shrink-0 mt-0.5">
           {isSet ? (
-            <span className="text-xs px-1.5 py-0.5 bg-accent-success/10 text-accent-success rounded">
-              Connected
-            </span>
+            <CheckCircle2 className="h-5 w-5 text-accent-success" />
           ) : (
-            <span className="text-xs px-1.5 py-0.5 bg-bg-tertiary text-text-muted rounded">
-              Not Set
-            </span>
+            <XCircle className="h-5 w-5 text-text-muted" />
           )}
         </div>
-        <p className="text-xs text-text-secondary mt-0.5">{description}</p>
-        <div className="flex items-center gap-3 mt-1.5">
-          <code className="text-xs text-text-muted font-mono">{envVar}</code>
-          <a
-            href={docUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-accent-primary hover:text-accent-primary/80 flex items-center gap-1"
-          >
-            Get Key <ExternalLink className="h-3 w-3" />
-          </a>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-text-primary">{name}</span>
+            {isSet ? (
+              <span className="text-xs px-1.5 py-0.5 bg-accent-success/10 text-accent-success rounded">
+                Connected
+              </span>
+            ) : (
+              <span className="text-xs px-1.5 py-0.5 bg-bg-tertiary text-text-muted rounded">
+                Not Set
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-text-secondary mt-0.5">{description}</p>
+          <div className="flex items-center gap-3 mt-1.5">
+            <a
+              href={docUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-accent-primary hover:text-accent-primary/80 flex items-center gap-1"
+            >
+              Get Key <ExternalLink className="h-3 w-3" />
+            </a>
+            {!editing && !isSet && (
+              <button
+                onClick={() => setEditing(true)}
+                className="text-xs text-accent-primary hover:text-accent-primary/80"
+              >
+                Add Key
+              </button>
+            )}
+            {!editing && isSet && (
+              <>
+                <button
+                  onClick={() => setEditing(true)}
+                  className="text-xs text-accent-primary hover:text-accent-primary/80"
+                >
+                  Update
+                </button>
+                <button
+                  onClick={handleRemove}
+                  disabled={deleting}
+                  className="text-xs text-accent-danger hover:text-accent-danger/80 flex items-center gap-1"
+                >
+                  {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                  Remove
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
+
+      {editing && (
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            type="password"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={`Enter ${name} key...`}
+            className="flex-1 bg-bg-tertiary border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent-primary font-mono"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSave();
+              if (e.key === 'Escape') { setEditing(false); setValue(''); }
+            }}
+          />
+          <button
+            onClick={handleSave}
+            disabled={saving || !value.trim()}
+            className="flex items-center gap-1 px-3 py-1.5 bg-accent-primary text-white rounded-md text-xs font-medium hover:bg-accent-primary/90 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+            Save
+          </button>
+          <button
+            onClick={() => { setEditing(false); setValue(''); setResult(null); }}
+            className="px-3 py-1.5 text-text-muted hover:text-text-primary text-xs"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {result && (
+        <div className={`mt-2 text-xs px-2 py-1 rounded ${
+          result.ok
+            ? 'text-accent-success bg-accent-success/10'
+            : 'text-accent-danger bg-accent-danger/10'
+        }`}>
+          {result.message}
+        </div>
+      )}
     </div>
   );
 }

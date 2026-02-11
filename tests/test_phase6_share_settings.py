@@ -317,9 +317,9 @@ async def test_share_image_redirect_invalid():
 
 @pytest.mark.asyncio
 async def test_settings_endpoint():
-    from backend.routers.settings import router
+    from backend.routers.settings import get_settings
 
-    result = await router.routes[0].endpoint()
+    result = await get_settings()
     assert "base_url" in result
     assert "library_dir" in result
     assert "has_steam_api_key" in result
@@ -339,9 +339,9 @@ async def test_settings_endpoint():
 
 @pytest.mark.asyncio
 async def test_settings_health():
-    from backend.routers.settings import router
+    from backend.routers.settings import health_check
 
-    result = await router.routes[1].endpoint()
+    result = await health_check()
     assert result["status"] == "ok"
 
 

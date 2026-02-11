@@ -33,3 +33,19 @@ export async function changePassword(
     new_password: newPassword,
   });
 }
+
+export async function saveApiKey(
+  keyName: string,
+  value: string,
+): Promise<{ message: string }> {
+  return api.put('/settings/api-keys', {
+    key_name: keyName,
+    value,
+  });
+}
+
+export async function deleteApiKey(
+  keyName: string,
+): Promise<{ message: string }> {
+  return api.delete(`/settings/api-keys/${keyName}`);
+}

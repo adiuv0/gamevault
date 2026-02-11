@@ -9,7 +9,6 @@ from pathlib import Path
 
 import httpx
 
-from backend.config import settings
 from backend.services.game_service import get_game, update_game, save_cover_image
 
 logger = logging.getLogger(__name__)
@@ -75,11 +74,14 @@ async def fetch_steam_metadata(app_id: int) -> dict | None:
 
 async def fetch_steamgriddb_cover(game_name: str, steam_app_id: int | None = None) -> dict | None:
     """Fetch cover art from SteamGridDB. Requires API key."""
-    if not settings.steamgriddb_api_key:
+    from backend.routers.settings import get_effective_key
+
+    api_key = await get_effective_key("steamgriddb_api_key")
+    if not api_key:
         return None
 
     try:
-        headers = {"Authorization": f"Bearer {settings.steamgriddb_api_key}"}
+        headers = {"Authorization": f"Bearer {api_key}"}
 
         async with httpx.AsyncClient(timeout=15.0, headers=headers) as client:
             # Find the game on SteamGridDB
@@ -141,37 +143,41 @@ async def fetch_steamgriddb_cover(game_name: str, steam_app_id: int | None = Non
 
 # ── IGDB API ─────────────────────────────────────────────────────────────────
 
-async def _get_igdb_token() -> str | None:
-    """Get an IGDB access token via Twitch OAuth2."""
-    if not settings.igdb_client_id or not settings.igdb_client_secret:
-        return None
+async def _get_igdb_token() -> tuple[str | None, str]:
+    """Get an IGDB access token via Twitch OAuth2. Returns (token, client_id)."""
+    from backend.routers.settings import get_effective_key
+
+    client_id = await get_effective_key("igdb_client_id")
+    client_secret = await get_effective_key("igdb_client_secret")
+    if not client_id or not client_secret:
+        return None, ""
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 IGDB_AUTH_URL,
                 params={
-                    "client_id": settings.igdb_client_id,
-                    "client_secret": settings.igdb_client_secret,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
                     "grant_type": "client_credentials",
                 },
             )
             if resp.status_code == 200:
-                return resp.json().get("access_token")
+                return resp.json().get("access_token"), client_id
     except Exception as e:
         logger.warning("IGDB auth error: %s", e)
-    return None
+    return None, ""
 
 
 async def fetch_igdb_metadata(game_name: str) -> dict | None:
     """Fetch game metadata from IGDB. Requires Twitch client credentials."""
-    token = await _get_igdb_token()
+    token, client_id = await _get_igdb_token()
     if not token:
         return None
 
     try:
         headers = {
-            "Client-ID": settings.igdb_client_id,
+            "Client-ID": client_id,
             "Authorization": f"Bearer {token}",
         }
 
