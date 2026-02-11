@@ -464,12 +464,22 @@ def run_cli(args: argparse.Namespace) -> None:
             game_hashes = {ss.sha256 for ss in game.screenshots}
             game.new_hashes = game_hashes - existing
 
-        # Print per-game summary
+        # Resolve game names from server and print per-game summary
+        print("\nResolving game names...")
+        gv_game_cache: dict[str, dict] = {}
+        for app_id in sorted(all_games.keys(), key=lambda x: int(x)):
+            try:
+                gv_game = client.get_or_create_game(app_id)
+                gv_game_cache[app_id] = gv_game
+                all_games[app_id].name = gv_game.get("name", f"App {app_id}")
+            except Exception:
+                all_games[app_id].name = f"App {app_id}"
+
         print("\n--- Per-game summary ---")
         for app_id in sorted(all_games.keys(), key=lambda x: int(x)):
             game = all_games[app_id]
-            label = f"App {app_id}"
-            print(f"  {label:>20s}    {game.new_count} new / {game.total_count} total")
+            label = game.name or f"App {app_id}"
+            print(f"  {label:>40s}    {game.new_count} new / {game.total_count} total")
 
         total_new = sum(g.new_count for g in all_games.values())
         print(f"\nTotal new: {total_new}")
@@ -484,6 +494,7 @@ def run_cli(args: argparse.Namespace) -> None:
 
         # Upload new screenshots
         uploaded = 0
+        failed = 0
         for app_id, game in all_games.items():
             new_shots = [
                 ss for ss in game.screenshots if ss.sha256 in game.new_hashes
@@ -491,25 +502,34 @@ def run_cli(args: argparse.Namespace) -> None:
             if not new_shots:
                 continue
 
-            gv_game = client.get_or_create_game(app_id)
+            gv_game = gv_game_cache.get(app_id)
+            if not gv_game:
+                try:
+                    gv_game = client.get_or_create_game(app_id)
+                except Exception as exc:
+                    print(f"\n  ERROR: Could not create game for {app_id}: {exc}", file=sys.stderr)
+                    failed += len(new_shots)
+                    continue
             gv_game_id = gv_game["id"]
+            game_name = gv_game.get("name", app_id)
 
             for ss in new_shots:
                 try:
                     client.upload_screenshot(gv_game_id, ss.path, ss.filename)
                     uploaded += 1
                     print(
-                        f"\r  Uploaded {uploaded}/{total_new}",
+                        f"\r  [{uploaded}/{total_new}] {game_name} — {ss.filename}",
                         end="",
                         flush=True,
                     )
                 except Exception as exc:
+                    failed += 1
                     print(
-                        f"\n  WARN: Failed to upload {ss.filename}: {exc}",
+                        f"\n  FAIL: {ss.filename}: {exc}",
                         file=sys.stderr,
                     )
 
-        print(f"\n\nDone. Uploaded {uploaded} screenshots.")
+        print(f"\n\nDone. Uploaded: {uploaded}, Failed: {failed}")
     finally:
         client.close()
 
@@ -688,7 +708,7 @@ def run_gui() -> None:
 
                 compute_hashes(all_ss, hash_progress)
 
-                # Check hashes against server (50-100%)
+                # Check hashes against server (50-80%)
                 root.after(
                     0,
                     lambda: status_var.set("Checking hashes against server..."),
@@ -707,7 +727,22 @@ def run_gui() -> None:
                         ]
                         result = client.check_hashes(chunk)
                         existing.update(result.get("existing", []))
-                        pct = 50 + (ci + 1) / num_chunks * 50
+                        pct = 50 + (ci + 1) / num_chunks * 30
+                        root.after(0, lambda p=pct: progress_var.set(p))
+
+                    # Resolve game names from server (80-100%)
+                    root.after(
+                        0,
+                        lambda: status_var.set("Resolving game names..."),
+                    )
+                    app_ids = sorted(all_games.keys(), key=lambda x: int(x))
+                    for gi, app_id in enumerate(app_ids):
+                        try:
+                            gv_game = client.get_or_create_game(app_id)
+                            all_games[app_id].name = gv_game.get("name", f"App {app_id}")
+                        except Exception:
+                            all_games[app_id].name = f"App {app_id}"
+                        pct = 80 + (gi + 1) / len(app_ids) * 20
                         root.after(0, lambda p=pct: progress_var.set(p))
                 finally:
                     client.close()
@@ -725,8 +760,9 @@ def run_gui() -> None:
                         game = all_games[app_id]
                         var = tk.BooleanVar(value=game.new_count > 0)
                         game_checks.append((var, app_id))
+                        display_name = game.name or f"App {app_id}"
                         label = (
-                            f"App {app_id}    "
+                            f"{display_name}    "
                             f"{game.new_count} new / {game.total_count} total"
                         )
                         cb = ttk.Checkbutton(
@@ -813,6 +849,7 @@ def run_gui() -> None:
                 gv_game_cache: dict[str, int] = {}
                 total = len(to_upload)
 
+                last_error = ""
                 for i, (app_id, ss) in enumerate(to_upload):
                     try:
                         if app_id not in gv_game_cache:
@@ -821,16 +858,22 @@ def run_gui() -> None:
                         gv_id = gv_game_cache[app_id]
                         client.upload_screenshot(gv_id, ss.path, ss.filename)
                         uploaded += 1
-                    except Exception:
+                    except Exception as exc:
                         failed += 1
+                        last_error = str(exc)
+                        print(f"Upload error ({ss.filename}): {exc}", file=sys.stderr)
 
                     pct = (i + 1) / total * 100
                     _uploaded = uploaded
+                    _failed = failed
+                    _fname = ss.filename
                     root.after(
                         0,
-                        lambda p=pct, u=_uploaded, t=total: (
+                        lambda p=pct, u=_uploaded, f=_failed, t=total, fn=_fname: (
                             progress_var.set(p),
-                            status_var.set(f"Uploaded {u}/{t}..."),
+                            status_var.set(
+                                f"Uploaded {u}/{t} (failed: {f}) — {fn}"
+                            ),
                         ),
                     )
 
@@ -840,6 +883,8 @@ def run_gui() -> None:
                         f"Uploaded: {uploaded}\n"
                         f"Failed: {failed}"
                     )
+                    if failed > 0 and last_error:
+                        msg += f"\n\nLast error:\n{last_error}"
                     messagebox.showinfo("Sync Complete", msg)
                     status_var.set(
                         f"Done. {uploaded} uploaded, {failed} failed."
