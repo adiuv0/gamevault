@@ -165,7 +165,8 @@ class SteamScraper:
     async def validate_profile(self) -> SteamProfile:
         """Validate that the Steam profile exists and is accessible.
 
-        Returns profile info or raises an error.
+        Returns profile info or raises an error. Also resolves the
+        Steam64 numeric ID if a vanity URL was provided.
         """
         url = self.profile_url
         resp = await self._get(url)
@@ -188,13 +189,30 @@ class SteamScraper:
         avatar_elem = soup.select_one(".playerAvatarAutoSizeInner img")
         avatar_url = avatar_elem.get("src") if avatar_elem else None
 
+        # Resolve Steam64 numeric ID (needed for API calls)
+        steam64_id = self.user_id if self.is_numeric else None
+        if not steam64_id:
+            steam64_id = await self._resolve_steam64_id()
+
         return SteamProfile(
-            user_id=self.user_id,
+            user_id=steam64_id or self.user_id,
             profile_name=profile_name,
             avatar_url=avatar_url,
-            is_numeric_id=self.is_numeric,
+            is_numeric_id=True if steam64_id else self.is_numeric,
             profile_url=self.profile_url,
         )
+
+    async def _resolve_steam64_id(self) -> str | None:
+        """Resolve a vanity URL to a Steam64 numeric ID using the XML profile."""
+        try:
+            resp = await self._get(f"{self.profile_url}/?xml=1")
+            if resp.status_code == 200:
+                match = re.search(r"<steamID64>(\d+)</steamID64>", resp.text)
+                if match:
+                    return match.group(1)
+        except Exception:
+            pass
+        return None
 
     # ── Game Discovery ───────────────────────────────────────────────────
 
@@ -377,39 +395,47 @@ class SteamScraper:
         """Parse a single grid page to extract screenshot entries."""
         screenshots = []
 
-        # Grid items are typically links with thumbnail images
+        # Grid items are <a> links with class "profile_media_item" or similar
         items = soup.select(
-            ".apphub_Card, "
-            ".profile_media_item, "
+            "a.profile_media_item, "
+            "a.apphub_Card, "
             "a[href*='filedetails']"
         )
 
         for item in items:
-            # Get the detail page URL
-            if item.name == "a":
-                href = item.get("href", "")
-            else:
-                link = item.select_one("a")
-                href = link.get("href", "") if link else ""
-
+            href = item.get("href", "")
             if not href or "filedetails" not in href:
                 continue
 
-            # Extract screenshot ID from URL
-            id_match = re.search(r"id=(\d+)", href)
-            if not id_match:
-                continue
+            # Extract screenshot ID from URL or data attribute
+            screenshot_id = item.get("data-publishedfileid", "")
+            if not screenshot_id:
+                id_match = re.search(r"id=(\d+)", href)
+                if not id_match:
+                    continue
+                screenshot_id = id_match.group(1)
 
-            screenshot_id = id_match.group(1)
-
-            # Get thumbnail URL
-            img = item.select_one("img")
+            # Current Steam layout (2024+): thumbnails are CSS background-image
+            # on a div.imgWallItem child, not <img> tags.
             thumbnail_url = ""
-            if img:
-                thumbnail_url = img.get("src", "") or img.get("data-src", "")
+            full_url = None
 
-            # Derive full image URL from thumbnail
-            full_url = _extract_full_image_url(thumbnail_url) if thumbnail_url else None
+            # Try the new div.imgWallItem background-image approach
+            wall_item = item.select_one(".imgWallItem, .imgWallHoverItem")
+            if wall_item:
+                style = wall_item.get("style", "")
+                bg_match = re.search(r"background-image:\s*url\(['\"]?([^'\")\s]+)", style)
+                if bg_match:
+                    thumbnail_url = bg_match.group(1)
+                    full_url = _extract_full_image_url(thumbnail_url)
+
+            # Fallback: try <img> tag (older layout)
+            if not thumbnail_url:
+                img = item.select_one("img")
+                if img:
+                    thumbnail_url = img.get("src", "") or img.get("data-src", "")
+                    if thumbnail_url:
+                        full_url = _extract_full_image_url(thumbnail_url)
 
             screenshots.append(SteamScreenshot(
                 screenshot_id=screenshot_id,

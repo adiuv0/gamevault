@@ -177,7 +177,8 @@ class TestGridParser:
         scraper = SteamScraper.__new__(SteamScraper)
         screenshots = scraper._parse_grid_page(soup, app_id=1245620)
 
-        assert "akamaihd.net" in screenshots[0].thumbnail_url
+        # Current layout: thumbnails extracted from CSS background-image
+        assert "steamuserimages" in screenshots[0].thumbnail_url or "akamaihd.net" in screenshots[0].thumbnail_url
         assert "thumb1" in screenshots[0].thumbnail_url
 
     def test_generates_full_image_urls(self, steam_grid_html):
