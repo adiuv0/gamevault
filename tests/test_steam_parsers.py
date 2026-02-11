@@ -198,22 +198,32 @@ class TestGridParser:
         ids = [s.screenshot_id for s in screenshots]
         assert all(sid.isdigit() for sid in ids)
 
-    def test_parse_game_sidebar(self, steam_grid_html):
-        """Parse game filter sidebar for game discovery."""
+    def test_parse_game_dropdown(self, steam_grid_html):
+        """Parse game filter dropdown for game discovery (current Steam layout)."""
+        import re
         soup = BeautifulSoup(steam_grid_html, "lxml")
 
         # Parse using the same selectors as discover_games
-        filter_items = soup.select(".screenshot_filter_app")
-        assert len(filter_items) == 3
+        filterable = soup.find(id="sharedfiles_filterselect_app_filterable")
+        assert filterable is not None
 
-        # First game
-        item0 = filter_items[0]
-        assert item0.get("data-appid") == "292030"
-        name_elem = item0.select_one(".screenshot_filter_app_name")
-        assert "Witcher" in name_elem.get_text(strip=True)
+        options = filterable.select("div.option")
+        games = []
+        for opt in options:
+            onclick = opt.get("onclick", "")
+            match = re.search(r"'appid'\s*:\s*'(\d+)'", onclick)
+            if not match:
+                continue
+            app_id = int(match.group(1))
+            if app_id == 0:
+                continue
+            name = opt.get_text(strip=True)
+            games.append((app_id, name))
 
-        count_elem = item0.select_one(".screenshot_filter_app_count")
-        assert "42" in count_elem.get_text(strip=True)
+        assert len(games) == 3
+        assert games[0] == (292030, "The Witcher 3: Wild Hunt")
+        assert games[1] == (1245620, "ELDEN RING")
+        assert games[2] == (374320, "DARK SOULS III")
 
     def test_empty_grid(self):
         """An empty grid page should return no screenshots."""

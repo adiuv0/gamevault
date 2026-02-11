@@ -198,11 +198,15 @@ class SteamScraper:
 
     # ── Game Discovery ───────────────────────────────────────────────────
 
-    async def discover_games(self) -> list[SteamGameScreenshots]:
+    async def discover_games(self, fetch_counts: bool = False) -> list[SteamGameScreenshots]:
         """Discover all games that have screenshots on this profile.
 
         Scrapes the screenshot grid with appid=0 (all games view) and
-        extracts the game filter sidebar to get per-game counts.
+        parses the game filter dropdown to get the list of games.
+
+        Args:
+            fetch_counts: If True, make an additional request per game to
+                get the screenshot count. This is slow for large libraries.
         """
         url = (
             f"{self.profile_url}/screenshots/"
@@ -216,15 +220,51 @@ class SteamScraper:
         soup = BeautifulSoup(resp.text, "lxml")
         games = []
 
-        # Parse the game filter sidebar
-        # Each game appears as a link with the app ID and screenshot count
+        # Steam's current layout uses a custom dropdown for game filtering.
+        # Each game is a div.option.ellipsis inside #sharedfiles_filterselect_app_filterable
+        # with the app ID embedded in an onclick attribute like:
+        #   onclick="javascript:SelectSharedFilesContentFilter({ 'appid': '292030' });"
+        # and the game name as the element's text content.
+        filterable = soup.find(id="sharedfiles_filterselect_app_filterable")
+        if filterable:
+            options = filterable.select("div.option")
+            for opt in options:
+                onclick = opt.get("onclick", "")
+                match = re.search(r"'appid'\s*:\s*'(\d+)'", onclick)
+                if not match:
+                    continue
+
+                app_id = int(match.group(1))
+                if app_id == 0:
+                    continue  # "All games" entry
+
+                name = opt.get_text(strip=True) or f"App {app_id}"
+
+                games.append(SteamGameScreenshots(
+                    app_id=app_id,
+                    name=name,
+                    screenshot_count=0,  # Populated below
+                ))
+
+        # If the new dropdown wasn't found, try legacy sidebar selectors
+        if not games:
+            games = self._parse_legacy_sidebar(soup)
+
+        # Optionally get screenshot counts by parsing the "Showing X of N" text
+        # on each game's screenshot page. This is slow for large libraries.
+        if games and fetch_counts:
+            await self._populate_screenshot_counts(games)
+
+        return games
+
+    def _parse_legacy_sidebar(self, soup: BeautifulSoup) -> list[SteamGameScreenshots]:
+        """Fallback: try the older sidebar-based game filter layout."""
+        games = []
         filter_items = soup.select(".screenshot_filter_app")
         if not filter_items:
-            # Try alternative selector
             filter_items = soup.select(".gameListRow, [data-appid]")
 
         for item in filter_items:
-            # Extract app ID from the link/data attribute
             app_id = None
             link = item.select_one("a")
 
@@ -238,11 +278,9 @@ class SteamScraper:
             if not app_id or app_id == 0:
                 continue
 
-            # Extract game name
             name_elem = item.select_one(".screenshot_filter_app_name, .gameName, a")
             name = name_elem.get_text(strip=True) if name_elem else f"App {app_id}"
 
-            # Extract count
             count_elem = item.select_one(".screenshot_filter_app_count, .gameCount")
             count = 0
             if count_elem:
@@ -257,36 +295,39 @@ class SteamScraper:
                 screenshot_count=count,
             ))
 
-        # If sidebar parsing didn't work, try to parse from the grid directly
-        if not games:
-            games = await self._discover_games_from_grid(soup)
-
         return games
 
-    async def _discover_games_from_grid(self, soup: BeautifulSoup) -> list[SteamGameScreenshots]:
-        """Fallback: discover games by parsing screenshot thumbnails in the grid."""
-        game_map: dict[int, SteamGameScreenshots] = {}
+    async def _populate_screenshot_counts(self, games: list[SteamGameScreenshots]) -> None:
+        """Fetch screenshot counts for each game by loading page 1 and reading
+        the 'Showing X - Y of Z' text. Processes games sequentially with rate
+        limiting to be respectful to Steam servers.
+        """
+        for game in games:
+            try:
+                url = (
+                    f"{self.profile_url}/screenshots/"
+                    f"?appid={game.app_id}&sort=newestfirst&browsefilter=myfiles"
+                    f"&view=grid&privacy={PRIVACY_FILTER}"
+                )
+                resp = await self._get(url)
+                if resp.status_code != 200:
+                    continue
 
-        cards = soup.select(".apphub_Card, .profile_media_item")
-        for card in cards:
-            link = card.get("href") or card.select_one("a")
-            if isinstance(link, str):
-                href = link
-            elif link:
-                href = link.get("href", "")
-            else:
+                # Look for "Showing X - Y of Z" in the page
+                match = re.search(
+                    r"Showing\s+\d+\s*-\s*\d+\s+of\s+([\d,]+)",
+                    resp.text,
+                )
+                if match:
+                    game.screenshot_count = int(match.group(1).replace(",", ""))
+                else:
+                    # If no paging text, count thumbnails on the page
+                    soup = BeautifulSoup(resp.text, "lxml")
+                    cards = soup.select("a[href*='filedetails']")
+                    game.screenshot_count = len(cards)
+            except Exception:
+                # Don't fail the whole discovery if one game errors
                 continue
-
-            # Extract app_id from screenshot detail URL
-            match = re.search(r"/(\d+)/", href)
-            if not match:
-                continue
-
-            # This is the screenshot ID, not app ID — need detail page for app ID
-            # For now, count unique apps from grid page context
-            pass
-
-        return list(game_map.values())
 
     # ── Screenshot Grid Scraping ─────────────────────────────────────────
 

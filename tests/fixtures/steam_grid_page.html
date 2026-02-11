@@ -20,24 +20,18 @@
     </a>
 </div>
 
-<!-- Game filter sidebar -->
-<div class="screenshot_filter_app" data-appid="292030">
-    <a href="?appid=292030">
-        <span class="screenshot_filter_app_name">The Witcher 3: Wild Hunt</span>
-        <span class="screenshot_filter_app_count">42</span>
-    </a>
-</div>
-<div class="screenshot_filter_app" data-appid="1245620">
-    <a href="?appid=1245620">
-        <span class="screenshot_filter_app_name">ELDEN RING</span>
-        <span class="screenshot_filter_app_count">128</span>
-    </a>
-</div>
-<div class="screenshot_filter_app" data-appid="374320">
-    <a href="?appid=374320">
-        <span class="screenshot_filter_app_name">DARK SOULS III</span>
-        <span class="screenshot_filter_app_count">7</span>
-    </a>
+<!-- Current Steam game filter dropdown (2024+ layout) -->
+<div id="sharedfiles_filterselect_app" class="sharedfiles_filterselect">
+    <div id="sharedfiles_filterselect_app_filterable">
+        <div class="option ellipsis" id="sharedfiles_filterselect_app_option_0"
+             onclick="javascript:SelectSharedFilesContentFilter({ 'appid': '0' });">All games</div>
+        <div class="option ellipsis" id="sharedfiles_filterselect_app_option_1"
+             onclick="javascript:SelectSharedFilesContentFilter({ 'appid': '292030' });">The Witcher 3: Wild Hunt</div>
+        <div class="option ellipsis" id="sharedfiles_filterselect_app_option_2"
+             onclick="javascript:SelectSharedFilesContentFilter({ 'appid': '1245620' });">ELDEN RING</div>
+        <div class="option ellipsis" id="sharedfiles_filterselect_app_option_3"
+             onclick="javascript:SelectSharedFilesContentFilter({ 'appid': '374320' });">DARK SOULS III</div>
+    </div>
 </div>
 
 <!-- Pagination info -->

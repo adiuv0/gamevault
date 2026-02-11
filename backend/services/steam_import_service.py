@@ -201,12 +201,12 @@ async def run_import(
                     await _fail_import(session_id, "None of the selected games found on Steam profile.")
                     return
 
-            # Calculate totals
+            # Calculate totals (counts may be 0 if not fetched during discovery)
             total_screenshots = sum(g.screenshot_count for g in all_games)
             await update_import_session(
                 session_id,
                 total_games=len(all_games),
-                total_screenshots=total_screenshots,
+                total_screenshots=total_screenshots if total_screenshots > 0 else None,
             )
 
             await emit_progress(session_id, "games_discovered", {

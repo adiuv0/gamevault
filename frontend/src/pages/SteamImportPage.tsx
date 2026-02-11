@@ -562,7 +562,9 @@ export function SteamImportPage() {
                   {validationResult.profile_name || userId}
                 </p>
                 <p className="text-xs text-text-muted">
-                  {games.length} games with {games.reduce((s, g) => s + g.screenshot_count, 0)} total screenshots
+                  {games.length} game{games.length !== 1 ? 's' : ''}{games.reduce((s, g) => s + g.screenshot_count, 0) > 0
+                    ? ` with ${games.reduce((s, g) => s + g.screenshot_count, 0)} total screenshots`
+                    : ' with screenshots'}
                 </p>
               </div>
               <button
@@ -580,7 +582,7 @@ export function SteamImportPage() {
             <div className="p-4 border-b border-border">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-medium text-text-primary">
-                  Select games to import ({selectedGames.size} selected, ~{totalSelected} screenshots)
+                  Select games to import ({selectedGames.size} selected{totalSelected > 0 ? `, ~${totalSelected} screenshots` : ''})
                 </h3>
                 <div className="flex gap-2">
                   <button
@@ -640,7 +642,9 @@ export function SteamImportPage() {
                     {game.name}
                   </span>
                   <span className="text-xs text-text-muted flex-shrink-0">
-                    {game.screenshot_count} screenshot{game.screenshot_count !== 1 ? 's' : ''}
+                    {game.screenshot_count > 0
+                      ? `${game.screenshot_count} screenshot${game.screenshot_count !== 1 ? 's' : ''}`
+                      : 'screenshots'}
                   </span>
                 </label>
               ))}
@@ -661,7 +665,7 @@ export function SteamImportPage() {
               className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-white rounded-md hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Download className="h-4 w-4" />
-              Import {selectedGames.size} Game{selectedGames.size !== 1 ? 's' : ''} ({totalSelected} screenshots)
+              Import {selectedGames.size} Game{selectedGames.size !== 1 ? 's' : ''}{totalSelected > 0 ? ` (${totalSelected} screenshots)` : ''}
             </button>
             <button
               onClick={handleReset}
