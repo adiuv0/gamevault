@@ -115,9 +115,25 @@ async def get_or_create_by_steam_appid(app_id: int):
     """Get or create a game by its Steam app ID.
 
     Used by the CLI sync tool to resolve games before uploading.
+    Tries to resolve the real game name via Steam Store API first.
     """
+    # Check if it already exists — return immediately
+    existing = await game_service.get_game_by_steam_app_id(app_id)
+    if existing:
+        return existing
+
+    # Try to get the real name from Steam Store API before creating
+    name = f"App {app_id}"
+    try:
+        from backend.services.metadata_service import fetch_steam_metadata
+        steam_data = await fetch_steam_metadata(app_id)
+        if steam_data and steam_data.get("name"):
+            name = steam_data["name"]
+    except Exception:
+        pass  # Fall back to generic name
+
     game = await game_service.get_or_create_game(
-        name=f"App {app_id}",
+        name=name,
         steam_app_id=app_id,
     )
     return game
@@ -126,9 +142,11 @@ async def get_or_create_by_steam_appid(app_id: int):
 @router.post("/{game_id}/refresh-metadata")
 async def refresh_metadata(game_id: int):
     """Re-fetch game metadata from external sources."""
+    from backend.services.metadata_service import fetch_and_apply_metadata
+
     game = await game_service.get_game(game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    # TODO: Phase 5 - metadata fetcher integration
-    return {"message": "Metadata refresh will be available in a future update"}
+    result = await fetch_and_apply_metadata(game_id)
+    return result

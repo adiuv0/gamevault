@@ -87,6 +87,47 @@ async def _run_upload(
             pass
 
 
+@router.post("/sync")
+async def upload_screenshot_sync(
+    files: list[UploadFile] = [],
+    game_id: int = Form(...),
+    taken_at: str = Form(default=None),
+):
+    """Synchronous upload — processes files inline and returns results.
+
+    Used by the CLI sync tool which needs to know immediately if the upload
+    succeeded (unlike the SSE-based ``POST /api/upload`` used by the web UI).
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    for f in files:
+        if f.size and f.size > settings.max_upload_size_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File {f.filename} exceeds max size of {settings.max_upload_size_mb}MB",
+            )
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="gamevault_sync_"))
+    temp_files = []
+
+    for f in files:
+        temp_path = temp_dir / (f.filename or "unnamed.jpg")
+        content = await f.read()
+        temp_path.write_bytes(content)
+        temp_files.append((f.filename or "unnamed.jpg", temp_path))
+
+    task_id = create_task_id()
+
+    try:
+        results = await process_upload(task_id, game_id, temp_files, taken_at)
+        return {"uploaded": len(results), "screenshots": results}
+    finally:
+        import shutil
+        shutil.rmtree(str(temp_dir), ignore_errors=True)
+        cleanup_progress(task_id)
+
+
 @router.get("/progress/{task_id}")
 async def upload_progress(task_id: str):
     """SSE endpoint for upload progress.

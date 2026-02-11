@@ -346,11 +346,15 @@ class GameVaultClient:
         return resp.json()
 
     def upload_screenshot(self, game_id: int, file_path: Path, filename: str) -> dict:
+        """Upload via the synchronous endpoint so the file is fully processed
+        before the response returns (no background task race condition)."""
+        mime = "image/png" if filename.lower().endswith(".png") else "image/jpeg"
         with open(file_path, "rb") as f:
             resp = self.client.post(
-                "/api/upload",
+                "/api/upload/sync",
                 data={"game_id": str(game_id)},
-                files={"files": (filename, f, "image/jpeg")},
+                files={"files": (filename, f, mime)},
+                timeout=120.0,
             )
         resp.raise_for_status()
         return resp.json()

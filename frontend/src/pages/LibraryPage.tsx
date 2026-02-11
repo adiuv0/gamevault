@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Gamepad2, Plus, Loader2 } from 'lucide-react';
+import { Gamepad2, Plus, Loader2, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { GameGrid } from '@/components/games/GameGrid';
 import { GameList } from '@/components/games/GameList';
 import { useViewStore } from '@/stores/viewStore';
 import { listGames, createGame } from '@/api/games';
+import { fetchAllMetadata } from '@/api/metadata';
 import type { Game } from '@/lib/types';
 
 export function LibraryPage() {
@@ -16,6 +17,8 @@ export function LibraryPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newGameName, setNewGameName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [fixingMeta, setFixingMeta] = useState(false);
+  const [metaResult, setMetaResult] = useState<string | null>(null);
 
   const fetchGames = async () => {
     try {
@@ -48,6 +51,26 @@ export function LibraryPage() {
       setError(err instanceof Error ? err.message : 'Failed to create game');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleFixMetadata = async () => {
+    try {
+      setFixingMeta(true);
+      setMetaResult(null);
+      const result = await fetchAllMetadata();
+      const parts = [];
+      if (result.updated > 0) parts.push(`${result.updated} updated`);
+      if (result.skipped > 0) parts.push(`${result.skipped} already complete`);
+      if (result.errors > 0) parts.push(`${result.errors} errors`);
+      setMetaResult(parts.join(', ') || 'No games needed updating');
+      // Refresh game list to show new names/covers
+      await fetchGames();
+    } catch (err) {
+      setMetaResult(err instanceof Error ? err.message : 'Failed to fix metadata');
+    } finally {
+      setFixingMeta(false);
+      setTimeout(() => setMetaResult(null), 8000);
     }
   };
 
@@ -86,14 +109,37 @@ export function LibraryPage() {
           )}
         </div>
 
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          Add Game
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleFixMetadata}
+            disabled={fixingMeta}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-text-secondary rounded-md text-sm hover:text-text-primary hover:border-accent-primary/50 transition-colors disabled:opacity-50"
+            title="Fetch missing metadata (names, covers, descriptions) for all games"
+          >
+            {fixingMeta ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            {fixingMeta ? 'Fixing...' : 'Fix Metadata'}
+          </button>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 px-3 py-1.5 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            Add Game
+          </button>
+        </div>
       </div>
+
+      {/* Metadata result toast */}
+      {metaResult && (
+        <div className="mb-4 flex items-center gap-2 px-3 py-2 bg-bg-secondary border border-border rounded-md text-sm text-text-secondary">
+          <CheckCircle2 className="h-4 w-4 text-accent-success flex-shrink-0" />
+          {metaResult}
+        </div>
+      )}
 
       {/* Content */}
       {games.length === 0 ? (

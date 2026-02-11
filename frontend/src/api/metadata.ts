@@ -19,6 +19,18 @@ export async function fetchGameMetadata(gameId: number): Promise<MetadataFetchRe
   return api.post(`/metadata/fetch/${gameId}`);
 }
 
+export interface BulkMetadataResult {
+  total_games: number;
+  updated: number;
+  skipped: number;
+  errors: number;
+  details: MetadataFetchResult[];
+}
+
+export async function fetchAllMetadata(): Promise<BulkMetadataResult> {
+  return api.post('/metadata/fetch-all');
+}
+
 export async function searchExternalGames(query: string): Promise<{ results: ExternalGameResult[] }> {
   return api.get(`/metadata/search?q=${encodeURIComponent(query)}`);
 }
