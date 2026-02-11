@@ -28,3 +28,7 @@ export async function deleteGame(id: number): Promise<void> {
 export async function refreshGameMetadata(id: number): Promise<Game> {
   return api.post(`/games/${id}/refresh-metadata`);
 }
+
+export async function cleanupEmptyGames(): Promise<{ deleted_count: number; deleted_games: string[] }> {
+  return api.post('/games/cleanup-empty');
+}

@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Gamepad2, Plus, Loader2, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Gamepad2, Plus, Loader2, RefreshCw, CheckCircle2, Trash2 } from 'lucide-react';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { GameGrid } from '@/components/games/GameGrid';
 import { GameList } from '@/components/games/GameList';
 import { useViewStore } from '@/stores/viewStore';
-import { listGames, createGame } from '@/api/games';
+import { listGames, createGame, cleanupEmptyGames } from '@/api/games';
 import { fetchAllMetadata } from '@/api/metadata';
 import type { Game } from '@/lib/types';
 
@@ -19,6 +19,7 @@ export function LibraryPage() {
   const [creating, setCreating] = useState(false);
   const [fixingMeta, setFixingMeta] = useState(false);
   const [metaResult, setMetaResult] = useState<string | null>(null);
+  const [cleaningUp, setCleaningUp] = useState(false);
 
   const fetchGames = async () => {
     try {
@@ -74,6 +75,29 @@ export function LibraryPage() {
     }
   };
 
+  const handleCleanupEmpty = async () => {
+    const emptyGames = games.filter(g => (g.screenshot_count ?? 0) === 0);
+    if (emptyGames.length === 0) {
+      setMetaResult('No empty games to clean up');
+      setTimeout(() => setMetaResult(null), 4000);
+      return;
+    }
+    if (!window.confirm(`Delete ${emptyGames.length} games with 0 screenshots?`)) return;
+
+    try {
+      setCleaningUp(true);
+      setMetaResult(null);
+      const result = await cleanupEmptyGames();
+      setMetaResult(`Cleaned up ${result.deleted_count} empty games`);
+      await fetchGames();
+    } catch (err) {
+      setMetaResult(err instanceof Error ? err.message : 'Cleanup failed');
+    } finally {
+      setCleaningUp(false);
+      setTimeout(() => setMetaResult(null), 8000);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -110,6 +134,21 @@ export function LibraryPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {games.some(g => (g.screenshot_count ?? 0) === 0) && (
+            <button
+              onClick={handleCleanupEmpty}
+              disabled={cleaningUp}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-accent-danger/30 text-accent-danger rounded-md text-sm hover:border-accent-danger/60 transition-colors disabled:opacity-50"
+              title="Delete all games with 0 screenshots"
+            >
+              {cleaningUp ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" />
+              )}
+              {cleaningUp ? 'Cleaning...' : 'Clean Up Empty'}
+            </button>
+          )}
           <button
             onClick={handleFixMetadata}
             disabled={fixingMeta}

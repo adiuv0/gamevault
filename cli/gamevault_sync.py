@@ -19,6 +19,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -465,15 +466,32 @@ def run_cli(args: argparse.Namespace) -> None:
             game.new_hashes = game_hashes - existing
 
         # Resolve game names from server and print per-game summary
+        # Rate-limit: Steam Store API throttles after rapid requests,
+        # so we add a small delay between name resolution calls.
         print("\nResolving game names...")
         gv_game_cache: dict[str, dict] = {}
-        for app_id in sorted(all_games.keys(), key=lambda x: int(x)):
+        app_ids_sorted = sorted(all_games.keys(), key=lambda x: int(x))
+        for gi, app_id in enumerate(app_ids_sorted):
             try:
                 gv_game = client.get_or_create_game(app_id)
                 gv_game_cache[app_id] = gv_game
-                all_games[app_id].name = gv_game.get("name", f"App {app_id}")
-            except Exception:
+                resolved_name = gv_game.get("name", f"App {app_id}")
+                all_games[app_id].name = resolved_name
+                print(
+                    f"\r  [{gi + 1}/{len(app_ids_sorted)}] {resolved_name}",
+                    end="",
+                    flush=True,
+                )
+            except Exception as exc:
                 all_games[app_id].name = f"App {app_id}"
+                print(
+                    f"\r  [{gi + 1}/{len(app_ids_sorted)}] App {app_id} (failed: {exc})",
+                    end="",
+                    flush=True,
+                )
+            # Rate-limit: ~1 request per 300ms to avoid Steam API throttling
+            if gi < len(app_ids_sorted) - 1:
+                time.sleep(0.3)
 
         print("\n--- Per-game summary ---")
         for app_id in sorted(all_games.keys(), key=lambda x: int(x)):
@@ -731,6 +749,7 @@ def run_gui() -> None:
                         root.after(0, lambda p=pct: progress_var.set(p))
 
                     # Resolve game names from server (80-100%)
+                    # Rate-limit: Steam Store API throttles rapid requests
                     root.after(
                         0,
                         lambda: status_var.set("Resolving game names..."),
@@ -739,11 +758,25 @@ def run_gui() -> None:
                     for gi, app_id in enumerate(app_ids):
                         try:
                             gv_game = client.get_or_create_game(app_id)
-                            all_games[app_id].name = gv_game.get("name", f"App {app_id}")
+                            resolved_name = gv_game.get("name", f"App {app_id}")
+                            all_games[app_id].name = resolved_name
                         except Exception:
                             all_games[app_id].name = f"App {app_id}"
                         pct = 80 + (gi + 1) / len(app_ids) * 20
-                        root.after(0, lambda p=pct: progress_var.set(p))
+                        _name = all_games[app_id].name
+                        root.after(
+                            0,
+                            lambda p=pct, n=_name, c=gi + 1, t=len(app_ids): (
+                                progress_var.set(p),
+                                status_var.set(
+                                    f"Resolving names... {c}/{t} — {n}"
+                                ),
+                            ),
+                        )
+                        # Rate-limit: ~300ms between requests
+                        if gi < len(app_ids) - 1:
+                            import time
+                            time.sleep(0.3)
                 finally:
                     client.close()
 

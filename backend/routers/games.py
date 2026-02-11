@@ -19,15 +19,6 @@ async def list_games(sort: str = "name"):
     return {"games": games, "total": len(games)}
 
 
-@router.get("/{game_id}")
-async def get_game(game_id: int):
-    """Get game details."""
-    game = await game_service.get_game(game_id)
-    if not game:
-        raise HTTPException(status_code=404, detail="Game not found")
-    return game
-
-
 @router.post("", response_model=GameResponse, status_code=201)
 async def create_game(data: GameCreate):
     """Create a new game."""
@@ -40,6 +31,78 @@ async def create_game(data: GameCreate):
         name=data.name,
         steam_app_id=data.steam_app_id,
     )
+    return game
+
+
+# ── Static path routes (must come BEFORE /{game_id} to avoid conflicts) ─────
+
+@router.post("/cleanup-empty")
+async def cleanup_empty_games():
+    """Delete all games that have 0 screenshots.
+
+    Useful for cleaning up placeholder games created by a failed sync.
+    Returns the count and names of deleted games.
+    """
+    games = await game_service.list_games()
+    deleted = []
+    for game in games:
+        if game.get("screenshot_count", 0) == 0:
+            await game_service.delete_game(game["id"])
+            deleted.append(game.get("name", f"Game {game['id']}"))
+
+    return {"deleted_count": len(deleted), "deleted_games": deleted}
+
+
+@router.get("/by-steam-appid/{app_id}")
+async def get_or_create_by_steam_appid(app_id: int):
+    """Get or create a game by its Steam app ID.
+
+    Used by the CLI sync tool to resolve games before uploading.
+    Tries to resolve the real game name via Steam Store API first.
+    If the game already exists with a placeholder name ("App {id}"),
+    re-fetches the real name from Steam.
+    """
+    existing = await game_service.get_game_by_steam_app_id(app_id)
+
+    # If game exists but still has a placeholder name, try to resolve it
+    if existing:
+        current_name = existing.get("name", "")
+        if current_name.startswith("App ") and current_name[4:].isdigit():
+            try:
+                from backend.services.metadata_service import fetch_steam_metadata
+                steam_data = await fetch_steam_metadata(app_id)
+                if steam_data and steam_data.get("name"):
+                    await game_service.update_game(existing["id"], name=steam_data["name"])
+                    existing = await game_service.get_game(existing["id"])
+            except Exception:
+                pass  # Keep placeholder name if resolution fails
+        return existing
+
+    # New game — try to get the real name from Steam Store API before creating
+    name = f"App {app_id}"
+    try:
+        from backend.services.metadata_service import fetch_steam_metadata
+        steam_data = await fetch_steam_metadata(app_id)
+        if steam_data and steam_data.get("name"):
+            name = steam_data["name"]
+    except Exception:
+        pass  # Fall back to generic name
+
+    game = await game_service.get_or_create_game(
+        name=name,
+        steam_app_id=app_id,
+    )
+    return game
+
+
+# ── Dynamic path routes (/{game_id}) ────────────────────────────────────────
+
+@router.get("/{game_id}")
+async def get_game(game_id: int):
+    """Get game details."""
+    game = await game_service.get_game(game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
     return game
 
 
@@ -108,35 +171,6 @@ async def get_game_screenshots(
         "limit": limit,
         "has_more": (page * limit) < total,
     }
-
-
-@router.get("/by-steam-appid/{app_id}")
-async def get_or_create_by_steam_appid(app_id: int):
-    """Get or create a game by its Steam app ID.
-
-    Used by the CLI sync tool to resolve games before uploading.
-    Tries to resolve the real game name via Steam Store API first.
-    """
-    # Check if it already exists — return immediately
-    existing = await game_service.get_game_by_steam_app_id(app_id)
-    if existing:
-        return existing
-
-    # Try to get the real name from Steam Store API before creating
-    name = f"App {app_id}"
-    try:
-        from backend.services.metadata_service import fetch_steam_metadata
-        steam_data = await fetch_steam_metadata(app_id)
-        if steam_data and steam_data.get("name"):
-            name = steam_data["name"]
-    except Exception:
-        pass  # Fall back to generic name
-
-    game = await game_service.get_or_create_game(
-        name=name,
-        steam_app_id=app_id,
-    )
-    return game
 
 
 @router.post("/{game_id}/refresh-metadata")

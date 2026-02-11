@@ -1,5 +1,6 @@
 """Game metadata routes: fetch from Steam/SteamGridDB/IGDB, search external."""
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -58,6 +59,9 @@ async def fetch_all_metadata():
         except Exception as e:
             errors += 1
             logger.warning("Metadata fetch failed for game %d: %s", game["id"], e)
+
+        # Rate-limit: avoid Steam Store API throttling (~300ms between games)
+        await asyncio.sleep(0.3)
 
     return {
         "total_games": len(games),
