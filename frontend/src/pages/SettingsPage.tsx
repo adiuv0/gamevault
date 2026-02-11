@@ -16,6 +16,9 @@ import {
   MessageSquare,
   Share2,
   Download,
+  Copy,
+  Check,
+  Monitor,
 } from 'lucide-react';
 import { getSettings, changePassword, saveApiKey, deleteApiKey } from '@/api/settings';
 import type { AppSettings } from '@/api/settings';
@@ -194,6 +197,9 @@ export function SettingsPage() {
           </div>
         </section>
 
+        {/* Sync Token */}
+        <SyncTokenSection />
+
         {/* Password Change */}
         {!settings.auth_disabled && (
           <section className="bg-bg-secondary border border-accent-danger/20 rounded-lg p-6">
@@ -362,6 +368,84 @@ function ConfigRow({
       <span className="text-text-secondary">{label}</span>
       <span className={`font-mono text-xs ${valueColor}`}>{value}</span>
     </div>
+  );
+}
+
+function SyncTokenSection() {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    const token = localStorage.getItem('gamevault_token');
+    if (!token) return;
+    try {
+      // Try modern clipboard API first (requires HTTPS or localhost)
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(token);
+      } else {
+        // Fallback: hidden textarea + execCommand for plain HTTP
+        const ta = document.createElement('textarea');
+        ta.value = token;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Last resort: prompt user to copy manually
+      window.prompt('Copy this token:', token);
+    }
+  };
+
+  const token = localStorage.getItem('gamevault_token');
+
+  return (
+    <section className="bg-bg-secondary border border-border rounded-lg p-6">
+      <div className="flex items-center gap-2 mb-4">
+        <Monitor className="h-5 w-5 text-accent-primary" />
+        <h2 className="text-lg font-medium text-text-primary">Sync Token</h2>
+      </div>
+      <p className="text-sm text-text-secondary mb-3">
+        Use this auth token with the{' '}
+        <span className="font-medium text-text-primary">GameVault Sync</span>{' '}
+        CLI tool to upload local Steam screenshots from your PC.
+      </p>
+
+      {token ? (
+        <div className="flex items-center gap-3">
+          <code className="flex-1 bg-bg-primary border border-border rounded-md px-3 py-2 text-xs font-mono text-text-muted truncate select-all">
+            {token.slice(0, 20)}{'...'}
+            {token.slice(-10)}
+          </code>
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1.5 px-3 py-2 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors flex-shrink-0"
+          >
+            {copied ? (
+              <>
+                <Check className="h-4 w-4" />
+                Copied!
+              </>
+            ) : (
+              <>
+                <Copy className="h-4 w-4" />
+                Copy Token
+              </>
+            )}
+          </button>
+        </div>
+      ) : (
+        <p className="text-sm text-text-muted">No token found. Please log in first.</p>
+      )}
+
+      <p className="mt-3 text-xs text-text-muted">
+        Paste this into the Sync tool's "Auth Token" field or pass via{' '}
+        <code className="bg-bg-primary px-1 rounded">--token</code> flag.
+      </p>
+    </section>
   );
 }
 

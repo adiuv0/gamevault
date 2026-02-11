@@ -16,11 +16,29 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
+
+# ---------------------------------------------------------------------------
+# Dependency check — httpx is the only external requirement
+# ---------------------------------------------------------------------------
+
+try:
+    import httpx  # noqa: F401
+except ImportError:
+    print("ERROR: 'httpx' is not installed.", file=sys.stderr)
+    print("Run:  pip install httpx", file=sys.stderr)
+    resp = input("\nInstall it now? [y/N] ").strip().lower()
+    if resp == "y":
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "httpx"])
+        import httpx  # noqa: F401
+        print()
+    else:
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -309,8 +327,6 @@ def compute_hashes(
 
 class GameVaultClient:
     def __init__(self, server: str, token: str):
-        import httpx
-
         self.client = httpx.Client(
             base_url=server.rstrip("/"),
             headers={"Authorization": f"Bearer {token}"},
