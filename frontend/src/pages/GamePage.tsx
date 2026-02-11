@@ -1,11 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Upload, Image, Trash2, Loader2, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Upload, Image, Trash2, Loader2, RefreshCw, CheckCircle2, Globe, Lock } from 'lucide-react';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { ScreenshotGallery } from '@/components/screenshots/ScreenshotGallery';
 import { ScreenshotViewer } from '@/components/screenshots/ScreenshotViewer';
-import { getGame, deleteGame, getCoverUrl } from '@/api/games';
+import { getGame, deleteGame, updateGame, getCoverUrl } from '@/api/games';
 import { listScreenshots } from '@/api/screenshots';
 import { fetchGameMetadata } from '@/api/metadata';
 import { formatCount, formatDate } from '@/lib/formatters';
@@ -177,6 +177,21 @@ export function GamePage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                const updated = await updateGame(gameId, { is_public: !game.is_public });
+                setGame(updated);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-text-secondary rounded-md text-sm hover:text-text-primary hover:border-accent-primary/50 transition-colors"
+              title={game.is_public ? 'Visible in public gallery' : 'Hidden from public gallery'}
+            >
+              {game.is_public ? (
+                <Globe className="h-3.5 w-3.5" />
+              ) : (
+                <Lock className="h-3.5 w-3.5" />
+              )}
+              {game.is_public ? 'Public' : 'Private'}
+            </button>
             <button
               onClick={handleFetchMetadata}
               disabled={fetchingMeta}

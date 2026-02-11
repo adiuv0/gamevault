@@ -85,6 +85,16 @@ API_PAGE_SIZE = 100
 # Steam Screenshots creator app ID
 STEAM_SCREENSHOTS_APP_ID = 760
 
+# Allowed domains for image downloads (SSRF defense).
+# Steam CDN images come from these domains; anything else is rejected.
+ALLOWED_IMAGE_DOMAINS = (
+    ".steamusercontent.com",
+    ".akamaihd.net",
+    ".steamcommunity.com",
+    ".steampowered.com",
+    ".steamstatic.com",
+)
+
 
 # ── Helper Functions ─────────────────────────────────────────────────────────
 
@@ -731,6 +741,15 @@ class SteamScraper:
         """Download a screenshot image from Akamai / Steam CDN."""
         if not url:
             logger.warning("download_image: empty URL")
+            return None
+
+        # SSRF defense: only allow known Steam CDN domains
+        parsed_host = urlparse(url).hostname or ""
+        if not any(parsed_host.endswith(d) for d in ALLOWED_IMAGE_DOMAINS):
+            logger.warning(
+                "download_image: blocked URL with disallowed domain %s",
+                parsed_host,
+            )
             return None
 
         try:

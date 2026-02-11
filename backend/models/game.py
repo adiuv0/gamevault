@@ -16,6 +16,7 @@ class GameUpdate(BaseModel):
     release_date: str | None = None
     genres: str | None = None
     description: str | None = None
+    is_public: bool | None = None
 
 
 class GameResponse(BaseModel):
@@ -29,6 +30,7 @@ class GameResponse(BaseModel):
     release_date: str | None = None
     genres: str | None = None
     description: str | None = None
+    is_public: bool = True
     screenshot_count: int = 0
     first_screenshot_date: str | None = None
     last_screenshot_date: str | None = None

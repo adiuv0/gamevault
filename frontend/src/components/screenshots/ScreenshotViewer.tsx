@@ -398,7 +398,11 @@ export function ScreenshotViewer({
                 {screenshot.format && (
                   <InfoRow label="Format" value={screenshot.format.toUpperCase()} />
                 )}
-                <InfoRow label="Source" value={screenshot.source === 'steam_import' ? 'Steam Import' : 'Upload'} />
+                <InfoRow label="Source" value={
+                  screenshot.source === 'steam_import' ? 'Steam Import'
+                  : screenshot.source === 'steam_local' ? 'Steam Local'
+                  : 'Upload'
+                } />
                 {screenshot.steam_description && (
                   <div>
                     <p className="text-text-muted text-xs mb-1">Steam Description</p>

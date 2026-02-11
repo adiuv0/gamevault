@@ -73,7 +73,12 @@ async def require_auth(request: Request) -> dict | None:
     path = request.url.path
 
     # Public endpoints that never require auth
-    if path.startswith("/share/") or path == "/api/health" or path.startswith("/api/auth/"):
+    if (
+        path.startswith("/share/")
+        or path == "/api/health"
+        or path.startswith("/api/auth/")
+        or path.startswith("/api/gallery/")
+    ):
         return None
 
     # Auth disabled mode

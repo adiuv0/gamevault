@@ -11,6 +11,7 @@ import aiosqlite
 # List of migration modules in order
 MIGRATIONS = [
     "backend.migrations.m001_initial",
+    "backend.migrations.m002_gallery",
 ]
 
 

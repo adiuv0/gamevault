@@ -9,6 +9,7 @@ export interface Game {
   release_date: string | null;
   genres: string | null;
   description: string | null;
+  is_public: boolean;
   screenshot_count: number;
   first_screenshot_date: string | null;
   last_screenshot_date: string | null;
@@ -31,7 +32,7 @@ export interface Screenshot {
   uploaded_at: string;
   steam_screenshot_id: string | null;
   steam_description: string | null;
-  source: 'upload' | 'steam_import';
+  source: 'upload' | 'steam_import' | 'steam_local';
   is_favorite: boolean;
   view_count: number;
   exif_data: string | null;

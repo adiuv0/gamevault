@@ -207,6 +207,27 @@ async def get_or_create_game(
     return await create_game(name, steam_app_id, **extra_fields)
 
 
+async def list_public_games(sort: str = "name") -> list[dict]:
+    """List all public games with sorting."""
+    db = await get_db()
+
+    order_clause = {
+        "name": "g.name ASC",
+        "date": "g.last_screenshot_date DESC NULLS LAST",
+        "count": "g.screenshot_count DESC",
+    }.get(sort, "g.name ASC")
+
+    cursor = await db.execute(f"""
+        SELECT g.* FROM games g
+        WHERE g.is_public = 1
+        ORDER BY {order_clause}
+    """)
+
+    columns = [desc[0] for desc in cursor.description]
+    rows = await cursor.fetchall()
+    return [dict(zip(columns, row)) for row in rows]
+
+
 async def save_cover_image(game_id: int, image_data: bytes, filename: str = "cover.jpg") -> str:
     """Save cover art for a game and update the database.
 

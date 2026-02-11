@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     igdb_client_id: str = ""
     igdb_client_secret: str = ""
 
+    # CORS (comma-separated extra origins, in addition to localhost defaults)
+    cors_origins: str = ""
+
     # Import settings
     import_rate_limit_ms: int = 1000
 

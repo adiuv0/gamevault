@@ -55,6 +55,7 @@ async def update_game(game_id: int, data: GameUpdate):
         release_date=data.release_date,
         genres=data.genres,
         description=data.description,
+        is_public=data.is_public,
     )
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
@@ -107,6 +108,19 @@ async def get_game_screenshots(
         "limit": limit,
         "has_more": (page * limit) < total,
     }
+
+
+@router.get("/by-steam-appid/{app_id}")
+async def get_or_create_by_steam_appid(app_id: int):
+    """Get or create a game by its Steam app ID.
+
+    Used by the CLI sync tool to resolve games before uploading.
+    """
+    game = await game_service.get_or_create_game(
+        name=f"App {app_id}",
+        steam_app_id=app_id,
+    )
+    return game
 
 
 @router.post("/{game_id}/refresh-metadata")

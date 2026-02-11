@@ -1,6 +1,7 @@
 """GameVault FastAPI application."""
 
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -20,8 +21,37 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.config import settings
 from backend.database import close_db, init_db
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_SECRET_SENTINEL = "change-me-to-a-random-string"
+
+
+def _ensure_secret_key() -> None:
+    """Auto-generate a persistent secret key if the user hasn't set one."""
+    if settings.secret_key != DEFAULT_SECRET_SENTINEL:
+        return  # User explicitly set GAMEVAULT_SECRET_KEY — use it as-is
+
+    key_file = settings.data_dir / ".secret_key"
+    if key_file.exists():
+        stored = key_file.read_text().strip()
+        if stored:
+            settings.secret_key = stored
+            logger.info("Loaded auto-generated secret key from %s", key_file)
+            return
+
+    # Generate a new random key and persist it
+    new_key = secrets.token_hex(32)
+    key_file.write_text(new_key)
+    settings.secret_key = new_key
+    logger.warning(
+        "Generated new secret key (saved to %s). "
+        "Set GAMEVAULT_SECRET_KEY env var to use your own.",
+        key_file,
+    )
 from backend.routers import (
     auth,
+    gallery,
     games,
     metadata,
     screenshots,
@@ -40,7 +70,16 @@ async def lifespan(app: FastAPI):
     # Startup
     settings.library_dir.mkdir(parents=True, exist_ok=True)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_secret_key()
     await init_db()
+
+    if settings.disable_auth:
+        logger.warning(
+            "Authentication is DISABLED (GAMEVAULT_DISABLE_AUTH=true). "
+            "All endpoints are publicly accessible. Only use this behind "
+            "a trusted reverse proxy with its own authentication."
+        )
+
     yield
     # Shutdown
     await close_db()
@@ -53,10 +92,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS (allow frontend dev server)
+# CORS — localhost defaults plus any extra origins from GAMEVAULT_CORS_ORIGINS
+_cors_origins = ["http://localhost:5173", "http://localhost:8080"]
+if settings.cors_origins:
+    _cors_origins.extend(o.strip() for o in settings.cors_origins.split(",") if o.strip())
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:8080"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -64,6 +106,7 @@ app.add_middleware(
 
 # API routers
 app.include_router(auth.router)
+app.include_router(gallery.router)
 app.include_router(games.router)
 app.include_router(screenshots.router)
 app.include_router(upload.router)

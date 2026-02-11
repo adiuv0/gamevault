@@ -196,6 +196,26 @@ async def check_duplicate_steam_id(steam_id: str) -> bool:
     return await cursor.fetchone() is not None
 
 
+async def check_hashes_batch(hashes: list[str]) -> set[str]:
+    """Return the subset of hashes that already exist in the database."""
+    if not hashes:
+        return set()
+    db = await get_db()
+    existing: set[str] = set()
+    # SQLite has a variable limit (~999), so batch in chunks
+    chunk_size = 500
+    for i in range(0, len(hashes), chunk_size):
+        chunk = hashes[i : i + chunk_size]
+        placeholders = ", ".join(["?"] * len(chunk))
+        cursor = await db.execute(
+            f"SELECT sha256_hash FROM screenshots WHERE sha256_hash IN ({placeholders})",
+            chunk,
+        )
+        rows = await cursor.fetchall()
+        existing.update(row[0] for row in rows)
+    return existing
+
+
 # ── Annotation helpers ───────────────────────────────────────────────────────
 
 async def get_annotation(screenshot_id: int) -> dict | None:

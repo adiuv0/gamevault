@@ -1,6 +1,8 @@
 """Authentication routes: login, setup, verify, change password."""
 
-from fastapi import APIRouter, HTTPException
+import time
+
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.auth import (
@@ -10,6 +12,34 @@ from backend.auth import (
     verify_password,
 )
 from backend.config import settings
+
+# ── Login rate limiting ──────────────────────────────────────────────────────
+# Track failed login attempts per IP: {ip: [timestamp, ...]}
+_login_attempts: dict[str, list[float]] = {}
+_RATE_LIMIT_WINDOW = 15 * 60  # 15 minutes
+_RATE_LIMIT_MAX = 5  # max failures before lockout
+
+
+def _check_rate_limit(ip: str) -> None:
+    """Raise 429 if this IP has too many recent failed login attempts."""
+    now = time.monotonic()
+    attempts = _login_attempts.get(ip, [])
+    # Prune old entries
+    attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
+    _login_attempts[ip] = attempts
+    if len(attempts) >= _RATE_LIMIT_MAX:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed login attempts. Try again later.",
+        )
+
+
+def _record_failed_attempt(ip: str) -> None:
+    _login_attempts.setdefault(ip, []).append(time.monotonic())
+
+
+def _clear_attempts(ip: str) -> None:
+    _login_attempts.pop(ip, None)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -39,7 +69,7 @@ class AuthStatus(BaseModel):
 
 
 @router.post("/login", response_model=AuthResponse)
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, request: Request):
     """Authenticate with password and receive a JWT token."""
     if settings.disable_auth:
         return AuthResponse(
@@ -47,13 +77,18 @@ async def login(req: LoginRequest):
             expires_in_days=settings.token_expiry_days,
         )
 
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(client_ip)
+
     stored_hash = await get_password_hash()
     if stored_hash is None:
         raise HTTPException(status_code=403, detail="setup_required")
 
     if not verify_password(req.password, stored_hash):
+        _record_failed_attempt(client_ip)
         raise HTTPException(status_code=401, detail="Invalid password")
 
+    _clear_attempts(client_ip)
     return AuthResponse(
         token=create_access_token(),
         expires_in_days=settings.token_expiry_days,

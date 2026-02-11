@@ -4,17 +4,33 @@ import mimetypes
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from backend.auth import require_auth
 from backend.config import settings
 from backend.models.annotation import AnnotationCreate
 from backend.services import screenshot_service
 
+
+class HashCheckRequest(BaseModel):
+    hashes: list[str]
+
 router = APIRouter(
     prefix="/api/screenshots",
     tags=["screenshots"],
     dependencies=[Depends(require_auth)],
 )
+
+
+@router.post("/check-hashes")
+async def check_hashes(data: HashCheckRequest):
+    """Check which sha256 hashes already exist in the database.
+
+    Used by the CLI sync tool to determine which local files need uploading.
+    """
+    existing = await screenshot_service.check_hashes_batch(data.hashes)
+    all_set = set(data.hashes)
+    return {"existing": list(existing), "new": list(all_set - existing)}
 
 
 @router.get("/{screenshot_id}")
@@ -57,7 +73,14 @@ async def get_image(screenshot_id: int):
         raise HTTPException(status_code=404, detail="Image file not found")
 
     media_type = mimetypes.guess_type(str(file_path))[0] or "image/jpeg"
-    return FileResponse(file_path, media_type=media_type)
+    return FileResponse(
+        file_path,
+        media_type=media_type,
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
+        },
+    )
 
 
 @router.get("/{screenshot_id}/thumb/{size}")
@@ -80,7 +103,14 @@ async def get_thumbnail(screenshot_id: int, size: str):
     if not full_path.exists():
         raise HTTPException(status_code=404, detail="Thumbnail not found")
 
-    return FileResponse(full_path, media_type="image/jpeg")
+    return FileResponse(
+        full_path,
+        media_type="image/jpeg",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
+        },
+    )
 
 
 @router.post("/{screenshot_id}/favorite")
