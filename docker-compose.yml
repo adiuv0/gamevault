@@ -1,0 +1,42 @@
+services:
+  gamevault:
+    image: adiuv0/gamevault:latest
+    # To build from source instead, comment out 'image' and uncomment:
+    # build: .
+    container_name: gamevault
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data                              # Database + config
+      # Uncomment and adjust for Unraid:
+      # - /mnt/user/screenshots:/data/library     # Screenshot storage on array
+    environment:
+      - GAMEVAULT_SECRET_KEY=change-me-to-a-random-string
+      - GAMEVAULT_BASE_URL=http://localhost:8080
+      # Optional: disable auth for LAN-only setups behind a reverse proxy
+      # - GAMEVAULT_DISABLE_AUTH=true
+      #
+      # Optional: API keys for enhanced metadata
+      # - GAMEVAULT_STEAM_API_KEY=
+      # - GAMEVAULT_STEAMGRIDDB_API_KEY=
+      # - GAMEVAULT_IGDB_CLIENT_ID=
+      # - GAMEVAULT_IGDB_CLIENT_SECRET=
+      #
+      # Import settings
+      # - GAMEVAULT_IMPORT_RATE_LIMIT_MS=1000
+      # - GAMEVAULT_MAX_UPLOAD_SIZE_MB=50
+      # - GAMEVAULT_THUMBNAIL_QUALITY=85
+      # - GAMEVAULT_TOKEN_EXPIRY_DAYS=30
+      - TZ=America/Chicago
+    labels:
+      # Example Traefik labels (uncomment and adjust):
+      # - "traefik.enable=true"
+      # - "traefik.http.routers.gamevault.rule=Host(`screenshots.yourdomain.com`)"
+      # - "traefik.http.routers.gamevault.entrypoints=websecure"
+      # - "traefik.http.routers.gamevault.tls.certresolver=letsencrypt"
+      # - "traefik.http.services.gamevault.loadbalancer.server.port=8080"
+      #
+      # Example Nginx Proxy Manager (SWAG) labels:
+      # - "com.github.nginx-proxy-manager.subdomain=screenshots"
+      - "com.gamevault.description=Self-hosted game screenshot manager"

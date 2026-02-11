@@ -1,0 +1,200 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>GameVault</Name>
+  <Repository>adiuv0/gamevault</Repository>
+  <Registry>https://hub.docker.com/r/adiuv0/gamevault</Registry>
+  <Branch>
+    <Tag>latest</Tag>
+    <TagDescription>Latest stable release</TagDescription>
+  </Branch>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/adiuv0/gamevault/issues</Support>
+  <Project>https://github.com/adiuv0/gamevault</Project>
+  <Overview>
+    Self-hosted game screenshot manager. Import screenshots from Steam, upload manually, annotate, search, and share with OpenGraph-powered link previews. Built for Unraid.
+  </Overview>
+  <Category>MediaApp:Photos MediaServer:Photos GameServers</Category>
+  <WebUI>http://[IP]:[PORT:8080]</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/adiuv0/gamevault/main/unraid-template.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/adiuv0/gamevault/main/frontend/public/favicon.svg</Icon>
+  <ExtraParams>--restart unless-stopped</ExtraParams>
+  <Description>
+    Self-hosted game screenshot manager. Import screenshots from Steam, upload manually, annotate with rich text, full-text search, timeline view, and share with OpenGraph-powered link previews. Dark gaming-themed UI built with React.
+  </Description>
+
+  <!-- Port -->
+  <Config
+    Name="Web UI Port"
+    Target="8080"
+    Default="8080"
+    Mode="tcp"
+    Description="Port for the GameVault web interface."
+    Type="Port"
+    Display="always"
+    Required="true"
+    Mask="false"
+  >8080</Config>
+
+  <!-- Volumes -->
+  <Config
+    Name="App Data"
+    Target="/data"
+    Default="/mnt/user/appdata/gamevault"
+    Mode="rw"
+    Description="Stores the database, config, and thumbnails. Use your appdata share."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false"
+  >/mnt/user/appdata/gamevault</Config>
+
+  <Config
+    Name="Screenshot Library"
+    Target="/data/library"
+    Default="/mnt/user/screenshots/gamevault"
+    Mode="rw"
+    Description="Where full-size screenshots are stored. Can point to your array for large collections."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false"
+  >/mnt/user/screenshots/gamevault</Config>
+
+  <!-- Required Environment Variables -->
+  <Config
+    Name="Secret Key"
+    Target="GAMEVAULT_SECRET_KEY"
+    Default=""
+    Description="Random string used to sign auth tokens. Generate one with: python -c &quot;import secrets; print(secrets.token_hex(32))&quot;"
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="true"
+  ></Config>
+
+  <Config
+    Name="Base URL"
+    Target="GAMEVAULT_BASE_URL"
+    Default="http://localhost:8080"
+    Description="Public URL for GameVault. Used for share links. Example: https://screenshots.yourdomain.com or http://192.168.1.100:8080"
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false"
+  >http://localhost:8080</Config>
+
+  <!-- Authentication -->
+  <Config
+    Name="Disable Auth"
+    Target="GAMEVAULT_DISABLE_AUTH"
+    Default="false"
+    Description="Set to true to disable password authentication. Only recommended for LAN-only setups behind a reverse proxy."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"
+  >false</Config>
+
+  <!-- Optional API Keys -->
+  <Config
+    Name="Steam API Key"
+    Target="GAMEVAULT_STEAM_API_KEY"
+    Default=""
+    Description="Optional. Enhances game metadata during Steam import. Get one at: https://steamcommunity.com/dev/apikey"
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="true"
+  ></Config>
+
+  <Config
+    Name="SteamGridDB API Key"
+    Target="GAMEVAULT_STEAMGRIDDB_API_KEY"
+    Default=""
+    Description="Optional. Provides higher-quality cover art. Get one at: https://www.steamgriddb.com/profile/preferences/api"
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="true"
+  ></Config>
+
+  <Config
+    Name="IGDB Client ID"
+    Target="GAMEVAULT_IGDB_CLIENT_ID"
+    Default=""
+    Description="Optional. Fallback metadata for non-Steam games. Get credentials at: https://api-docs.igdb.com/#getting-started"
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"
+  ></Config>
+
+  <Config
+    Name="IGDB Client Secret"
+    Target="GAMEVAULT_IGDB_CLIENT_SECRET"
+    Default=""
+    Description="Optional. IGDB/Twitch client secret (paired with Client ID above)."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="true"
+  ></Config>
+
+  <!-- Tuning -->
+  <Config
+    Name="Import Rate Limit (ms)"
+    Target="GAMEVAULT_IMPORT_RATE_LIMIT_MS"
+    Default="1000"
+    Description="Delay between Steam requests during import. Lower = faster but may hit rate limits."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false"
+  >1000</Config>
+
+  <Config
+    Name="Max Upload Size (MB)"
+    Target="GAMEVAULT_MAX_UPLOAD_SIZE_MB"
+    Default="50"
+    Description="Maximum file size for manual screenshot uploads."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false"
+  >50</Config>
+
+  <Config
+    Name="Thumbnail Quality"
+    Target="GAMEVAULT_THUMBNAIL_QUALITY"
+    Default="85"
+    Description="JPEG quality for generated thumbnails (1-100). Higher = better quality, larger files."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false"
+  >85</Config>
+
+  <Config
+    Name="Token Expiry (Days)"
+    Target="GAMEVAULT_TOKEN_EXPIRY_DAYS"
+    Default="30"
+    Description="How long login tokens remain valid before requiring re-authentication."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false"
+  >30</Config>
+
+  <Config
+    Name="Timezone"
+    Target="TZ"
+    Default="America/Chicago"
+    Description="Container timezone. Affects date display in the UI."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false"
+  >America/Chicago</Config>
+</Container>

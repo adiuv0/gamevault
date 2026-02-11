@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block meta %}
+<meta property="og:title" content="{{ og_title }}">
+<meta property="og:description" content="{{ og_description }}">
+<meta property="og:image" content="{{ og_image }}">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ og_title }}">
+<meta name="twitter:description" content="{{ og_description }}">
+<meta name="twitter:image" content="{{ og_image }}">
+{% endblock %}
+
+{% block title %}{{ game_name }} - Screenshot | GameVault{% endblock %}
+
+{% block head %}
+<style>
+    .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    .header {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid #30363d;
+    }
+    .game-badge {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 0.25rem 0.75rem;
+        font-size: 0.875rem;
+        color: #8b949e;
+    }
+    .screenshot-date {
+        color: #8b949e;
+        font-size: 0.875rem;
+    }
+    .screenshot-image {
+        width: 100%;
+        border-radius: 8px;
+        border: 1px solid #30363d;
+    }
+    .annotation {
+        margin-top: 2rem;
+        padding: 1.5rem;
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        line-height: 1.6;
+    }
+    .annotation h1, .annotation h2, .annotation h3 {
+        margin-top: 1rem;
+        margin-bottom: 0.5rem;
+    }
+    .annotation p { margin-bottom: 0.75rem; }
+    .annotation code {
+        background: #21262d;
+        padding: 0.125rem 0.375rem;
+        border-radius: 3px;
+        font-size: 0.875em;
+    }
+    .footer {
+        margin-top: 3rem;
+        padding-top: 1rem;
+        border-top: 1px solid #30363d;
+        text-align: center;
+        color: #484f58;
+        font-size: 0.8rem;
+    }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="container">
+    <div class="header">
+        <span class="game-badge">{{ game_name }}</span>
+        {% if taken_at %}
+        <span class="screenshot-date">{{ taken_at }}</span>
+        {% endif %}
+    </div>
+
+    <img src="{{ image_url }}" alt="Screenshot from {{ game_name }}" class="screenshot-image">
+
+    {% if annotation_html %}
+    <div class="annotation">
+        {{ annotation_html | safe }}
+    </div>
+    {% endif %}
+
+    <div class="footer">
+        Shared via <a href="{{ base_url }}">GameVault</a>
+    </div>
+</div>
+{% endblock %}
