@@ -18,7 +18,7 @@
   <Category>MediaApp:Photos MediaServer:Photos GameServers</Category>
   <WebUI>http://[IP]:[PORT:8080]</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/adiuv0/gamevault/main/unraid-template.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/adiuv0/gamevault/main/frontend/public/favicon.svg</Icon>
+  <Icon>https://raw.githubusercontent.com/adiuv0/gamevault/main/frontend/public/vite.svg</Icon>
   <ExtraParams>--restart unless-stopped</ExtraParams>
   <Description>
     Self-hosted game screenshot manager. Import screenshots from Steam, upload manually, annotate with rich text, full-text search, timeline view, and share with OpenGraph-powered link previews. Dark gaming-themed UI built with React.
