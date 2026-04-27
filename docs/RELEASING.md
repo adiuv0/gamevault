@@ -6,6 +6,93 @@ Docker image, push to Docker Hub.
 Docker Hub repo: [adiuv0/gamevault](https://hub.docker.com/r/adiuv0/gamevault)
 GitHub repo: [adiuv0/gamevault](https://github.com/adiuv0/gamevault)
 
+## Quick start (Windows, step by step)
+
+If it's been a while and you'd rather follow a numbered list than
+remember the whole flow, this is the simplest path: build the image,
+push two tags, you're done. Skip the version bump for a no-code-change
+re-release; do the [pre-release checklist](#pre-release-checklist) for a
+real release.
+
+### 1. Make sure Docker Desktop is running
+
+Look at the bottom-right of your screen for the **whale icon**. If it's
+not there, open Docker Desktop from the Start menu and wait until the
+whale icon stops animating.
+
+### 2. Open PowerShell
+
+Windows key → type `powershell` → Enter.
+
+### 3. Go to the project folder
+
+```powershell
+cd "C:\Users\Emiliano Zazueta\projects\gamevault"
+```
+
+### 4. Pick a version number
+
+Check [hub.docker.com/r/adiuv0/gamevault/tags](https://hub.docker.com/r/adiuv0/gamevault/tags)
+for the latest tag. Pick the next number up: `0.1.0` → `0.2.0` for a
+new feature, or `0.2.0` → `0.2.1` for a small fix.
+
+The instructions below use `0.2.0` — replace with whatever you picked.
+
+### 5. Build the image
+
+```powershell
+docker build -t adiuv0/gamevault:0.2.0 -t adiuv0/gamevault:latest .
+```
+
+> **Why the dot at the end?** It's the "build context" — the folder
+> Docker is allowed to copy files from when running the `Dockerfile`.
+> The dot means "current folder." Skipping it gets you an error.
+
+The build takes 3–8 minutes. You'll see a wall of text scrolling — that's
+normal. You're done when the prompt comes back and you see a line like
+`naming to docker.io/adiuv0/gamevault:latest done`.
+
+### 6. Log in to Docker Hub
+
+Skip this if you've already logged in on this PC — Docker remembers.
+
+```powershell
+docker login
+```
+
+Username: `adiuv0`. Password: your Docker Hub password or access token.
+The cursor doesn't move while you type the password — that's normal,
+just type/paste and hit Enter. Look for `Login Succeeded`.
+
+### 7. Push (two commands, both required)
+
+```powershell
+docker push adiuv0/gamevault:0.2.0
+docker push adiuv0/gamevault:latest
+```
+
+The second one is fast because Docker already uploaded the layers in
+the first push.
+
+### 8. Confirm it landed
+
+Open [hub.docker.com/r/adiuv0/gamevault/tags](https://hub.docker.com/r/adiuv0/gamevault/tags).
+You should see `0.2.0` and `latest` at the top with a fresh timestamp.
+
+### If something breaks
+
+- **"Cannot connect to the Docker daemon"** — Docker Desktop isn't
+  running. Go back to step 1.
+- **"denied: requested access to the resource is denied"** — You're not
+  logged in (or your session expired). Do step 6 again.
+- **Build fails partway through** — Scroll up to find the last red
+  error line. Often it's a network blip; re-run step 5.
+- **You forgot what version is currently live** — The newest tag at
+  [hub.docker.com/r/adiuv0/gamevault/tags](https://hub.docker.com/r/adiuv0/gamevault/tags)
+  is the answer. Pick one above it.
+
+---
+
 ## TL;DR (one-shot)
 
 For a routine release where you just want to push a new version of the
