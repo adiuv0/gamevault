@@ -1,5 +1,7 @@
 import { api } from './client';
 
+export type ToneMapAlgorithm = 'reinhard' | 'aces' | 'clip';
+
 export interface AppSettings {
   base_url: string;
   library_dir: string;
@@ -18,6 +20,21 @@ export interface AppSettings {
   annotation_count: number;
   active_share_count: number;
   import_session_count: number;
+  specialk_path: string;
+  tone_map_algorithm: ToneMapAlgorithm;
+  tone_map_exposure: number;
+}
+
+export interface PreferenceUpdate {
+  specialk_path?: string;
+  tone_map_algorithm?: ToneMapAlgorithm;
+  tone_map_exposure?: number;
+}
+
+export async function savePreferences(
+  prefs: PreferenceUpdate,
+): Promise<{ message: string }> {
+  return api.put('/settings/preferences', prefs);
 }
 
 export async function getSettings(): Promise<AppSettings> {

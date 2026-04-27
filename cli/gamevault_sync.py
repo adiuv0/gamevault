@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """
-GameVault Sync — standalone script to sync local Steam screenshots to a GameVault server.
+GameVault Sync — standalone script to sync local screenshots to a GameVault server.
+
+Supports two sources:
+  - Steam: walks Steam's userdata/<id>/760/remote/<appid>/screenshots/
+  - Special K: walks a user-supplied root where each subfolder is a game
+    (handles both .png SDR and .jxr HDR captures)
 
 Single-file tool with an embedded VDF parser and tkinter GUI.
 Only external dependency: httpx
 
 Usage:
-    python gamevault_sync.py                  # launch GUI
-    python gamevault_sync.py --no-gui ...     # headless CLI mode
+    python gamevault_sync.py                            # launch GUI
+    python gamevault_sync.py --no-gui --mode steam ...  # headless: Steam only
+    python gamevault_sync.py --no-gui --mode specialk \
+        --specialk-path "C:/Users/You/Documents/My Mods/SpecialK/Profiles" ...
+    python gamevault_sync.py --no-gui --mode both ...   # both sources
 """
 
 from __future__ import annotations
@@ -16,6 +24,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -161,7 +170,7 @@ def vdf_parse(text: str) -> dict:
 @dataclass
 class LocalScreenshot:
     path: Path
-    game_id: str
+    source: str  # "steam" or "specialk"
     filename: str
     width: int = 0
     height: int = 0
@@ -171,10 +180,27 @@ class LocalScreenshot:
 
 @dataclass
 class GameScanResult:
-    app_id: str
+    """One scanned game from either source.
+
+    For Steam: ``app_id`` is set, ``folder_name`` is empty.
+    For Special K: ``folder_name`` is set (the on-disk folder), ``app_id`` is "".
+    ``name`` is filled in from the GameVault server (Steam) or by cleaning the
+    folder name (Special K) before display + upload.
+    """
+
+    source: str
+    app_id: str = ""
+    folder_name: str = ""
     name: str = ""
     screenshots: list[LocalScreenshot] = field(default_factory=list)
     new_hashes: set[str] = field(default_factory=set)
+
+    @property
+    def key(self) -> str:
+        """Unique cross-source identifier for use as a dict key."""
+        if self.source == "steam":
+            return f"steam:{self.app_id}"
+        return f"specialk:{self.folder_name}"
 
     @property
     def new_count(self) -> int:
@@ -190,6 +216,10 @@ class GameScanResult:
 # ---------------------------------------------------------------------------
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tga"}
+
+# Special K writes both .png (SDR) and .jxr (HDR). The GameVault upload
+# pipeline accepts both — JXR is tone-mapped server-side for thumbnails.
+SPECIALK_EXTENSIONS = {".jxr", ".png"}
 
 
 def find_steam_path() -> Optional[Path]:
@@ -265,7 +295,7 @@ def scan_local_screenshots(steam_path: Path, user_id: str) -> dict[str, GameScan
         if not ss_dir.is_dir():
             continue
 
-        game = GameScanResult(app_id=app_id)
+        game = GameScanResult(source="steam", app_id=app_id)
         for img_file in ss_dir.iterdir():
             if not img_file.is_file():
                 continue
@@ -274,7 +304,7 @@ def scan_local_screenshots(steam_path: Path, user_id: str) -> dict[str, GameScan
 
             ls = LocalScreenshot(
                 path=img_file,
-                game_id=app_id,
+                source="steam",
                 filename=img_file.name,
             )
 
@@ -299,6 +329,69 @@ def scan_local_screenshots(steam_path: Path, user_id: str) -> dict[str, GameScan
 
         if game.screenshots:
             results[app_id] = game
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Special K scanner
+# ---------------------------------------------------------------------------
+
+
+def clean_specialk_folder_name(folder_name: str) -> str:
+    """Mirror of the server-side cleaner in specialk_import_service.
+
+    Strip ``.exe``, split CamelCase, split letter→digit boundaries.
+    Mirrors backend behaviour so client- and server-resolved game names
+    converge on the same string.
+    """
+    name = folder_name.strip()
+    if name.lower().endswith(".exe"):
+        name = name[:-4]
+    name = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name)
+    name = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", name)
+    name = re.sub(r"(?<=[A-Za-z])(?=\d)", " ", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    return name or folder_name
+
+
+def scan_specialk_path(root: Path) -> dict[str, GameScanResult]:
+    """Scan a Special K root directory for per-game subfolders.
+
+    Returns a dict keyed by ``GameScanResult.key`` (``specialk:<folder>``).
+    Each top-level subdirectory becomes one game; screenshots are collected
+    recursively under it (so HDR/SDR subfolder splits are handled).
+    """
+    results: dict[str, GameScanResult] = {}
+    if not root.exists() or not root.is_dir():
+        return results
+
+    for child in sorted(root.iterdir()):
+        if not child.is_dir():
+            continue
+
+        game = GameScanResult(
+            source="specialk",
+            folder_name=child.name,
+            name=clean_specialk_folder_name(child.name),
+        )
+
+        for path in child.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in SPECIALK_EXTENSIONS:
+                continue
+
+            game.screenshots.append(
+                LocalScreenshot(
+                    path=path,
+                    source="specialk",
+                    filename=path.name,
+                )
+            )
+
+        if game.screenshots:
+            results[game.key] = game
 
     return results
 
@@ -346,16 +439,42 @@ class GameVaultClient:
         resp.raise_for_status()
         return resp.json()
 
+    def get_or_create_game_by_name(self, name: str) -> dict:
+        """Resolve a game by display name, creating it if missing.
+
+        Used for Special K imports where there's no Steam app ID — the
+        cleaned folder name becomes the canonical game name. Existing games
+        with a matching name (e.g. created by an earlier Steam import) are
+        returned as-is, so the two sources merge into one library entry.
+        """
+        resp = self.client.post("/api/games/by-name", json={"name": name})
+        resp.raise_for_status()
+        return resp.json()
+
+    @staticmethod
+    def _guess_mime(filename: str) -> str:
+        ext = filename.lower().rsplit(".", 1)[-1]
+        return {
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "webp": "image/webp",
+            "bmp": "image/bmp",
+            "tiff": "image/tiff",
+            "gif": "image/gif",
+            "jxr": "image/vnd.ms-photo",
+        }.get(ext, "application/octet-stream")
+
     def upload_screenshot(self, game_id: int, file_path: Path, filename: str) -> dict:
         """Upload via the synchronous endpoint so the file is fully processed
         before the response returns (no background task race condition)."""
-        mime = "image/png" if filename.lower().endswith(".png") else "image/jpeg"
+        mime = self._guess_mime(filename)
         with open(file_path, "rb") as f:
             resp = self.client.post(
                 "/api/upload/sync",
                 data={"game_id": str(game_id)},
                 files={"files": (filename, f, mime)},
-                timeout=120.0,
+                timeout=300.0,  # JXR HDR files are large + tone-mapped server-side
             )
         resp.raise_for_status()
         return resp.json()
@@ -388,51 +507,139 @@ def save_config(cfg: dict) -> None:
 # CLI mode
 # ---------------------------------------------------------------------------
 
+def _resolve_steam_path(arg_path: Optional[str]) -> Optional[Path]:
+    """Resolve the Steam install root, either from --steam-path or auto-detect."""
+    if arg_path:
+        return Path(arg_path)
+    return find_steam_path()
+
+
+def _scan_steam_into(
+    steam_path: Path, all_games: dict[str, GameScanResult]
+) -> int:
+    """Scan all Steam user IDs into ``all_games`` keyed by ``GameScanResult.key``.
+
+    Returns the number of screenshots discovered.
+    """
+    user_ids = find_user_ids(steam_path)
+    if not user_ids:
+        return 0
+
+    discovered = 0
+    for uid in user_ids:
+        games = scan_local_screenshots(steam_path, uid)
+        for game in games.values():
+            existing = all_games.get(game.key)
+            if existing is not None:
+                existing.screenshots.extend(game.screenshots)
+            else:
+                all_games[game.key] = game
+            discovered += len(game.screenshots)
+    return discovered
+
+
+def _scan_specialk_into(
+    specialk_path: Path, all_games: dict[str, GameScanResult]
+) -> int:
+    """Scan a Special K root into ``all_games``. Returns screenshot count."""
+    games = scan_specialk_path(specialk_path)
+    discovered = 0
+    for game in games.values():
+        all_games[game.key] = game
+        discovered += len(game.screenshots)
+    return discovered
+
+
+def _resolve_game_for_upload(
+    client: GameVaultClient,
+    game: GameScanResult,
+    cache: dict[str, dict],
+) -> dict:
+    """Get-or-create a GameVault game record for a scanned game.
+
+    Steam: looks up by Steam app ID. Special K: looks up by display name.
+    Caches results so we only ask the server once per game.
+    """
+    if game.key in cache:
+        return cache[game.key]
+
+    if game.source == "steam":
+        gv_game = client.get_or_create_game(game.app_id)
+    else:
+        gv_game = client.get_or_create_game_by_name(game.name)
+
+    cache[game.key] = gv_game
+    return gv_game
+
+
+def _sort_games(all_games: dict[str, GameScanResult]) -> list[GameScanResult]:
+    """Stable sort: Steam first (by app_id numeric), then Special K (by name)."""
+    steam = sorted(
+        (g for g in all_games.values() if g.source == "steam"),
+        key=lambda g: int(g.app_id) if g.app_id.isdigit() else 0,
+    )
+    specialk = sorted(
+        (g for g in all_games.values() if g.source == "specialk"),
+        key=lambda g: g.name.lower(),
+    )
+    return steam + specialk
+
+
 def run_cli(args: argparse.Namespace) -> None:
     """Execute the headless CLI workflow."""
     server = args.server
     token = args.token
     dry_run = args.dry_run
+    mode = args.mode
 
-    # Resolve steam path
-    if args.steam_path:
-        steam_path = Path(args.steam_path)
-    else:
-        steam_path = find_steam_path()
+    do_steam = mode in ("steam", "both")
+    do_specialk = mode in ("specialk", "both")
+
+    all_games: dict[str, GameScanResult] = {}
+
+    # ── Steam scan ────────────────────────────────────────────────────────
+    if do_steam:
+        steam_path = _resolve_steam_path(args.steam_path)
         if steam_path is None:
             print(
-                "ERROR: Could not auto-detect Steam path. Use --steam-path.",
+                "ERROR: Could not auto-detect Steam path. Use --steam-path "
+                "or --mode specialk to skip Steam.",
                 file=sys.stderr,
             )
             sys.exit(1)
+        print(f"Steam path: {steam_path}")
+        count = _scan_steam_into(steam_path, all_games)
+        print(f"Steam: found {count} screenshots")
 
-    print(f"Steam path: {steam_path}")
-
-    # Scan all user IDs
-    user_ids = find_user_ids(steam_path)
-    if not user_ids:
-        print("No Steam user IDs found.", file=sys.stderr)
-        sys.exit(1)
-    print(f"Found user IDs: {', '.join(user_ids)}")
-
-    # Scan screenshots across all users
-    all_games: dict[str, GameScanResult] = {}
-    for uid in user_ids:
-        games = scan_local_screenshots(steam_path, uid)
-        for app_id, game in games.items():
-            if app_id in all_games:
-                all_games[app_id].screenshots.extend(game.screenshots)
-            else:
-                all_games[app_id] = game
+    # ── Special K scan ────────────────────────────────────────────────────
+    if do_specialk:
+        if not args.specialk_path:
+            print(
+                "ERROR: --specialk-path is required when --mode is specialk or both.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        sk_path = Path(args.specialk_path)
+        if not sk_path.is_dir():
+            print(
+                f"ERROR: Special K path is not a directory: {sk_path}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print(f"Special K path: {sk_path}")
+        count = _scan_specialk_into(sk_path, all_games)
+        print(f"Special K: found {count} screenshots")
 
     all_screenshots = [ss for g in all_games.values() for ss in g.screenshots]
-    print(f"Found {len(all_screenshots)} screenshots across {len(all_games)} games")
+    print(
+        f"Total: {len(all_screenshots)} screenshots across {len(all_games)} games"
+    )
 
     if not all_screenshots:
         print("Nothing to do.")
         return
 
-    # Hash
+    # ── Hash ──────────────────────────────────────────────────────────────
     def cli_hash_progress(current: int, total: int) -> None:
         pct = current * 100 // total
         print(f"\rHashing: {current}/{total} ({pct}%)", end="", flush=True)
@@ -440,13 +647,11 @@ def run_cli(args: argparse.Namespace) -> None:
     compute_hashes(all_screenshots, cli_hash_progress)
     print()
 
-    # Connect and batch-check hashes
     client = GameVaultClient(server, token)
     try:
+        # ── Batch-check hashes ───────────────────────────────────────────
         all_hashes = [ss.sha256 for ss in all_screenshots]
         existing: set[str] = set()
-
-        # Batch check in chunks of 500
         chunk_size = 500
         for i in range(0, len(all_hashes), chunk_size):
             chunk = all_hashes[i : i + chunk_size]
@@ -465,39 +670,47 @@ def run_cli(args: argparse.Namespace) -> None:
             game_hashes = {ss.sha256 for ss in game.screenshots}
             game.new_hashes = game_hashes - existing
 
-        # Resolve game names from server and print per-game summary
-        # Rate-limit: Steam Store API throttles after rapid requests,
-        # so we add a small delay between name resolution calls.
+        # ── Resolve game names ───────────────────────────────────────────
+        # Steam path hits Steam Store API server-side, so rate-limit to be
+        # polite. Special K resolution is local (just a DB read), no
+        # throttle needed.
         print("\nResolving game names...")
         gv_game_cache: dict[str, dict] = {}
-        app_ids_sorted = sorted(all_games.keys(), key=lambda x: int(x))
-        for gi, app_id in enumerate(app_ids_sorted):
+        ordered = _sort_games(all_games)
+        for gi, game in enumerate(ordered):
             try:
-                gv_game = client.get_or_create_game(app_id)
-                gv_game_cache[app_id] = gv_game
-                resolved_name = gv_game.get("name", f"App {app_id}")
-                all_games[app_id].name = resolved_name
+                gv_game = _resolve_game_for_upload(client, game, gv_game_cache)
+                resolved_name = gv_game.get("name") or game.name
+                game.name = resolved_name
                 print(
-                    f"\r  [{gi + 1}/{len(app_ids_sorted)}] {resolved_name}",
+                    f"\r  [{gi + 1}/{len(ordered)}] {resolved_name}",
                     end="",
                     flush=True,
                 )
             except Exception as exc:
-                all_games[app_id].name = f"App {app_id}"
+                if not game.name:
+                    game.name = (
+                        f"App {game.app_id}" if game.source == "steam"
+                        else game.folder_name
+                    )
                 print(
-                    f"\r  [{gi + 1}/{len(app_ids_sorted)}] App {app_id} (failed: {exc})",
+                    f"\r  [{gi + 1}/{len(ordered)}] {game.name} (failed: {exc})",
                     end="",
                     flush=True,
                 )
-            # Rate-limit: ~1 request per 300ms to avoid Steam API throttling
-            if gi < len(app_ids_sorted) - 1:
+            if gi < len(ordered) - 1 and game.source == "steam":
                 time.sleep(0.3)
+        print()
 
+        # ── Per-game summary ──────────────────────────────────────────────
         print("\n--- Per-game summary ---")
-        for app_id in sorted(all_games.keys(), key=lambda x: int(x)):
-            game = all_games[app_id]
-            label = game.name or f"App {app_id}"
-            print(f"  {label:>40s}    {game.new_count} new / {game.total_count} total")
+        for game in ordered:
+            tag = "Steam" if game.source == "steam" else "SpecialK"
+            label = game.name or game.folder_name or game.app_id
+            print(
+                f"  [{tag:>9s}] {label:>40s}    "
+                f"{game.new_count} new / {game.total_count} total"
+            )
 
         total_new = sum(g.new_count for g in all_games.values())
         print(f"\nTotal new: {total_new}")
@@ -510,32 +723,37 @@ def run_cli(args: argparse.Namespace) -> None:
             print("Everything is already synced.")
             return
 
-        # Upload new screenshots
+        # ── Upload ────────────────────────────────────────────────────────
         uploaded = 0
         failed = 0
-        for app_id, game in all_games.items():
+        for game in ordered:
             new_shots = [
                 ss for ss in game.screenshots if ss.sha256 in game.new_hashes
             ]
             if not new_shots:
                 continue
 
-            gv_game = gv_game_cache.get(app_id)
-            if not gv_game:
-                try:
-                    gv_game = client.get_or_create_game(app_id)
-                except Exception as exc:
-                    print(f"\n  ERROR: Could not create game for {app_id}: {exc}", file=sys.stderr)
-                    failed += len(new_shots)
-                    continue
+            try:
+                gv_game = _resolve_game_for_upload(
+                    client, game, gv_game_cache
+                )
+            except Exception as exc:
+                print(
+                    f"\n  ERROR: Could not resolve game {game.name or game.key}: {exc}",
+                    file=sys.stderr,
+                )
+                failed += len(new_shots)
+                continue
+
             gv_game_id = gv_game["id"]
-            game_name = gv_game.get("name", app_id)
+            game_name = gv_game.get("name", game.name)
 
             for ss in new_shots:
                 try:
-                    result = client.upload_screenshot(gv_game_id, ss.path, ss.filename)
-                    server_uploaded = result.get("uploaded", 0)
-                    if server_uploaded > 0:
+                    result = client.upload_screenshot(
+                        gv_game_id, ss.path, ss.filename
+                    )
+                    if result.get("uploaded", 0) > 0:
                         uploaded += 1
                         print(
                             f"\r  [{uploaded}/{total_new}] {game_name} — {ss.filename}",
@@ -543,10 +761,7 @@ def run_cli(args: argparse.Namespace) -> None:
                             flush=True,
                         )
                     else:
-                        # Server accepted the request but didn't save the file
-                        # (e.g. duplicate hash, invalid image, etc.)
                         failed += 1
-                        screenshots = result.get("screenshots", [])
                         print(
                             f"\n  SKIP: {ss.filename}: server returned uploaded=0 (response: {result})",
                             file=sys.stderr,
@@ -576,7 +791,7 @@ def run_gui() -> None:
 
     root = tk.Tk()
     root.title("GameVault Sync")
-    root.geometry("620x560")
+    root.geometry("680x620")
     root.resizable(True, True)
 
     # ---- Connection frame ----
@@ -585,20 +800,51 @@ def run_gui() -> None:
 
     ttk.Label(conn_frame, text="Server URL:").grid(row=0, column=0, sticky="w")
     server_var = tk.StringVar(value=cfg.get("server", ""))
-    ttk.Entry(conn_frame, textvariable=server_var, width=50).grid(
+    ttk.Entry(conn_frame, textvariable=server_var, width=55).grid(
         row=0, column=1, columnspan=2, sticky="ew", padx=(4, 0)
     )
 
     ttk.Label(conn_frame, text="Auth Token:").grid(row=1, column=0, sticky="w")
     token_var = tk.StringVar(value=cfg.get("token", ""))
-    ttk.Entry(conn_frame, textvariable=token_var, width=50, show="*").grid(
+    ttk.Entry(conn_frame, textvariable=token_var, width=55, show="*").grid(
         row=1, column=1, columnspan=2, sticky="ew", padx=(4, 0)
     )
 
-    ttk.Label(conn_frame, text="Steam Path:").grid(row=2, column=0, sticky="w")
+    conn_frame.columnconfigure(1, weight=1)
+
+    # ---- Sources frame ----
+    src_frame = ttk.LabelFrame(root, text="Sources", padding=8)
+    src_frame.pack(fill="x", padx=10, pady=(4, 4))
+
+    ttk.Label(src_frame, text="Mode:").grid(row=0, column=0, sticky="w")
+    _MODE_LABELS = {
+        "steam": "Steam Only",
+        "specialk": "Special K Only",
+        "both": "Steam + Special K",
+    }
+    _MODE_VALUES = list(_MODE_LABELS.values())
+    saved_mode = cfg.get("mode", "steam")
+    mode_var = tk.StringVar(value=_MODE_LABELS.get(saved_mode, _MODE_LABELS["steam"]))
+    mode_combo = ttk.Combobox(
+        src_frame,
+        textvariable=mode_var,
+        values=_MODE_VALUES,
+        state="readonly",
+        width=22,
+    )
+    mode_combo.grid(row=0, column=1, sticky="w", padx=(4, 0), pady=(0, 4))
+
+    def _selected_mode() -> str:
+        label = mode_var.get()
+        for k, v in _MODE_LABELS.items():
+            if v == label:
+                return k
+        return "steam"
+
+    ttk.Label(src_frame, text="Steam Path:").grid(row=1, column=0, sticky="w")
     steam_var = tk.StringVar(value=cfg.get("steam_path", ""))
-    ttk.Entry(conn_frame, textvariable=steam_var, width=42).grid(
-        row=2, column=1, sticky="ew", padx=(4, 0)
+    ttk.Entry(src_frame, textvariable=steam_var, width=42).grid(
+        row=1, column=1, sticky="ew", padx=(4, 0)
     )
 
     def browse_steam():
@@ -606,10 +852,46 @@ def run_gui() -> None:
         if d:
             steam_var.set(d)
 
-    ttk.Button(conn_frame, text="Browse", command=browse_steam).grid(
-        row=2, column=2, padx=(4, 0)
+    ttk.Button(src_frame, text="Browse", command=browse_steam).grid(
+        row=1, column=2, padx=(4, 0)
     )
-    conn_frame.columnconfigure(1, weight=1)
+
+    ttk.Label(src_frame, text="Special K Path:").grid(row=2, column=0, sticky="w")
+    sk_var = tk.StringVar(value=cfg.get("specialk_path", ""))
+    ttk.Entry(src_frame, textvariable=sk_var, width=42).grid(
+        row=2, column=1, sticky="ew", padx=(4, 0), pady=(4, 0)
+    )
+
+    def browse_sk():
+        d = filedialog.askdirectory(title="Select Special K screenshots root")
+        if d:
+            sk_var.set(d)
+
+    ttk.Button(src_frame, text="Browse", command=browse_sk).grid(
+        row=2, column=2, padx=(4, 0), pady=(4, 0)
+    )
+
+    src_frame.columnconfigure(1, weight=1)
+
+    # Enable/disable path fields based on mode
+    def _refresh_path_state(*_args) -> None:
+        mode = _selected_mode()
+        steam_state = "normal" if mode in ("steam", "both") else "disabled"
+        sk_state = "normal" if mode in ("specialk", "both") else "disabled"
+        # Toggle the entry widgets (column 1) and browse buttons (column 2)
+        for child in src_frame.grid_slaves(row=1):
+            try:
+                child.configure(state=steam_state)
+            except tk.TclError:
+                pass
+        for child in src_frame.grid_slaves(row=2):
+            try:
+                child.configure(state=sk_state)
+            except tk.TclError:
+                pass
+
+    mode_combo.bind("<<ComboboxSelected>>", _refresh_path_state)
+    _refresh_path_state()
 
     # ---- Scan button ----
     scan_btn = ttk.Button(root, text="Scan")
@@ -654,7 +936,9 @@ def run_gui() -> None:
     )
 
     # State
-    game_checks: list[tuple[tk.BooleanVar, str]] = []  # (checked, app_id)
+    # game_checks pairs each checkbox variable with the GameScanResult.key
+    # so we can look up the underlying game in ``all_games`` after the scan.
+    game_checks: list[tuple[tk.BooleanVar, str]] = []
     all_games: dict[str, GameScanResult] = {}
 
     def clear_inner():
@@ -664,24 +948,9 @@ def run_gui() -> None:
 
     # ---- Scan logic (background thread) ----
     def do_scan():
-        # Save config
-        cfg_out = {
-            "server": server_var.get().strip(),
-            "token": token_var.get().strip(),
-            "steam_path": steam_var.get().strip(),
-        }
-        save_config(cfg_out)
-
-        steam_path_str = steam_var.get().strip()
-        if steam_path_str:
-            sp = Path(steam_path_str)
-        else:
-            sp = find_steam_path()
-            if sp:
-                steam_var.set(str(sp))
-            else:
-                messagebox.showerror("Error", "Could not detect Steam path.")
-                return
+        mode = _selected_mode()
+        do_steam = mode in ("steam", "both")
+        do_specialk = mode in ("specialk", "both")
 
         server = server_var.get().strip()
         token = token_var.get().strip()
@@ -690,6 +959,51 @@ def run_gui() -> None:
                 "Error", "Server URL and Auth Token are required."
             )
             return
+
+        steam_path_str = steam_var.get().strip()
+        sk_path_str = sk_var.get().strip()
+
+        # Resolve / validate paths up front
+        sp: Optional[Path] = None
+        if do_steam:
+            if steam_path_str:
+                sp = Path(steam_path_str)
+            else:
+                sp = find_steam_path()
+                if sp:
+                    steam_var.set(str(sp))
+                else:
+                    messagebox.showerror(
+                        "Error",
+                        "Could not detect Steam path. Browse to it or "
+                        "switch the mode to Special K Only.",
+                    )
+                    return
+
+        sk: Optional[Path] = None
+        if do_specialk:
+            if not sk_path_str:
+                messagebox.showerror(
+                    "Error",
+                    "Special K Path is required when scanning Special K.",
+                )
+                return
+            sk = Path(sk_path_str)
+            if not sk.is_dir():
+                messagebox.showerror(
+                    "Error",
+                    f"Special K Path is not a directory:\n{sk}",
+                )
+                return
+
+        # Save config (including the new fields)
+        save_config({
+            "server": server,
+            "token": token,
+            "steam_path": steam_path_str,
+            "specialk_path": sk_path_str,
+            "mode": mode,
+        })
 
         scan_btn.configure(state="disabled")
         sync_btn.configure(state="disabled")
@@ -700,28 +1014,30 @@ def run_gui() -> None:
 
         def background():
             try:
-                user_ids = find_user_ids(sp)
-                if not user_ids:
-                    root.after(
-                        0,
-                        lambda: messagebox.showerror(
-                            "Error", "No Steam user IDs found."
-                        ),
-                    )
-                    return
+                if do_steam and sp is not None:
+                    user_ids = find_user_ids(sp)
+                    if not user_ids and not do_specialk:
+                        root.after(
+                            0,
+                            lambda: messagebox.showerror(
+                                "Error", "No Steam user IDs found."
+                            ),
+                        )
+                        return
+                    _scan_steam_into(sp, all_games)
 
-                for uid in user_ids:
-                    games = scan_local_screenshots(sp, uid)
-                    for app_id, game in games.items():
-                        if app_id in all_games:
-                            all_games[app_id].screenshots.extend(game.screenshots)
-                        else:
-                            all_games[app_id] = game
+                if do_specialk and sk is not None:
+                    _scan_specialk_into(sk, all_games)
 
-                all_ss = [ss for g in all_games.values() for ss in g.screenshots]
+                all_ss = [
+                    ss for g in all_games.values() for ss in g.screenshots
+                ]
                 total_ss = len(all_ss)
                 root.after(
-                    0, lambda: status_var.set(f"Hashing {total_ss} screenshots...")
+                    0,
+                    lambda: status_var.set(
+                        f"Hashing {total_ss} screenshots..."
+                    ),
                 )
 
                 if total_ss == 0:
@@ -730,17 +1046,19 @@ def run_gui() -> None:
                     )
                     return
 
-                # Hash (0-50% of progress bar)
+                # Hash (0-50%)
                 def hash_progress(cur, tot):
                     pct = cur / tot * 50
                     root.after(0, lambda p=pct: progress_var.set(p))
 
                 compute_hashes(all_ss, hash_progress)
 
-                # Check hashes against server (50-80%)
+                # Check hashes (50-80%)
                 root.after(
                     0,
-                    lambda: status_var.set("Checking hashes against server..."),
+                    lambda: status_var.set(
+                        "Checking hashes against server..."
+                    ),
                 )
                 client = GameVaultClient(server, token)
                 try:
@@ -759,34 +1077,39 @@ def run_gui() -> None:
                         pct = 50 + (ci + 1) / num_chunks * 30
                         root.after(0, lambda p=pct: progress_var.set(p))
 
-                    # Resolve game names from server (80-100%)
-                    # Rate-limit: Steam Store API throttles rapid requests
+                    # Resolve game names (80-100%) — Steam goes via Steam
+                    # Store API server-side, so rate-limit. Special K hits
+                    # only the local DB.
                     root.after(
-                        0,
-                        lambda: status_var.set("Resolving game names..."),
+                        0, lambda: status_var.set("Resolving game names...")
                     )
-                    app_ids = sorted(all_games.keys(), key=lambda x: int(x))
-                    for gi, app_id in enumerate(app_ids):
+                    ordered = _sort_games(all_games)
+                    cache: dict[str, dict] = {}
+                    for gi, game in enumerate(ordered):
                         try:
-                            gv_game = client.get_or_create_game(app_id)
-                            resolved_name = gv_game.get("name", f"App {app_id}")
-                            all_games[app_id].name = resolved_name
+                            gv_game = _resolve_game_for_upload(
+                                client, game, cache
+                            )
+                            game.name = gv_game.get("name") or game.name
                         except Exception:
-                            all_games[app_id].name = f"App {app_id}"
-                        pct = 80 + (gi + 1) / len(app_ids) * 20
-                        _name = all_games[app_id].name
+                            if not game.name:
+                                game.name = (
+                                    f"App {game.app_id}"
+                                    if game.source == "steam"
+                                    else game.folder_name
+                                )
+                        pct = 80 + (gi + 1) / max(1, len(ordered)) * 20
+                        _name = game.name
                         root.after(
                             0,
-                            lambda p=pct, n=_name, c=gi + 1, t=len(app_ids): (
+                            lambda p=pct, n=_name, c=gi + 1, t=len(ordered): (
                                 progress_var.set(p),
                                 status_var.set(
                                     f"Resolving names... {c}/{t} — {n}"
                                 ),
                             ),
                         )
-                        # Rate-limit: ~300ms between requests
-                        if gi < len(app_ids) - 1:
-                            import time
+                        if gi < len(ordered) - 1 and game.source == "steam":
                             time.sleep(0.3)
                 finally:
                     client.close()
@@ -795,18 +1118,15 @@ def run_gui() -> None:
                     game_hashes = {ss.sha256 for ss in game.screenshots}
                     game.new_hashes = game_hashes - existing
 
-                # Populate checkbox list on the main thread
                 def populate():
                     clear_inner()
-                    for app_id in sorted(
-                        all_games.keys(), key=lambda x: int(x)
-                    ):
-                        game = all_games[app_id]
+                    for game in _sort_games(all_games):
                         var = tk.BooleanVar(value=game.new_count > 0)
-                        game_checks.append((var, app_id))
-                        display_name = game.name or f"App {app_id}"
+                        game_checks.append((var, game.key))
+                        tag = "Steam" if game.source == "steam" else "SpecialK"
+                        display_name = game.name or game.folder_name or game.app_id
                         label = (
-                            f"{display_name}    "
+                            f"[{tag}] {display_name}    "
                             f"{game.new_count} new / {game.total_count} total"
                         )
                         cb = ttk.Checkbutton(
@@ -842,8 +1162,8 @@ def run_gui() -> None:
 
     # ---- Select / Deselect helpers ----
     def do_select_all_new():
-        for var, app_id in game_checks:
-            game = all_games.get(app_id)
+        for var, key in game_checks:
+            game = all_games.get(key)
             if game and game.new_count > 0:
                 var.set(True)
 
@@ -861,20 +1181,20 @@ def run_gui() -> None:
             )
             return
 
-        selected_ids = [app_id for var, app_id in game_checks if var.get()]
-        if not selected_ids:
+        selected_keys = [key for var, key in game_checks if var.get()]
+        if not selected_keys:
             messagebox.showinfo("Info", "No games selected.")
             return
 
         # Gather new screenshots for selected games
         to_upload: list[tuple[str, LocalScreenshot]] = []
-        for app_id in selected_ids:
-            game = all_games.get(app_id)
+        for key in selected_keys:
+            game = all_games.get(key)
             if not game:
                 continue
             for ss in game.screenshots:
                 if ss.sha256 in game.new_hashes:
-                    to_upload.append((app_id, ss))
+                    to_upload.append((key, ss))
 
         if not to_upload:
             messagebox.showinfo("Info", "No new screenshots to upload.")
@@ -890,27 +1210,35 @@ def run_gui() -> None:
             failed = 0
             client = GameVaultClient(server, token)
             try:
-                gv_game_cache: dict[str, int] = {}
+                gv_game_cache: dict[str, dict] = {}
                 total = len(to_upload)
 
                 last_error = ""
-                for i, (app_id, ss) in enumerate(to_upload):
+                for i, (key, ss) in enumerate(to_upload):
                     try:
-                        if app_id not in gv_game_cache:
-                            gv_game = client.get_or_create_game(app_id)
-                            gv_game_cache[app_id] = gv_game["id"]
-                        gv_id = gv_game_cache[app_id]
-                        result = client.upload_screenshot(gv_id, ss.path, ss.filename)
+                        game = all_games[key]
+                        gv_game = _resolve_game_for_upload(
+                            client, game, gv_game_cache
+                        )
+                        result = client.upload_screenshot(
+                            gv_game["id"], ss.path, ss.filename
+                        )
                         if result.get("uploaded", 0) > 0:
                             uploaded += 1
                         else:
                             failed += 1
                             last_error = f"Server skipped: {result}"
-                            print(f"Server skipped ({ss.filename}): {result}", file=sys.stderr)
+                            print(
+                                f"Server skipped ({ss.filename}): {result}",
+                                file=sys.stderr,
+                            )
                     except Exception as exc:
                         failed += 1
                         last_error = str(exc)
-                        print(f"Upload error ({ss.filename}): {exc}", file=sys.stderr)
+                        print(
+                            f"Upload error ({ss.filename}): {exc}",
+                            file=sys.stderr,
+                        )
 
                     pct = (i + 1) / total * 100
                     _uploaded = uploaded
@@ -974,7 +1302,7 @@ def run_gui() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "GameVault Sync -- sync local Steam screenshots "
+            "GameVault Sync -- sync local Steam and Special K screenshots "
             "to a GameVault server."
         )
     )
@@ -996,10 +1324,30 @@ def main() -> None:
         help="Auth token / JWT for the GameVault API (required for --no-gui).",
     )
     parser.add_argument(
+        "--mode",
+        type=str,
+        choices=("steam", "specialk", "both"),
+        default="steam",
+        help=(
+            "Which sources to sync: steam (default), specialk, or both. "
+            "specialk requires --specialk-path."
+        ),
+    )
+    parser.add_argument(
         "--steam-path",
         type=str,
         default=None,
-        help="Path to Steam installation directory.",
+        help="Path to Steam installation directory (auto-detected if omitted).",
+    )
+    parser.add_argument(
+        "--specialk-path",
+        type=str,
+        default=None,
+        help=(
+            "Root of the Special K screenshots tree — each top-level "
+            "subfolder is treated as a game. Required when --mode is "
+            "specialk or both."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -1012,6 +1360,10 @@ def main() -> None:
     if args.no_gui:
         if not args.server or not args.token:
             parser.error("--server and --token are required with --no-gui")
+        if args.mode in ("specialk", "both") and not args.specialk_path:
+            parser.error(
+                "--specialk-path is required when --mode is specialk or both"
+            )
         run_cli(args)
     else:
         run_gui()

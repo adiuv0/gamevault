@@ -20,9 +20,15 @@ import {
   Check,
   Monitor,
 } from 'lucide-react';
-import { getSettings, changePassword, saveApiKey, deleteApiKey } from '@/api/settings';
-import type { AppSettings } from '@/api/settings';
-import { Save, Trash2 } from 'lucide-react';
+import {
+  getSettings,
+  changePassword,
+  saveApiKey,
+  deleteApiKey,
+  savePreferences,
+} from '@/api/settings';
+import type { AppSettings, ToneMapAlgorithm } from '@/api/settings';
+import { Save, Trash2, Sparkles } from 'lucide-react';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 
 export function SettingsPage() {
@@ -197,6 +203,9 @@ export function SettingsPage() {
           </div>
         </section>
 
+        {/* Special K + HDR */}
+        <SpecialKSection settings={settings} onSaved={loadSettings} />
+
         {/* Sync Token */}
         <SyncTokenSection />
 
@@ -368,6 +377,133 @@ function ConfigRow({
       <span className="text-text-secondary">{label}</span>
       <span className={`font-mono text-xs ${valueColor}`}>{value}</span>
     </div>
+  );
+}
+
+function SpecialKSection({
+  settings,
+  onSaved,
+}: {
+  settings: AppSettings;
+  onSaved: () => void;
+}) {
+  const [path, setPath] = useState(settings.specialk_path);
+  const [algorithm, setAlgorithm] = useState<ToneMapAlgorithm>(settings.tone_map_algorithm);
+  const [exposure, setExposure] = useState(settings.tone_map_exposure);
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const dirty =
+    path !== settings.specialk_path
+    || algorithm !== settings.tone_map_algorithm
+    || Math.abs(exposure - settings.tone_map_exposure) > 0.001;
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      setResult(null);
+      await savePreferences({
+        specialk_path: path,
+        tone_map_algorithm: algorithm,
+        tone_map_exposure: exposure,
+      });
+      setResult({ ok: true, message: 'Saved' });
+      onSaved();
+    } catch (err) {
+      setResult({
+        ok: false,
+        message: err instanceof Error ? err.message : 'Failed to save',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="bg-bg-secondary border border-border rounded-lg p-6">
+      <div className="flex items-center gap-2 mb-4">
+        <Sparkles className="h-5 w-5 text-accent-primary" />
+        <h2 className="text-lg font-medium text-text-primary">Special K & HDR</h2>
+      </div>
+      <p className="text-sm text-text-secondary mb-4">
+        Configure the path Special K writes screenshots to, and how HDR captures
+        (.jxr / 16-bit .png) are tone-mapped to SDR for the gallery view. The
+        original file is always preserved on disk for download.
+      </p>
+
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-text-secondary mb-1">
+            Screenshots root path
+          </label>
+          <input
+            type="text"
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            placeholder="e.g. C:\Users\You\Documents\My Mods\SpecialK\Profiles"
+            className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-accent-primary font-mono"
+          />
+          <p className="text-xs text-text-muted mt-1">
+            Top-level subfolders are treated as games. Used as the default in the
+            Special K Import page.
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-text-secondary mb-1">
+            HDR tone-map algorithm
+          </label>
+          <select
+            value={algorithm}
+            onChange={(e) => setAlgorithm(e.target.value as ToneMapAlgorithm)}
+            className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-sm text-text-primary focus:outline-none focus:border-accent-primary"
+          >
+            <option value="reinhard">Reinhard (soft rolloff, default)</option>
+            <option value="aces">ACES filmic (cinematic)</option>
+            <option value="clip">Hard clip (fastest, blows highlights)</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="flex items-center justify-between text-sm font-medium text-text-secondary mb-1">
+            <span>Tone-map exposure</span>
+            <span className="font-mono text-text-primary">{exposure.toFixed(2)}</span>
+          </label>
+          <input
+            type="range"
+            min={0.1}
+            max={4}
+            step={0.05}
+            value={exposure}
+            onChange={(e) => setExposure(parseFloat(e.target.value))}
+            className="w-full"
+          />
+          <p className="text-xs text-text-muted mt-1">
+            Lower values darken the SDR result, higher values brighten it. 1.0 is neutral.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleSave}
+            disabled={saving || !dirty}
+            className="flex items-center gap-2 px-3 py-1.5 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save
+          </button>
+          {result && (
+            <span
+              className={`text-xs ${
+                result.ok ? 'text-accent-success' : 'text-accent-danger'
+              }`}
+            >
+              {result.message}
+            </span>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 

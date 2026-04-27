@@ -6,6 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+# Some MIME types Python's mimetypes module doesn't know natively.
+_EXTRA_MIME_TYPES = {
+    ".jxr": "image/vnd.ms-photo",
+    ".wdp": "image/vnd.ms-photo",
+}
+
 from backend.auth import require_auth
 from backend.config import settings
 from backend.models.annotation import AnnotationCreate
@@ -72,7 +78,12 @@ async def get_image(screenshot_id: int):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image file not found")
 
-    media_type = mimetypes.guess_type(str(file_path))[0] or "image/jpeg"
+    suffix = file_path.suffix.lower()
+    media_type = (
+        _EXTRA_MIME_TYPES.get(suffix)
+        or mimetypes.guess_type(str(file_path))[0]
+        or "image/jpeg"
+    )
     return FileResponse(
         file_path,
         media_type=media_type,

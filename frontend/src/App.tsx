@@ -8,6 +8,7 @@ import { GamePage } from '@/pages/GamePage';
 import { TimelinePage } from '@/pages/TimelinePage';
 import { UploadPage } from '@/pages/UploadPage';
 import { SteamImportPage } from '@/pages/SteamImportPage';
+import { SpecialKImportPage } from '@/pages/SpecialKImportPage';
 import { SearchPage } from '@/pages/SearchPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { GalleryHomePage } from '@/pages/gallery/GalleryHomePage';
@@ -46,6 +47,7 @@ function App() {
             <Route path="/timeline" element={<TimelinePage />} />
             <Route path="/upload" element={<UploadPage />} />
             <Route path="/import/steam" element={<SteamImportPage />} />
+            <Route path="/import/specialk" element={<SpecialKImportPage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>

@@ -1,7 +1,14 @@
-"""Image processing: thumbnails, EXIF extraction, hashing."""
+"""Image processing: thumbnails, EXIF extraction, hashing.
 
+HDR-aware: JPEG XR (.jxr) and 16-bit-per-channel PNGs are detected and
+routed through ``hdr_processor`` for tone-mapped SDR thumbnails. The
+original file is always preserved on disk for download.
+"""
+
+import asyncio
 import hashlib
 import json
+import logging
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -9,6 +16,9 @@ from pathlib import Path
 from PIL import Image, ExifTags
 
 from backend.config import settings
+from backend.services import hdr_processor
+
+logger = logging.getLogger(__name__)
 
 
 # Map EXIF tag IDs to names — compatible with Pillow 10+ (Base) and older (TAGS)
@@ -33,7 +43,9 @@ def compute_sha256_bytes(data: bytes) -> str:
 
 
 def get_image_dimensions(file_path: Path) -> tuple[int, int] | None:
-    """Get image width and height."""
+    """Get image width and height. Handles JXR via hdr_processor."""
+    if hdr_processor.is_jxr(file_path):
+        return hdr_processor.get_hdr_dimensions(file_path)
     try:
         with Image.open(file_path) as img:
             return img.size  # (width, height)
@@ -42,7 +54,12 @@ def get_image_dimensions(file_path: Path) -> tuple[int, int] | None:
 
 
 def get_image_format(file_path: Path) -> str | None:
-    """Detect actual image format from file content."""
+    """Detect actual image format from file content.
+
+    Pillow can't open JXR — we detect it by magic bytes and return ``"jxr"``.
+    """
+    if hdr_processor.is_jxr(file_path):
+        return "jxr"
     try:
         with Image.open(file_path) as img:
             return img.format.lower() if img.format else None
@@ -53,8 +70,13 @@ def get_image_format(file_path: Path) -> str | None:
 def extract_exif(file_path: Path) -> dict:
     """Extract EXIF metadata from an image file.
 
-    Returns a dict with human-readable keys and string values.
+    Returns a dict with human-readable keys and string values. JXR files
+    return an empty dict — Pillow can't read their IFD metadata and
+    imagecodecs doesn't expose it.
     """
+    if hdr_processor.is_jxr(file_path):
+        return {}
+
     result = {}
     try:
         with Image.open(file_path) as img:
@@ -87,7 +109,10 @@ def extract_date_taken(file_path: Path) -> datetime | None:
     """Try to extract the date a photo was taken from EXIF data.
 
     Checks DateTimeOriginal, DateTimeDigitized, then DateTime.
+    Returns None for JXR (no EXIF accessible).
     """
+    if hdr_processor.is_jxr(file_path):
+        return None
     try:
         with Image.open(file_path) as img:
             exif_data = img.getexif()
@@ -113,6 +138,71 @@ def extract_date_taken(file_path: Path) -> datetime | None:
     return None
 
 
+# ── Tone-map settings lookup ─────────────────────────────────────────────────
+
+
+def _get_tone_map_settings() -> tuple[str, float]:
+    """Get the user-configured tone-map algorithm and exposure.
+
+    Reads from the ``app_settings`` DB table; falls back to safe defaults.
+    Synchronous — used inside the (synchronous) Pillow pipeline. We open
+    a fresh sqlite connection rather than block on the async pool.
+    """
+    import sqlite3
+
+    algorithm = "reinhard"
+    exposure = 1.0
+    try:
+        conn = sqlite3.connect(str(settings.db_path))
+        try:
+            cur = conn.execute(
+                "SELECT key, value FROM app_settings "
+                "WHERE key IN ('tone_map_algorithm', 'tone_map_exposure')"
+            )
+            for key, value in cur.fetchall():
+                if key == "tone_map_algorithm" and value in ("reinhard", "aces", "clip"):
+                    algorithm = value
+                elif key == "tone_map_exposure":
+                    try:
+                        exposure = max(0.05, min(8.0, float(value)))
+                    except (TypeError, ValueError):
+                        pass
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+    return algorithm, exposure
+
+
+# ── Thumbnail generation ─────────────────────────────────────────────────────
+
+
+def _open_for_thumbnail(source_path: Path) -> Image.Image | None:
+    """Open an image as an SDR Pillow RGB image, tone-mapping HDR sources."""
+    if hdr_processor.is_hdr_source(source_path):
+        algo, exposure = _get_tone_map_settings()
+        try:
+            return hdr_processor.render_sdr_pil(source_path, algorithm=algo, exposure=exposure)
+        except Exception as e:
+            logger.warning("HDR decode failed for %s: %s", source_path, e)
+            # Fall through to Pillow — it'll fail on JXR but may handle 16-bit PNG
+            try:
+                with Image.open(source_path) as img:
+                    return img.convert("RGB")
+            except Exception:
+                return None
+
+    try:
+        with Image.open(source_path) as img:
+            if img.mode in ("RGBA", "P", "LA"):
+                return img.convert("RGB")
+            if img.mode != "RGB":
+                return img.convert("RGB")
+            return img.copy()
+    except Exception:
+        return None
+
+
 def generate_thumbnail(
     source_path: Path,
     dest_path: Path,
@@ -120,6 +210,9 @@ def generate_thumbnail(
     quality: int | None = None,
 ) -> bool:
     """Generate a thumbnail with the specified max width, preserving aspect ratio.
+
+    Routes JXR / 16-bit PNG sources through the HDR tone-mapping pipeline so
+    the resulting JPEG is viewable on standard displays.
 
     Returns True on success, False on failure.
     """
@@ -129,27 +222,27 @@ def generate_thumbnail(
     try:
         dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with Image.open(source_path) as img:
-            # Convert to RGB if necessary (e.g., RGBA PNGs, palette images)
-            if img.mode in ("RGBA", "P", "LA"):
-                img = img.convert("RGB")
+        img = _open_for_thumbnail(source_path)
+        if img is None:
+            return False
 
-            # Calculate proportional height
-            width, height = img.size
-            if width <= max_width:
-                # Image is smaller than target, just save as-is
-                ratio = 1.0
-            else:
-                ratio = max_width / width
+        # Calculate proportional height
+        width, height = img.size
+        if width <= max_width:
+            ratio = 1.0
+        else:
+            ratio = max_width / width
 
-            new_width = int(width * ratio)
-            new_height = int(height * ratio)
+        new_width = int(width * ratio)
+        new_height = int(height * ratio)
 
-            # Use high-quality downsampling
-            resized = img.resize((new_width, new_height), Image.LANCZOS)
-            resized.save(dest_path, "JPEG", quality=quality, optimize=True)
-            return True
-    except Exception:
+        if ratio < 1.0:
+            img = img.resize((new_width, new_height), Image.LANCZOS)
+
+        img.save(dest_path, "JPEG", quality=quality, optimize=True)
+        return True
+    except Exception as e:
+        logger.warning("Thumbnail generation failed for %s: %s", source_path, e)
         return False
 
 
@@ -183,7 +276,13 @@ def generate_thumbnails(
 
 
 def validate_image(file_path: Path) -> bool:
-    """Validate that a file is a supported image by opening it with Pillow."""
+    """Validate that a file is a supported image (including JXR via hdr_processor)."""
+    if hdr_processor.is_jxr(file_path):
+        try:
+            hdr_processor.decode_jxr(file_path)
+            return True
+        except Exception:
+            return False
     try:
         with Image.open(file_path) as img:
             img.verify()
