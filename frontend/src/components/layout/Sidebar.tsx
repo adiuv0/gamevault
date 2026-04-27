@@ -6,6 +6,7 @@ import {
   Download,
   Search,
   Settings,
+  Sparkles,
 } from 'lucide-react';
 
 const navItems = [
@@ -13,6 +14,7 @@ const navItems = [
   { path: '/timeline', label: 'Timeline', icon: Clock },
   { path: '/upload', label: 'Upload', icon: Upload },
   { path: '/import/steam', label: 'Steam Import', icon: Download },
+  { path: '/import/specialk', label: 'Special K Import', icon: Sparkles },
   { path: '/search', label: 'Search', icon: Search },
   { path: '/settings', label: 'Settings', icon: Settings },
 ];

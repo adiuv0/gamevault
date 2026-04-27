@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from backend.auth import require_auth
 from backend.config import settings
@@ -51,6 +52,26 @@ async def cleanup_empty_games():
             deleted.append(game.get("name", f"Game {game['id']}"))
 
     return {"deleted_count": len(deleted), "deleted_games": deleted}
+
+
+class GameByNameRequest(BaseModel):
+    name: str
+
+
+@router.post("/by-name")
+async def get_or_create_by_name(req: GameByNameRequest):
+    """Get or create a game by display name.
+
+    Used by the GameVault Sync CLI for Special K imports — the local folder
+    name (cleaned client-side) becomes the canonical game name. If a game
+    with that name already exists (e.g. from a Steam import), it's returned
+    as-is so the two sources merge into one library entry.
+    """
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+    game = await game_service.get_or_create_game(name=name)
+    return game
 
 
 @router.get("/by-steam-appid/{app_id}")

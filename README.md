@@ -186,6 +186,16 @@ python tests/test_phase4_steam_import.py   # 66 tests — Steam import pipeline
 python tests/test_phase5_metadata_timeline.py  # 52 tests — metadata & timeline
 ```
 
+## Documentation
+
+Reference docs live in [docs/](docs/README.md):
+
+- [User Guide](docs/USER_GUIDE.md) — every feature walked through end-to-end
+- [Configuration](docs/CONFIGURATION.md) — env vars, DB-stored preferences, backups
+- [API Reference](docs/API_REFERENCE.md) — every REST endpoint
+- [Architecture](docs/ARCHITECTURE.md) — how the code is organized
+- [Releasing](docs/RELEASING.md) — version bump, Docker Hub push cheat sheet
+
 ## License
 
 MIT

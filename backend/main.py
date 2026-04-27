@@ -58,6 +58,7 @@ from backend.routers import (
     search,
     settings as settings_router,
     share,
+    specialk_import,
     steam_import,
     timeline,
     upload,
@@ -111,6 +112,7 @@ app.include_router(games.router)
 app.include_router(screenshots.router)
 app.include_router(upload.router)
 app.include_router(steam_import.router)
+app.include_router(specialk_import.router)
 app.include_router(timeline.router)
 app.include_router(search.router)
 app.include_router(share.router)

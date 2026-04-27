@@ -39,6 +39,7 @@ ALLOWED_IMAGE_FORMATS: dict[str, str] = {
     "bmp": ".bmp",
     "tiff": ".tiff",
     "gif": ".gif",
+    "jxr": ".jxr",
 }
 
 
