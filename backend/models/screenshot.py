@@ -1,6 +1,6 @@
 """Pydantic models for screenshots."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ScreenshotResponse(BaseModel):
@@ -38,3 +38,34 @@ class ScreenshotListResponse(BaseModel):
 class ScreenshotUpdate(BaseModel):
     taken_at: str | None = None
     is_favorite: bool | None = None
+
+
+# ── Public-gallery response shapes ────────────────────────────────────────────
+# These project away internal fields (file_path, sha256_hash, exif_data,
+# steam_screenshot_id, source, ...) so the unauthenticated /api/gallery
+# endpoints don't leak them. Use as ``response_model=`` on those routes;
+# FastAPI then drops anything not declared here when serializing.
+
+
+class PublicScreenshot(BaseModel):
+    """Slim screenshot view for unauthenticated /api/gallery responses."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    game_id: int
+    filename: str
+    thumbnail_path_sm: str | None = None
+    thumbnail_path_md: str | None = None
+    width: int | None = None
+    height: int | None = None
+    taken_at: str | None = None
+    uploaded_at: str
+
+
+class PublicScreenshotListResponse(BaseModel):
+    screenshots: list[PublicScreenshot]
+    total: int
+    page: int
+    limit: int
+    has_more: bool

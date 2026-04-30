@@ -1,4 +1,13 @@
-"""Public read-only gallery routes (no authentication required)."""
+"""Public read-only gallery routes (no authentication required).
+
+Response shapes for these routes are *intentionally slimmer* than the
+admin endpoints (see ``models/screenshot.py:PublicScreenshot`` and
+``models/game.py:PublicGame``). The unauthenticated public must not see
+internal fields like ``file_path``, ``sha256_hash``, ``exif_data``,
+``steam_screenshot_id``, or ``source`` — that's GV-002 from the audit.
+FastAPI's ``response_model`` enforces this by dropping any field not
+declared on the model when serializing.
+"""
 
 import mimetypes
 
@@ -7,7 +16,10 @@ from fastapi.responses import FileResponse
 
 from backend.config import settings
 from backend.database import get_db
+from backend.models.game import PublicGame, PublicGameListResponse
+from backend.models.screenshot import PublicScreenshot, PublicScreenshotListResponse
 from backend.services import game_service
+from backend.services.filesystem import safe_library_path
 from backend.services.screenshot_service import list_screenshots
 
 router = APIRouter(prefix="/api/gallery", tags=["gallery"])
@@ -44,27 +56,27 @@ async def _get_public_screenshot(screenshot_id: int) -> dict:
 # ── Game endpoints ──────────────────────────────────────────────────────────
 
 
-@router.get("/games")
+@router.get("/games", response_model=PublicGameListResponse)
 async def gallery_list_games(sort: str = "name"):
-    """List all public games."""
+    """List all public games with slim response."""
     games = await game_service.list_public_games(sort=sort)
     return {"games": games, "total": len(games)}
 
 
-@router.get("/games/{game_id}")
+@router.get("/games/{game_id}", response_model=PublicGame)
 async def gallery_get_game(game_id: int):
-    """Get a public game's details."""
+    """Get a public game's details (slim shape)."""
     return await _get_public_game(game_id)
 
 
-@router.get("/games/{game_id}/screenshots")
+@router.get("/games/{game_id}/screenshots", response_model=PublicScreenshotListResponse)
 async def gallery_game_screenshots(
     game_id: int,
     page: int = 1,
     limit: int = 50,
     sort: str = "date_desc",
 ):
-    """List screenshots for a public game."""
+    """List screenshots for a public game with slim response shape."""
     await _get_public_game(game_id)
     screenshots, total = await list_screenshots(game_id, page, limit, sort)
     return {
@@ -84,7 +96,7 @@ async def gallery_cover(game_id: int):
     if not game.get("cover_image_path"):
         raise HTTPException(status_code=404, detail="No cover image")
 
-    cover_path = settings.library_dir / game["cover_image_path"]
+    cover_path = safe_library_path(game["cover_image_path"])
     if not cover_path.exists():
         raise HTTPException(status_code=404, detail="Cover image file not found")
 
@@ -107,7 +119,7 @@ async def gallery_screenshot_image(screenshot_id: int):
     """Serve full-resolution image if its game is public."""
     screenshot = await _get_public_screenshot(screenshot_id)
 
-    file_path = settings.library_dir / screenshot["file_path"]
+    file_path = safe_library_path(screenshot.get("file_path"))
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image file not found")
 
@@ -132,9 +144,9 @@ async def gallery_screenshot_thumb(screenshot_id: int, size: str):
     screenshot = await _get_public_screenshot(screenshot_id)
 
     path_field = "thumbnail_path_sm" if size == "sm" else "thumbnail_path_md"
-    rel_path = screenshot.get(path_field) or screenshot["file_path"]
+    rel_path = screenshot.get(path_field) or screenshot.get("file_path")
 
-    full_path = settings.library_dir / rel_path
+    full_path = safe_library_path(rel_path)
     if not full_path.exists():
         raise HTTPException(status_code=404, detail="Thumbnail not found")
 

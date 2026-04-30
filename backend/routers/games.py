@@ -8,6 +8,7 @@ from backend.auth import require_auth
 from backend.config import settings
 from backend.models.game import GameCreate, GameUpdate, GameResponse, GameListResponse
 from backend.services import game_service
+from backend.services.filesystem import safe_library_path
 from backend.services.screenshot_service import list_screenshots
 
 router = APIRouter(prefix="/api/games", tags=["games"], dependencies=[Depends(require_auth)])
@@ -165,7 +166,7 @@ async def get_cover(game_id: int):
     if not game.get("cover_image_path"):
         raise HTTPException(status_code=404, detail="No cover image")
 
-    cover_path = settings.library_dir / game["cover_image_path"]
+    cover_path = safe_library_path(game["cover_image_path"])
     if not cover_path.exists():
         raise HTTPException(status_code=404, detail="Cover image file not found")
 

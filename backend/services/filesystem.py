@@ -3,6 +3,8 @@
 import re
 from pathlib import Path
 
+from fastapi import HTTPException
+
 from backend.config import settings
 
 # Characters invalid in Windows/Linux filenames
@@ -82,6 +84,31 @@ def ensure_game_directories(folder_name: str) -> None:
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
+
+
+def safe_library_path(rel_path: str | None) -> Path:
+    """Resolve a DB-stored relative path under ``library_dir``, rejecting any
+    that escape the library root.
+
+    Defense in depth against GV-008: if a row in ``screenshots`` ever holds
+    a poisoned path (absolute, or with traversal segments), the file-serve
+    and delete paths must not let it reach outside the library.
+
+    Raises HTTPException(404) on any unsafe path. The 404 (not 403) is
+    intentional — callers should treat unsafe rows the same as missing rows.
+    """
+    if not rel_path:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    library_root = settings.library_dir.resolve()
+    candidate = (library_root / rel_path).resolve()
+
+    try:
+        candidate.relative_to(library_root)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return candidate
 
 
 def get_library_size_bytes() -> int:

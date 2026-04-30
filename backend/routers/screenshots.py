@@ -16,6 +16,7 @@ from backend.auth import require_auth
 from backend.config import settings
 from backend.models.annotation import AnnotationCreate
 from backend.services import screenshot_service
+from backend.services.filesystem import safe_library_path
 
 
 class HashCheckRequest(BaseModel):
@@ -55,13 +56,20 @@ async def delete_screenshot(screenshot_id: int):
     if not screenshot:
         raise HTTPException(status_code=404, detail="Screenshot not found")
 
-    # Delete files from disk
+    # Delete files from disk — every path resolution goes through the
+    # library-containment check so a poisoned DB row can't reach outside.
     for path_field in ["file_path", "thumbnail_path_sm", "thumbnail_path_md"]:
         rel_path = screenshot.get(path_field)
-        if rel_path:
-            full_path = settings.library_dir / rel_path
-            if full_path.exists():
-                full_path.unlink()
+        if not rel_path:
+            continue
+        try:
+            full_path = safe_library_path(rel_path)
+        except HTTPException:
+            # Unsafe stored path — skip the unlink rather than fail the
+            # whole delete. The DB row will still be removed below.
+            continue
+        if full_path.exists():
+            full_path.unlink()
 
     await screenshot_service.delete_screenshot(screenshot_id)
     return {"message": "Screenshot deleted"}
@@ -74,7 +82,7 @@ async def get_image(screenshot_id: int):
     if not screenshot:
         raise HTTPException(status_code=404, detail="Screenshot not found")
 
-    file_path = settings.library_dir / screenshot["file_path"]
+    file_path = safe_library_path(screenshot.get("file_path"))
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image file not found")
 
@@ -108,9 +116,9 @@ async def get_thumbnail(screenshot_id: int, size: str):
     rel_path = screenshot.get(path_field)
 
     if not rel_path:
-        rel_path = screenshot["file_path"]
+        rel_path = screenshot.get("file_path")
 
-    full_path = settings.library_dir / rel_path
+    full_path = safe_library_path(rel_path)
     if not full_path.exists():
         raise HTTPException(status_code=404, detail="Thumbnail not found")
 

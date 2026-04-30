@@ -18,9 +18,85 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from backend.config import settings
 from backend.database import close_db, init_db
+
+
+# ── Per-context Content-Security-Policy strings ──────────────────────────────
+#
+# Three contexts:
+#
+#   1. Public share pages (/share/...) — minimal HTML, inline <style> in
+#      the template, no JS. Only same-origin images allowed (the share
+#      route now serves images directly).
+#   2. SPA + admin API responses — Vite-built bundle, Tailwind, React.
+#      Lucide icons render as inline SVG so no img/font fetches.
+#   3. Image/file responses (set explicitly elsewhere as ``default-src 'none'``)
+#      — left alone by the middleware.
+#
+# Inline ``<style>`` is kept allowed for both contexts because:
+#   - the share template ships inline CSS (acceptable single-file output)
+#   - some Tailwind + lucide combinations rely on tiny inline style attrs
+# Inline ``<script>`` is forbidden everywhere.
+
+_CSP_SHARE = (
+    "default-src 'self'; "
+    "img-src 'self' data:; "
+    "style-src 'self' 'unsafe-inline'; "
+    "script-src 'none'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+
+_CSP_SPA = (
+    "default-src 'self'; "
+    "img-src 'self' data: blob:; "
+    "style-src 'self' 'unsafe-inline'; "
+    "script-src 'self'; "
+    "connect-src 'self'; "
+    "font-src 'self' data:; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Apply standard security response headers across the whole app.
+
+    Closes GV-009 from the audit. Notes on the design:
+      * Headers are ``setdefault``-style — if a route already set its own
+        Content-Security-Policy (e.g. image responses use the strict
+        ``default-src 'none'``), we don't override it.
+      * CSP is route-aware: the public ``/share/`` pages get a stricter
+        policy than the SPA + admin pages.
+    """
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+
+        # Set if absent — never clobber stricter route-level headers.
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault(
+            "Referrer-Policy", "strict-origin-when-cross-origin"
+        )
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "camera=(), microphone=(), geolocation=()",
+        )
+
+        if "Content-Security-Policy" not in response.headers:
+            if path.startswith("/share/"):
+                response.headers["Content-Security-Policy"] = _CSP_SHARE
+            else:
+                response.headers["Content-Security-Policy"] = _CSP_SPA
+
+        return response
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +180,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Apply security headers to every response. Order matters: this runs
+# *outside* the CORS middleware, so headers we add are not consumed by
+# CORS preflight handling.
+app.add_middleware(SecurityHeadersMiddleware)
 
 # API routers
 app.include_router(auth.router)
