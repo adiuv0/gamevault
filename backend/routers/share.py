@@ -1,16 +1,25 @@
 """Share routes: create/manage share links (authenticated) + public view (unauthenticated)."""
 
+import mimetypes
+
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from backend.auth import require_auth
 from backend.config import settings
+from backend.services.filesystem import safe_library_path
 from backend.services.share_service import (
     create_share_link,
     get_active_share_link,
     deactivate_share_link,
     get_shared_screenshot_data,
 )
+
+# JXR isn't recognized by stdlib ``mimetypes`` — provide an explicit fallback.
+_EXTRA_MIME_TYPES = {
+    ".jxr": "image/vnd.ms-photo",
+    ".wdp": "image/vnd.ms-photo",
+}
 
 router = APIRouter(tags=["share"])
 
@@ -73,7 +82,12 @@ async def public_share_page(token: str):
     else:
         description = f"Screenshot from {game['name']}" if game else "Shared screenshot"
 
-    image_url = f"{settings.base_url}/api/screenshots/{screenshot['id']}/image"
+    # Image URL points at the token-bound /share/{token}/image route, NOT
+    # the auth-protected /api/screenshots/... endpoint. This is what makes
+    # OpenGraph crawlers (Discord, Slack, Twitter) able to fetch the image
+    # without needing a JWT, while still keeping the screenshot route
+    # gated for everything else.
+    image_url = f"{settings.base_url}/share/{token}/image"
     page_url = f"{settings.base_url}/share/{token}"
 
     return HTMLResponse(content=_render_share_page(
@@ -88,15 +102,41 @@ async def public_share_page(token: str):
 
 
 @router.get("/share/{token}/image")
-async def share_image_redirect(token: str):
-    """Redirect to the screenshot image (for OpenGraph crawlers)."""
+async def share_image(token: str):
+    """Serve the shared screenshot's full image bytes directly.
+
+    The token is the only auth signal — anyone with the token gets the
+    image. Importantly we do NOT redirect to the auth-protected
+    /api/screenshots/... route; that flow used to break OpenGraph crawlers
+    and tempted future "fixes" that would have made /api/screenshots
+    public.
+    """
     data = await get_shared_screenshot_data(token)
     if not data:
         raise HTTPException(status_code=404, detail="Share link not found")
 
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(
-        url=f"/api/screenshots/{data['screenshot']['id']}/image"
+    screenshot = data["screenshot"]
+    file_path = safe_library_path(screenshot.get("file_path"))
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Image file not found")
+
+    suffix = file_path.suffix.lower()
+    media_type = (
+        _EXTRA_MIME_TYPES.get(suffix)
+        or mimetypes.guess_type(str(file_path))[0]
+        or "image/jpeg"
+    )
+    return FileResponse(
+        file_path,
+        media_type=media_type,
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
+            # Cache for an hour so OpenGraph crawlers don't hammer the
+            # backend, but short enough that revoking a share takes effect
+            # quickly for re-views.
+            "Cache-Control": "public, max-age=3600",
+        },
     )
 
 

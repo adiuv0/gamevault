@@ -293,23 +293,41 @@ async def test_share_public_page_invalid_token():
 
 
 @pytest.mark.asyncio
-async def test_share_image_redirect():
-    from fastapi.responses import RedirectResponse
-    from backend.routers.share import router
-    from backend.services.share_service import get_active_share_link
+async def test_share_image_serves_directly(monkeypatch, tmp_path):
+    """The /share/{token}/image route now returns the image bytes directly
+    instead of redirecting to /api/screenshots/.... See GV-007."""
+    from fastapi.responses import FileResponse, RedirectResponse
 
-    link = await get_active_share_link(1)
-    response = await router.routes[4].endpoint(token=link["token"])
-    assert isinstance(response, RedirectResponse)
+    from backend.config import settings as app_settings
+    from backend.routers import share as share_router
+
+    # Point library_dir at a tmp dir with a real fake image
+    monkeypatch.setattr(app_settings, "library_dir", tmp_path)
+    rel = "TestGame/screenshots/shot.jpg"
+    (tmp_path / "TestGame" / "screenshots").mkdir(parents=True)
+    (tmp_path / rel).write_bytes(b"\xff\xd8\xff\xe0fake")
+
+    async def _fake_data(_token):
+        return {
+            "screenshot": {"id": 1, "file_path": rel, "filename": "shot.jpg"},
+            "game": {"name": "G"},
+            "annotation": None,
+        }
+
+    monkeypatch.setattr(share_router, "get_shared_screenshot_data", _fake_data)
+
+    response = await share_router.share_image(token="anytoken")
+    assert isinstance(response, FileResponse)
+    assert not isinstance(response, RedirectResponse)
 
 
 @pytest.mark.asyncio
-async def test_share_image_redirect_invalid():
+async def test_share_image_invalid_token():
     from fastapi import HTTPException
-    from backend.routers.share import router
+    from backend.routers import share as share_router
 
     with pytest.raises(HTTPException) as exc_info:
-        await router.routes[4].endpoint(token="bad-token")
+        await share_router.share_image(token="bad-token")
     assert exc_info.value.status_code == 404
 
 

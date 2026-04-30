@@ -1,6 +1,6 @@
 """Pydantic models for games."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class GameCreate(BaseModel):
@@ -40,4 +40,35 @@ class GameResponse(BaseModel):
 
 class GameListResponse(BaseModel):
     games: list[GameResponse]
+    total: int
+
+
+# ── Public-gallery response shapes ────────────────────────────────────────────
+
+
+class PublicGame(BaseModel):
+    """Slim game view for unauthenticated /api/gallery responses.
+
+    Excludes internal fields like ``folder_name`` (filesystem layout),
+    ``cover_image_path`` (the gallery uses /api/gallery/games/{id}/cover
+    instead), and timestamps that aren't user-facing.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    name: str
+    steam_app_id: int | None = None
+    developer: str | None = None
+    publisher: str | None = None
+    release_date: str | None = None
+    genres: str | None = None
+    description: str | None = None
+    screenshot_count: int = 0
+    first_screenshot_date: str | None = None
+    last_screenshot_date: str | None = None
+
+
+class PublicGameListResponse(BaseModel):
+    games: list[PublicGame]
     total: int

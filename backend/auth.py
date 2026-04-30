@@ -1,5 +1,6 @@
 """Authentication: single-password auth with JWT tokens."""
 
+import re
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -10,6 +11,34 @@ from backend.config import settings
 from backend.database import get_db
 
 ALGORITHM = "HS256"
+
+
+# Endpoints where ``?token=`` query-string auth is allowed.
+#
+# JWT in the URL is normally a defense-in-depth no-no (it leaks via access
+# logs, browser history, referrers). We accept it only on the specific
+# endpoints where the browser literally cannot send an Authorization
+# header:
+#
+#   - EventSource streams (SSE) — no custom-header API
+#   - <img>/<video> src attributes — no custom-header API
+#
+# Anything outside this allowlist must use ``Authorization: Bearer ...``.
+_QUERY_TOKEN_ALLOWED_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # SSE progress streams
+    re.compile(r"^/api/upload/progress/[^/]+$"),
+    re.compile(r"^/api/steam/import/\d+/progress$"),
+    re.compile(r"^/api/specialk/import/\d+/progress$"),
+    # Image / thumbnail / cover serves used as <img src=...>
+    re.compile(r"^/api/screenshots/\d+/image$"),
+    re.compile(r"^/api/screenshots/\d+/thumb/(sm|md)$"),
+    re.compile(r"^/api/games/\d+/cover$"),
+)
+
+
+def _query_token_allowed(path: str) -> bool:
+    """True if ``path`` is on the ``?token=`` allowlist."""
+    return any(p.match(path) for p in _QUERY_TOKEN_ALLOWED_PATTERNS)
 
 
 def hash_password(password: str) -> str:
@@ -105,9 +134,11 @@ async def require_auth(request: Request) -> dict | None:
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header.split(" ", 1)[1]
 
-    # Fallback: token query parameter (needed for SSE EventSource which
-    # cannot set custom headers)
-    if not token:
+    # Fallback: ?token= query param. Only accepted on endpoints the browser
+    # cannot send a header for — SSE streams and <img> src URLs (see the
+    # allowlist above). On every other path, the query param is silently
+    # ignored so a leaked URL token can't authenticate a JSON API call.
+    if not token and _query_token_allowed(path):
         token = request.query_params.get("token")
 
     if not token:
