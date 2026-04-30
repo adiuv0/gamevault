@@ -147,14 +147,18 @@ async def get_annotation(screenshot_id: int):
 
 @router.post("/{screenshot_id}/annotation")
 async def save_annotation(screenshot_id: int, data: AnnotationCreate):
-    """Create or update annotation for a screenshot."""
+    """Create or update annotation for a screenshot.
+
+    Markdown is rendered with HTML disabled and the result is sanitized
+    via nh3 before storage — both layers are required to prevent stored
+    XSS in the authenticated UI and on public share pages.
+    """
     screenshot = await screenshot_service.get_screenshot(screenshot_id)
     if not screenshot:
         raise HTTPException(status_code=404, detail="Screenshot not found")
 
-    from markdown_it import MarkdownIt
-    md = MarkdownIt()
-    content_html = md.render(data.content)
+    from backend.services.annotation_renderer import render_and_sanitize
+    content_html = render_and_sanitize(data.content)
 
     annotation = await screenshot_service.save_annotation(
         screenshot_id, data.content, content_html

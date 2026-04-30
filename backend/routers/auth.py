@@ -2,44 +2,54 @@
 
 import time
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.auth import (
     create_access_token,
     get_password_hash,
+    require_auth,
     set_password,
     verify_password,
 )
 from backend.config import settings
 
-# ── Login rate limiting ──────────────────────────────────────────────────────
-# Track failed login attempts per IP: {ip: [timestamp, ...]}
+# ── Rate limiting ────────────────────────────────────────────────────────────
+# Track failed attempts per IP: {ip: [timestamp, ...]}. Login and password
+# change have separate counters so a logged-in attacker can't bypass login
+# rate limiting by switching to change-password.
 _login_attempts: dict[str, list[float]] = {}
+_change_password_attempts: dict[str, list[float]] = {}
 _RATE_LIMIT_WINDOW = 15 * 60  # 15 minutes
 _RATE_LIMIT_MAX = 5  # max failures before lockout
 
 
-def _check_rate_limit(ip: str) -> None:
-    """Raise 429 if this IP has too many recent failed login attempts."""
+def _check_rate_limit(
+    bucket: dict[str, list[float]], ip: str, kind: str
+) -> None:
+    """Raise 429 if this IP has too many recent failures in ``bucket``."""
     now = time.monotonic()
-    attempts = _login_attempts.get(ip, [])
+    attempts = bucket.get(ip, [])
     # Prune old entries
     attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
-    _login_attempts[ip] = attempts
+    bucket[ip] = attempts
     if len(attempts) >= _RATE_LIMIT_MAX:
         raise HTTPException(
             status_code=429,
-            detail="Too many failed login attempts. Try again later.",
+            detail=f"Too many failed {kind} attempts. Try again later.",
         )
 
 
-def _record_failed_attempt(ip: str) -> None:
-    _login_attempts.setdefault(ip, []).append(time.monotonic())
+def _record_failed_attempt(bucket: dict[str, list[float]], ip: str) -> None:
+    bucket.setdefault(ip, []).append(time.monotonic())
 
 
-def _clear_attempts(ip: str) -> None:
-    _login_attempts.pop(ip, None)
+def _clear_attempts(bucket: dict[str, list[float]], ip: str) -> None:
+    bucket.pop(ip, None)
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -77,18 +87,18 @@ async def login(req: LoginRequest, request: Request):
             expires_in_days=settings.token_expiry_days,
         )
 
-    client_ip = request.client.host if request.client else "unknown"
-    _check_rate_limit(client_ip)
+    client_ip = _client_ip(request)
+    _check_rate_limit(_login_attempts, client_ip, "login")
 
     stored_hash = await get_password_hash()
     if stored_hash is None:
         raise HTTPException(status_code=403, detail="setup_required")
 
     if not verify_password(req.password, stored_hash):
-        _record_failed_attempt(client_ip)
+        _record_failed_attempt(_login_attempts, client_ip)
         raise HTTPException(status_code=401, detail="Invalid password")
 
-    _clear_attempts(client_ip)
+    _clear_attempts(_login_attempts, client_ip)
     return AuthResponse(
         token=create_access_token(),
         expires_in_days=settings.token_expiry_days,
@@ -130,18 +140,29 @@ async def verify():
     return AuthStatus(authenticated=False, setup_required=False, auth_disabled=False)
 
 
-@router.post("/change-password")
-async def change_password(req: ChangePasswordRequest):
-    """Change the password. Requires current password for verification."""
+@router.post("/change-password", dependencies=[Depends(require_auth)])
+async def change_password(req: ChangePasswordRequest, request: Request):
+    """Change the password.
+
+    Requires a valid JWT (``Depends(require_auth)``) AND the current
+    password. Failed current-password verifications are rate-limited per
+    IP, separately from login, so a logged-in attacker can't brute-force
+    the password through this endpoint.
+    """
     if settings.disable_auth:
         raise HTTPException(status_code=400, detail="Auth is disabled")
+
+    client_ip = _client_ip(request)
+    _check_rate_limit(_change_password_attempts, client_ip, "password change")
 
     stored_hash = await get_password_hash()
     if stored_hash is None:
         raise HTTPException(status_code=400, detail="No password set. Use /setup instead.")
 
     if not verify_password(req.current_password, stored_hash):
+        _record_failed_attempt(_change_password_attempts, client_ip)
         raise HTTPException(status_code=401, detail="Current password is incorrect")
 
+    _clear_attempts(_change_password_attempts, client_ip)
     await set_password(req.new_password)
     return {"message": "Password changed successfully"}

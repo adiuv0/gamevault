@@ -72,11 +72,13 @@ async def require_auth(request: Request) -> dict | None:
     """
     path = request.url.path
 
-    # Public endpoints that never require auth
+    # Public endpoints that never require auth.
+    # /api/auth/* is intentionally NOT in this list — the public endpoints
+    # there (login, setup, verify) simply don't have require_auth attached,
+    # while change-password DOES need to enforce a valid token.
     if (
         path.startswith("/share/")
         or path == "/api/health"
-        or path.startswith("/api/auth/")
         or path.startswith("/api/gallery/")
     ):
         return None

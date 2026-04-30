@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import re
 import tempfile
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, UploadFile
@@ -19,6 +21,78 @@ from backend.services.upload_service import (
 
 router = APIRouter(prefix="/api/upload", tags=["upload"], dependencies=[Depends(require_auth)])
 
+# Read uploads in 1 MB chunks so we never buffer the whole file in memory.
+_UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+# Whitelist of characters allowed in the *display* filename (used for
+# progress events + log lines only — the actual on-disk path is a uuid).
+_DISPLAY_NAME_PATTERN = re.compile(r"[^A-Za-z0-9._\- ()]")
+
+
+def _safe_display_name(filename: str | None) -> str:
+    """Sanitize the user-supplied filename for use as a *display* string.
+
+    The on-disk temp path is always a random UUID — this function only
+    cleans up the name so it can appear in progress events / logs without
+    enabling log injection. Strips any path components, drops control
+    characters, and caps the length.
+    """
+    if not filename:
+        return "unnamed.jpg"
+    base = Path(filename).name  # strips directories on POSIX and Windows
+    base = _DISPLAY_NAME_PATTERN.sub("_", base).strip()
+    return (base[:120] or "unnamed.jpg")
+
+
+async def _save_upload_streaming(
+    f: UploadFile,
+    temp_dir: Path,
+    max_bytes: int,
+) -> tuple[str, Path]:
+    """Stream an UploadFile to a uuid-named temp file with a hard byte cap.
+
+    Returns ``(display_name, on_disk_path)``. The on-disk path is built from
+    a random UUID — the user-supplied filename is *never* used as part of
+    any path. Aborts with HTTP 413 as soon as the byte limit is exceeded,
+    so a malicious oversized upload doesn't get fully buffered.
+    """
+    display_name = _safe_display_name(f.filename)
+    temp_path = temp_dir / f"{uuid.uuid4().hex}.bin"
+
+    written = 0
+    try:
+        with open(temp_path, "wb") as out:
+            while True:
+                chunk = await f.read(_UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    out.close()
+                    try:
+                        temp_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            f"File {display_name} exceeds max size of "
+                            f"{settings.max_upload_size_mb}MB"
+                        ),
+                    )
+                out.write(chunk)
+    except HTTPException:
+        raise
+    except Exception:
+        # Best-effort cleanup on unexpected failure
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+    return display_name, temp_path
+
 
 @router.post("")
 async def upload_screenshots(
@@ -34,28 +108,38 @@ async def upload_screenshots(
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 
-    # Validate file sizes
+    # Fast-path size pre-check: if Content-Length is known and over the limit,
+    # reject immediately without buffering. This is best-effort — the real
+    # enforcement happens in _save_upload_streaming.
+    max_bytes = settings.max_upload_size_bytes
     for f in files:
-        if f.size and f.size > settings.max_upload_size_bytes:
+        if f.size and f.size > max_bytes:
             raise HTTPException(
                 status_code=413,
-                detail=f"File {f.filename} exceeds max size of {settings.max_upload_size_mb}MB",
+                detail=(
+                    f"File {_safe_display_name(f.filename)} exceeds max size "
+                    f"of {settings.max_upload_size_mb}MB"
+                ),
             )
 
-    # Save files to temp directory
     temp_dir = Path(tempfile.mkdtemp(prefix="gamevault_upload_"))
-    temp_files = []
+    temp_files: list[tuple[str, Path]] = []
 
-    for f in files:
-        temp_path = temp_dir / (f.filename or "unnamed.jpg")
-        content = await f.read()
-        temp_path.write_bytes(content)
-        temp_files.append((f.filename or "unnamed.jpg", temp_path))
+    try:
+        for f in files:
+            display_name, temp_path = await _save_upload_streaming(
+                f, temp_dir, max_bytes
+            )
+            temp_files.append((display_name, temp_path))
+    except HTTPException:
+        # Cleanup partial uploads if any one file blew the limit
+        import shutil
 
-    # Create task for progress tracking
+        shutil.rmtree(str(temp_dir), ignore_errors=True)
+        raise
+
     task_id = create_task_id()
 
-    # Process in background
     background_tasks.add_task(
         _run_upload,
         task_id,
@@ -101,21 +185,31 @@ async def upload_screenshot_sync(
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 
+    max_bytes = settings.max_upload_size_bytes
     for f in files:
-        if f.size and f.size > settings.max_upload_size_bytes:
+        if f.size and f.size > max_bytes:
             raise HTTPException(
                 status_code=413,
-                detail=f"File {f.filename} exceeds max size of {settings.max_upload_size_mb}MB",
+                detail=(
+                    f"File {_safe_display_name(f.filename)} exceeds max size "
+                    f"of {settings.max_upload_size_mb}MB"
+                ),
             )
 
     temp_dir = Path(tempfile.mkdtemp(prefix="gamevault_sync_"))
-    temp_files = []
+    temp_files: list[tuple[str, Path]] = []
 
-    for f in files:
-        temp_path = temp_dir / (f.filename or "unnamed.jpg")
-        content = await f.read()
-        temp_path.write_bytes(content)
-        temp_files.append((f.filename or "unnamed.jpg", temp_path))
+    try:
+        for f in files:
+            display_name, temp_path = await _save_upload_streaming(
+                f, temp_dir, max_bytes
+            )
+            temp_files.append((display_name, temp_path))
+    except HTTPException:
+        import shutil
+
+        shutil.rmtree(str(temp_dir), ignore_errors=True)
+        raise
 
     task_id = create_task_id()
 

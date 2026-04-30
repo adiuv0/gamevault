@@ -419,6 +419,27 @@ def compute_hashes(
 # GameVault API client
 # ---------------------------------------------------------------------------
 
+class AuthExpiredError(Exception):
+    """Raised when the GameVault server returns 401, with a user-friendly message."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "GameVault rejected your auth token (HTTP 401).\n\n"
+            "Your token may be expired (default lifetime: 30 days).\n\n"
+            "To get a fresh token:\n"
+            "  1. Open GameVault in a browser and log in\n"
+            "  2. Go to Settings > Sync Token > Copy Token\n"
+            "  3. Paste it into the Auth Token field here and try again"
+        )
+
+
+def _raise_for_status_friendly(resp: "httpx.Response") -> None:
+    """Like ``resp.raise_for_status()`` but converts 401 into a clear message."""
+    if resp.status_code == 401:
+        raise AuthExpiredError()
+    resp.raise_for_status()
+
+
 class GameVaultClient:
     def __init__(self, server: str, token: str):
         self.client = httpx.Client(
@@ -431,12 +452,12 @@ class GameVaultClient:
         resp = self.client.post(
             "/api/screenshots/check-hashes", json={"hashes": hashes}
         )
-        resp.raise_for_status()
+        _raise_for_status_friendly(resp)
         return resp.json()
 
     def get_or_create_game(self, app_id: str) -> dict:
         resp = self.client.get(f"/api/games/by-steam-appid/{app_id}")
-        resp.raise_for_status()
+        _raise_for_status_friendly(resp)
         return resp.json()
 
     def get_or_create_game_by_name(self, name: str) -> dict:
@@ -448,7 +469,7 @@ class GameVaultClient:
         returned as-is, so the two sources merge into one library entry.
         """
         resp = self.client.post("/api/games/by-name", json={"name": name})
-        resp.raise_for_status()
+        _raise_for_status_friendly(resp)
         return resp.json()
 
     @staticmethod
@@ -476,7 +497,7 @@ class GameVaultClient:
                 files={"files": (filename, f, mime)},
                 timeout=300.0,  # JXR HDR files are large + tone-mapped server-side
             )
-        resp.raise_for_status()
+        _raise_for_status_friendly(resp)
         return resp.json()
 
     def close(self) -> None:
