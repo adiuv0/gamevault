@@ -1,5 +1,10 @@
 services:
   gamevault:
+    # ``:latest`` is convenient (Unraid spots digest changes for auto-update).
+    # For production where you want bit-exact reproducibility, pin to an
+    # immutable digest instead, e.g.:
+    #     image: adiuv0/gamevault@sha256:abcd1234...
+    # See docs/RELEASING.md for how to find the current digest.
     image: adiuv0/gamevault:latest
     # To build from source instead, comment out 'image' and uncomment:
     # build: .
@@ -28,6 +33,12 @@ services:
       # - GAMEVAULT_MAX_UPLOAD_SIZE_MB=50
       # - GAMEVAULT_THUMBNAIL_QUALITY=85
       # - GAMEVAULT_TOKEN_EXPIRY_DAYS=30
+      #
+      # Special K filesystem importer — REQUIRED if you also set
+      # GAMEVAULT_DISABLE_AUTH=true (otherwise the endpoint becomes a
+      # public file-disclosure primitive). When set, scan paths must
+      # resolve under one of these absolute directories.
+      # - GAMEVAULT_SPECIALK_ALLOWED_ROOTS=/data/specialk,/mnt/specialk
       - TZ=America/Chicago
     labels:
       # Example Traefik labels (uncomment and adjust):

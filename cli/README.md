@@ -14,7 +14,13 @@ so re-running the sync is safe and idempotent.
 ## Requirements
 
 - Python 3.10+
-- `httpx` (`pip install httpx`)
+- `httpx` (`pip install httpx`) — required
+- `keyring` (`pip install keyring`) — **optional**, recommended.
+  When installed, the auth token is stored in your OS credential vault
+  (Credential Manager on Windows, Keychain on macOS, Secret Service on
+  Linux) instead of plaintext in `~/.gamevault_sync.json`. The CLI
+  detects keyring at runtime and falls back to JSON storage with a
+  warning if it's not available.
 
 ## Usage
 
@@ -38,8 +44,10 @@ python gamevault_sync.py
    `[SpecialK]` tag plus `N new / M total`)
 7. Click **Sync** to upload new screenshots
 
-Settings (server, token, both paths, and mode) are saved to
-`~/.gamevault_sync.json` for the next run.
+Settings (server, both paths, and mode) are saved to
+`~/.gamevault_sync.json` for the next run. The auth token is stored
+separately in the OS keyring when `keyring` is installed; otherwise it
+goes into the same JSON file as a plaintext fallback.
 
 ### CLI Mode
 

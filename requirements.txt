@@ -1,19 +1,28 @@
-# Auto-generated from pyproject.toml [project.dependencies]
-fastapi>=0.115.0
-uvicorn[standard]>=0.32.0
-python-multipart>=0.0.12
-aiosqlite>=0.20.0
-httpx>=0.27.0
-beautifulsoup4>=4.12.0
-lxml>=5.3.0
-Pillow>=11.0.0
-piexif>=1.1.3
-imagecodecs>=2024.6.1
-numpy>=1.26.0
-python-jose[cryptography]>=3.3.0
-bcrypt>=4.0.0
-pydantic>=2.10.0
-pydantic-settings>=2.6.0
-markdown-it-py>=3.0.0
-nh3>=0.2.17
-Jinja2>=3.1.0
+# Pinned dependency versions for reproducible Docker builds (GV-012).
+#
+# Direct deps are pinned with `==` so a `docker build` six months from
+# now produces the same image as today. ``pyproject.toml`` keeps the
+# `>=` lower bounds for source/dev installs (`pip install -e .[dev]`).
+# Update both together when bumping a dep.
+#
+# For full hash-checked reproducibility, generate a lockfile with
+# pip-compile and pass `--require-hashes` to pip. See docs/RELEASING.md.
+
+fastapi==0.128.7
+uvicorn[standard]==0.40.0
+python-multipart==0.0.22
+aiosqlite==0.22.1
+httpx==0.28.1
+beautifulsoup4==4.14.3
+lxml==6.0.2
+Pillow==12.1.0
+piexif==1.1.3
+imagecodecs==2024.6.1
+numpy==1.26.4
+python-jose[cryptography]==3.5.0
+bcrypt==5.0.0
+pydantic==2.12.5
+pydantic-settings==2.12.0
+markdown-it-py==4.0.0
+nh3==0.3.5
+Jinja2==3.1.6

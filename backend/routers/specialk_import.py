@@ -2,12 +2,14 @@
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from backend.auth import require_auth
+from backend.config import settings
 from backend.models.specialk_import import (
     SpecialKImportRequest,
     SpecialKImportSessionResponse,
@@ -25,7 +27,85 @@ from backend.services.specialk_import_service import (
     scan_path,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/specialk", tags=["specialk"], dependencies=[Depends(require_auth)])
+
+
+# ── Path allowlist (GV-010) ──────────────────────────────────────────────────
+#
+# Three modes:
+#   1. ``specialk_allowed_roots`` set (comma-separated absolute dirs):
+#      every scan/import path must resolve under one of them. Strictest.
+#   2. ``specialk_allowed_roots`` empty + auth enabled: allow any path
+#      (backward compatible — relies on the JWT being a sufficient
+#      authorization signal for the single-user app).
+#   3. ``specialk_allowed_roots`` empty + auth disabled: REFUSE. Without
+#      an allowlist or auth, the endpoint becomes a public arbitrary
+#      file-disclosure primitive. Operator must explicitly opt in.
+
+
+def _parse_allowed_roots() -> list[Path]:
+    raw = (settings.specialk_allowed_roots or "").strip()
+    if not raw:
+        return []
+    roots: list[Path] = []
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            roots.append(Path(chunk).resolve())
+        except (OSError, RuntimeError):
+            logger.warning("Could not resolve specialk_allowed_roots entry: %r", chunk)
+    return roots
+
+
+def _enforce_allowed_root(raw_path: str) -> Path:
+    """Validate a user-supplied scan path against config.
+
+    Returns the resolved Path on success. Raises HTTPException otherwise.
+    """
+    allowed = _parse_allowed_roots()
+
+    if not allowed:
+        if settings.disable_auth:
+            # Mode 3: refuse entirely.
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Special K import is disabled when GAMEVAULT_DISABLE_AUTH=true "
+                    "and no GAMEVAULT_SPECIALK_ALLOWED_ROOTS is set. Configure an "
+                    "allowlist before using this endpoint without authentication."
+                ),
+            )
+        # Mode 2: backward compatible — accept any path. The require_auth
+        # dependency on the router has already gated us behind a JWT.
+        try:
+            return Path(raw_path).resolve()
+        except (OSError, RuntimeError):
+            raise HTTPException(status_code=400, detail="Invalid path")
+
+    # Mode 1: must be under one of the configured roots.
+    try:
+        candidate = Path(raw_path).resolve()
+    except (OSError, RuntimeError):
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    for root in allowed:
+        try:
+            candidate.relative_to(root)
+            return candidate
+        except ValueError:
+            continue
+
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Path is not under any configured GAMEVAULT_SPECIALK_ALLOWED_ROOTS "
+            "entry. Ask the server operator to add it if you need to scan there."
+        ),
+    )
 
 
 @router.post("/scan", response_model=SpecialKScanResponse)
@@ -35,7 +115,9 @@ async def scan(req: SpecialKScanRequest):
     if not raw_path:
         raise HTTPException(status_code=400, detail="Path cannot be empty")
 
-    root = Path(raw_path)
+    # Enforce the configured allowlist before touching the disk
+    root = _enforce_allowed_root(raw_path)
+
     if not root.exists():
         return SpecialKScanResponse(
             valid=False,
@@ -82,7 +164,8 @@ async def start_import(req: SpecialKImportRequest, bg: BackgroundTasks):
     if not raw_path:
         raise HTTPException(status_code=400, detail="Path cannot be empty")
 
-    root = Path(raw_path)
+    # Enforce the configured allowlist before kicking off any work
+    root = _enforce_allowed_root(raw_path)
     if not root.exists() or not root.is_dir():
         raise HTTPException(status_code=400, detail=f"Path is not a directory: {raw_path}")
 

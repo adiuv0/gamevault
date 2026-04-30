@@ -62,6 +62,7 @@ take precedence over env vars.
 | `GAMEVAULT_MAX_UPLOAD_SIZE_MB` | `50` | Per-file upload limit. Web requests over this return HTTP 413. |
 | `GAMEVAULT_THUMBNAIL_QUALITY` | `85` | JPEG quality (1-100) for generated thumbnails. |
 | `GAMEVAULT_CORS_ORIGINS` | `""` | Comma-separated list of additional origins beyond the localhost defaults. Required if you serve the frontend from a different host than the backend. |
+| `GAMEVAULT_SPECIALK_ALLOWED_ROOTS` | `""` | Comma-separated absolute paths the Special K importer is allowed to scan. **Required when `GAMEVAULT_DISABLE_AUTH=true`** — otherwise the endpoint refuses with HTTP 403. When auth is enabled, an empty value falls back to "any path" for backward compatibility. See [Special K import safety](#special-k-import-safety) below. |
 | `TZ` | `UTC` | Container timezone. Affects timestamps in logs and the `taken_at` displayed in the UI. |
 
 ### Auto-managed
@@ -226,7 +227,74 @@ uvicorn's `--port`). All endpoints are under `/api`, `/share`,
 - Set `GAMEVAULT_CORS_ORIGINS` if your frontend is served from a
   different origin
 
+### Login rate limiting behind a proxy
+
+Login (`POST /api/auth/login`) and password change (`POST /api/auth/change-password`)
+are independently rate-limited at 5 failed attempts per IP per 15-minute
+window. The per-IP key is read from `request.client.host`, which behind a
+proxy will be the proxy's address — not the real client IP. Two options:
+
+1. **Let the proxy do the rate limiting.** Most reverse proxies have
+   built-in support and can key on `X-Forwarded-For`:
+   - **nginx**: `limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/m;`
+     applied to `/api/auth/`
+   - **Traefik**: a `RateLimit` middleware on the auth router
+   - **Caddy**: the `rate_limit` plugin
+   This is the recommended approach for any internet-exposed deployment.
+
+2. **Trust the proxy via Uvicorn's `--proxy-headers`.** Run uvicorn with
+   `--proxy-headers --forwarded-allow-ips=<your-proxy-ip>`. GameVault
+   will then see real client IPs in `request.client.host` and the
+   built-in limiter will work as intended. Don't enable this unless you
+   actually have a trusted proxy in front — without one, attackers can
+   spoof `X-Forwarded-For` and bypass rate limiting entirely.
+
+The in-process limiter is sufficient for single-instance LAN setups; for
+public deployments lean on the proxy.
+
+## Entrypoint behavior
+
+[`entrypoint.sh`](../entrypoint.sh) runs as root on container start, then
+`chown -R gamevault:gamevault /data` before dropping to the `gamevault`
+user via `gosu`. This is what makes mounted volumes (which arrive owned
+by the host user, often UID 99 on Unraid) writable inside the container.
+
+**Side effects:**
+
+- Slow on startup for large libraries (every file is touched). Containers
+  with millions of screenshots may take tens of seconds to start.
+- The chown is recursive — bind-mounting unrelated directories under
+  `/data` will rewrite their ownership. Mount only what GameVault needs.
+- If you're certain your volume's ownership already matches, you can
+  skip the chown by overriding the entrypoint or running with
+  `--user gamevault:gamevault` directly.
+
 ---
+
+## Special K import safety
+
+The [Special K Import page](USER_GUIDE.md#special-k-import-hdr--sdr) reads
+files from a path the GameVault server can see. Because the path is
+caller-supplied, an attacker with API access (or anyone, if auth is off)
+could otherwise enumerate and copy any image-shaped file the server can
+read. Two protections gate this:
+
+| Mode | `GAMEVAULT_SPECIALK_ALLOWED_ROOTS` | Auth | Behavior |
+|---|---|---|---|
+| 1 | set | enabled | Scan path must resolve under one of the configured roots — strictest. Recommended for public-facing deployments. |
+| 2 | empty | enabled | Any path the server can read. Backward compatible — the JWT is the authorization signal. |
+| 3 | empty | **disabled** | Endpoint refuses with HTTP 403. Without an allowlist or auth, the feature would be a public file-disclosure primitive. Operator must explicitly opt in by setting the allowlist. |
+
+To enable Mode 1, set the env var to a comma-separated list of absolute
+directories:
+
+```env
+GAMEVAULT_SPECIALK_ALLOWED_ROOTS=/data/specialk,/mnt/screenshots
+```
+
+In Docker, these must be **container** paths — bind-mount your host
+Special K folders into the container first, then list the in-container
+mount points here.
 
 ## Sample `.env`
 
@@ -246,6 +314,9 @@ GAMEVAULT_MAX_UPLOAD_SIZE_MB=100
 GAMEVAULT_THUMBNAIL_QUALITY=90
 GAMEVAULT_TOKEN_EXPIRY_DAYS=14
 TZ=America/Chicago
+
+# Special K importer allowlist (required if GAMEVAULT_DISABLE_AUTH=true)
+# GAMEVAULT_SPECIALK_ALLOWED_ROOTS=/data/specialk,/mnt/screenshots
 ```
 
 For Docker Compose, see the example in the main [README.md](../README.md).

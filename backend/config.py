@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     thumbnail_quality: int = 85
     max_upload_size_mb: int = 50
 
+    # Special K import — server-side scanning is gated by an optional path
+    # allowlist. Set this to a comma-separated list of absolute directories
+    # the API may scan; an empty value falls back to "any path" for
+    # backward compatibility, except when auth is disabled (where the
+    # feature is refused entirely without an explicit allowlist). See
+    # GV-010 in docs/SECURITY_AUDIT_2026-04-27.md.
+    specialk_allowed_roots: str = ""
+
     model_config = {
         "env_prefix": "GAMEVAULT_",
         "env_file": ".env",

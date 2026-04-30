@@ -7,6 +7,16 @@ from backend.database import get_db
 from backend.services.game_service import update_screenshot_stats
 
 
+# GV-013: explicit allowlist for ORDER BY fragments — see game_service for
+# the rationale.
+SCREENSHOT_SORT_CLAUSES: dict[str, str] = {
+    "date_asc": "s.taken_at ASC, s.id ASC",
+    "date_desc": "s.taken_at DESC, s.id DESC",
+    "name": "s.filename ASC",
+}
+SCREENSHOT_DEFAULT_SORT = "s.taken_at DESC, s.id DESC"
+
+
 async def list_screenshots(
     game_id: int,
     page: int = 1,
@@ -19,11 +29,7 @@ async def list_screenshots(
     """
     db = await get_db()
 
-    order_clause = {
-        "date_asc": "s.taken_at ASC, s.id ASC",
-        "date_desc": "s.taken_at DESC, s.id DESC",
-        "name": "s.filename ASC",
-    }.get(sort, "s.taken_at DESC, s.id DESC")
+    order_clause = SCREENSHOT_SORT_CLAUSES.get(sort, SCREENSHOT_DEFAULT_SORT)
 
     # Get total count
     cursor = await db.execute(

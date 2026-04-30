@@ -507,21 +507,133 @@ class GameVaultClient:
 # ---------------------------------------------------------------------------
 # Config persistence
 # ---------------------------------------------------------------------------
+#
+# The auth token is the most sensitive value here. By default we try to
+# stash it in the OS keyring (Credential Manager on Windows, Keychain on
+# macOS, Secret Service on Linux) so it never lives in a plaintext JSON
+# file in the user's home directory. If the ``keyring`` library is not
+# installed (it's an *optional* CLI dep — the sync tool's only required
+# dep remains httpx), we transparently fall back to JSON and emit a
+# one-time warning. Existing JSON-stored tokens keep working.
+#
+# This closes GV-011 from the security audit.
 
 CONFIG_PATH = Path.home() / ".gamevault_sync.json"
 
+_KEYRING_SERVICE = "gamevault_sync"
+_KEYRING_USERNAME = "token"
+
+# Token stored via the keyring backend. Tracked separately from the JSON
+# config so deletes/migration are explicit.
+_KEYRING_FLAG_KEY = "_token_in_keyring"
+
+_keyring_warning_shown = False
+
+
+def _get_keyring_module():
+    """Lazily import keyring; return None if unavailable.
+
+    keyring is an optional dep so the CLI keeps working with just httpx.
+    A failed import is treated like "no secure storage available."
+    """
+    try:
+        import keyring  # type: ignore
+        return keyring
+    except Exception:
+        return None
+
+
+def _save_token_to_keyring(token: str) -> bool:
+    kr = _get_keyring_module()
+    if kr is None:
+        return False
+    try:
+        kr.set_password(_KEYRING_SERVICE, _KEYRING_USERNAME, token)
+        return True
+    except Exception as exc:
+        print(
+            f"WARNING: keyring rejected the token ({exc}); falling back to JSON.",
+            file=sys.stderr,
+        )
+        return False
+
+
+def _load_token_from_keyring() -> str | None:
+    kr = _get_keyring_module()
+    if kr is None:
+        return None
+    try:
+        return kr.get_password(_KEYRING_SERVICE, _KEYRING_USERNAME)
+    except Exception:
+        return None
+
+
+def _delete_token_from_keyring() -> None:
+    kr = _get_keyring_module()
+    if kr is None:
+        return
+    try:
+        kr.delete_password(_KEYRING_SERVICE, _KEYRING_USERNAME)
+    except Exception:
+        pass
+
+
+def _warn_plaintext_once() -> None:
+    global _keyring_warning_shown
+    if _keyring_warning_shown:
+        return
+    _keyring_warning_shown = True
+    print(
+        "NOTE: Storing the auth token in plaintext at "
+        f"{CONFIG_PATH} (the 'keyring' package is not installed).\n"
+        "      For secure OS-keyring storage, run:  pip install keyring",
+        file=sys.stderr,
+    )
+
 
 def load_config() -> dict:
+    """Load saved config. Pulls the token from the OS keyring when flagged."""
+    cfg: dict = {}
     if CONFIG_PATH.exists():
         try:
-            return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         except Exception:
-            pass
-    return {}
+            cfg = {}
+
+    # If a previous run stashed the token in the keyring, hydrate it back
+    # into the cfg dict so callers see a uniform shape.
+    if cfg.get(_KEYRING_FLAG_KEY):
+        token = _load_token_from_keyring()
+        if token:
+            cfg["token"] = token
+        else:
+            # Keyring entry vanished (user wiped credentials, etc.) —
+            # clear the flag so we don't keep trying.
+            cfg.pop(_KEYRING_FLAG_KEY, None)
+
+    return cfg
 
 
 def save_config(cfg: dict) -> None:
-    CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    """Persist config. The token is preferentially saved in the OS keyring."""
+    out = dict(cfg)
+    token = out.pop("token", None) or ""
+
+    if token:
+        if _save_token_to_keyring(token):
+            out[_KEYRING_FLAG_KEY] = True
+            # Make sure no stale plaintext copy lingers in the JSON
+            out.pop("token", None)
+        else:
+            _warn_plaintext_once()
+            out["token"] = token
+            out.pop(_KEYRING_FLAG_KEY, None)
+    else:
+        # Token cleared — wipe both backends so logout is complete
+        out.pop(_KEYRING_FLAG_KEY, None)
+        _delete_token_from_keyring()
+
+    CONFIG_PATH.write_text(json.dumps(out, indent=2), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
