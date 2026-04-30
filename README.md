@@ -190,6 +190,7 @@ python tests/test_phase5_metadata_timeline.py  # 52 tests — metadata & timelin
 
 Reference docs live in [docs/](docs/README.md):
 
+- [Changelog](CHANGELOG.md) — what's in each release
 - [User Guide](docs/USER_GUIDE.md) — every feature walked through end-to-end
 - [Configuration](docs/CONFIGURATION.md) — env vars, DB-stored preferences, backups
 - [API Reference](docs/API_REFERENCE.md) — every REST endpoint

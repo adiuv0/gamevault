@@ -147,19 +147,29 @@ def extract_date_taken(file_path: Path) -> datetime | None:
 
 
 # ── Tone-map settings lookup ─────────────────────────────────────────────────
+#
+# The tone-map algorithm + exposure are read once per thumbnail. A naive
+# "open sqlite, SELECT, close" each call became visible during HDR
+# imports — a 100-screenshot import generates 200 thumbnails (sm + md)
+# and was opening 200 SQLite connections to read two rarely-changing
+# values. Now cached at module level and invalidated whenever the
+# settings router writes new values.
+#
+# Concurrency: the cache is a plain ``dict`` mutated under the GIL. The
+# generation thread reads it inside ``asyncio.to_thread`` workers; the
+# settings router invalidates it on the event loop. Eventual consistency
+# is fine — the next thumbnail picks up the new value.
 
 
-def _get_tone_map_settings() -> tuple[str, float]:
-    """Get the user-configured tone-map algorithm and exposure.
+_tone_map_cache: dict[str, str | float] | None = None
 
-    Reads from the ``app_settings`` DB table; falls back to safe defaults.
-    Synchronous — used inside the (synchronous) Pillow pipeline. We open
-    a fresh sqlite connection rather than block on the async pool.
-    """
+
+def _load_tone_map_settings() -> dict[str, str | float]:
+    """Read tone-map settings directly from sqlite. Used on cache miss."""
     import sqlite3
 
-    algorithm = "reinhard"
-    exposure = 1.0
+    algorithm: str = "reinhard"
+    exposure: float = 1.0
     try:
         conn = sqlite3.connect(str(settings.db_path))
         try:
@@ -179,7 +189,28 @@ def _get_tone_map_settings() -> tuple[str, float]:
             conn.close()
     except sqlite3.Error:
         pass
-    return algorithm, exposure
+    return {"algorithm": algorithm, "exposure": exposure}
+
+
+def _get_tone_map_settings() -> tuple[str, float]:
+    """Cached tone-map settings (algorithm, exposure)."""
+    global _tone_map_cache
+    if _tone_map_cache is None:
+        _tone_map_cache = _load_tone_map_settings()
+    return (
+        _tone_map_cache["algorithm"],  # type: ignore[return-value]
+        _tone_map_cache["exposure"],  # type: ignore[return-value]
+    )
+
+
+def invalidate_tone_map_cache() -> None:
+    """Drop the cached tone-map settings.
+
+    Call from the settings router after writing new tone-map preferences
+    so the next thumbnail rendered uses the fresh values.
+    """
+    global _tone_map_cache
+    _tone_map_cache = None
 
 
 # ── Thumbnail generation ─────────────────────────────────────────────────────
