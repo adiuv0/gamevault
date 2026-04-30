@@ -21,6 +21,14 @@ from backend.services import hdr_processor
 logger = logging.getLogger(__name__)
 
 
+# Pillow's default DecompressionBombWarning fires at ~89 megapixels and
+# DecompressionBombError at 2x that. Set an explicit ceiling that's well
+# above any reasonable screenshot (8K is ~33 MP) but well below where a
+# crafted image could exhaust memory during decode. A 12K x 12K PNG is
+# 144 MP — that's our cap.
+Image.MAX_IMAGE_PIXELS = 144_000_000
+
+
 # Map EXIF tag IDs to names — compatible with Pillow 10+ (Base) and older (TAGS)
 if hasattr(ExifTags, "Base"):
     EXIF_TAG_NAMES = {tag.value: tag.name for tag in ExifTags.Base}

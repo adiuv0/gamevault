@@ -13,6 +13,7 @@ MIGRATIONS = [
     "backend.migrations.m001_initial",
     "backend.migrations.m002_gallery",
     "backend.migrations.m003_specialk",
+    "backend.migrations.m004_resanitize_annotations",
 ]
 
 

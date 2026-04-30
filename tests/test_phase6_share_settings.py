@@ -415,37 +415,74 @@ def test_html_escape():
 
 # ── Auth Password Change Tests ───────────────────────────────────────────────
 
+def _fake_request(client_ip: str = "127.0.0.1") -> "Request":
+    """Build a minimal Request for direct change_password() calls.
+
+    The handler reads request.client.host for per-IP rate limiting; this
+    fake provides that. Use a unique IP per test to avoid carry-over from
+    previous test runs in the in-memory rate-limit bucket.
+    """
+    from starlette.requests import Request
+    return Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/api/auth/change-password",
+        "headers": [],
+        "query_string": b"",
+        "client": (client_ip, 1234),
+    })
+
+
 @pytest.mark.asyncio
 async def test_password_change_no_password_set():
     from fastapi import HTTPException
-    from backend.routers.auth import ChangePasswordRequest, change_password
+    from backend.routers.auth import (
+        ChangePasswordRequest,
+        _change_password_attempts,
+        change_password,
+    )
 
-    req = ChangePasswordRequest(current_password="old", new_password="newpass123")
-    with pytest.raises(HTTPException) as exc_info:
-        await change_password(req)
-    assert exc_info.value.status_code == 400
+    old_disable = settings.disable_auth
+    settings.disable_auth = False
+    _change_password_attempts.clear()
+    try:
+        req = ChangePasswordRequest(current_password="old", new_password="newpass123")
+        with pytest.raises(HTTPException) as exc_info:
+            await change_password(req, _fake_request("10.0.0.1"))
+        assert exc_info.value.status_code == 400
+    finally:
+        settings.disable_auth = old_disable
 
 
 @pytest.mark.asyncio
 async def test_password_setup_and_change():
     from fastapi import HTTPException
-    from backend.routers.auth import SetupRequest, ChangePasswordRequest, setup, change_password
+    from backend.routers.auth import (
+        ChangePasswordRequest,
+        SetupRequest,
+        _change_password_attempts,
+        change_password,
+        setup,
+    )
 
     old_disable = settings.disable_auth
     settings.disable_auth = False
+    _change_password_attempts.clear()
 
     try:
         result = await setup(SetupRequest(password="initial123"))
         assert "token" in result.model_dump()
 
         result2 = await change_password(
-            ChangePasswordRequest(current_password="initial123", new_password="newpass456")
+            ChangePasswordRequest(current_password="initial123", new_password="newpass456"),
+            _fake_request("10.0.0.2"),
         )
         assert "message" in result2
 
         with pytest.raises(HTTPException) as exc_info:
             await change_password(
-                ChangePasswordRequest(current_password="wrong", new_password="another789")
+                ChangePasswordRequest(current_password="wrong", new_password="another789"),
+                _fake_request("10.0.0.3"),
             )
         assert exc_info.value.status_code == 401
     finally:
