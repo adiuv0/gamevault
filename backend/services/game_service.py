@@ -12,15 +12,22 @@ from backend.services.filesystem import (
 )
 
 
+# GV-013: explicit allowlist for ORDER BY fragments. Any caller-supplied
+# sort token is translated through this map; an unknown token falls back
+# to GAME_DEFAULT_SORT instead of becoming part of a SQL string.
+GAME_SORT_CLAUSES: dict[str, str] = {
+    "name": "g.name ASC",
+    "date": "g.last_screenshot_date DESC NULLS LAST",
+    "count": "g.screenshot_count DESC",
+}
+GAME_DEFAULT_SORT = "g.name ASC"
+
+
 async def list_games(sort: str = "name") -> list[dict]:
     """List all games with sorting."""
     db = await get_db()
 
-    order_clause = {
-        "name": "g.name ASC",
-        "date": "g.last_screenshot_date DESC NULLS LAST",
-        "count": "g.screenshot_count DESC",
-    }.get(sort, "g.name ASC")
+    order_clause = GAME_SORT_CLAUSES.get(sort, GAME_DEFAULT_SORT)
 
     cursor = await db.execute(f"""
         SELECT g.* FROM games g
@@ -211,11 +218,7 @@ async def list_public_games(sort: str = "name") -> list[dict]:
     """List all public games with sorting."""
     db = await get_db()
 
-    order_clause = {
-        "name": "g.name ASC",
-        "date": "g.last_screenshot_date DESC NULLS LAST",
-        "count": "g.screenshot_count DESC",
-    }.get(sort, "g.name ASC")
+    order_clause = GAME_SORT_CLAUSES.get(sort, GAME_DEFAULT_SORT)
 
     cursor = await db.execute(f"""
         SELECT g.* FROM games g

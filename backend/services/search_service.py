@@ -3,6 +3,21 @@
 from backend.database import get_db
 
 
+# GV-013: explicit allowlist for ORDER BY fragments. The relevance
+# variant uses bm25() with our column weights; date variants use the
+# coalesce pattern. Any unknown caller-supplied sort token falls back
+# to relevance.
+SEARCH_SORT_CLAUSES: dict[str, str] = {
+    "relevance": "bm25(screenshots_fts, 5.0, 1.0, 3.0, 10.0)",
+    "date_desc": "COALESCE(s.taken_at, s.uploaded_at) DESC",
+    "date_asc": "COALESCE(s.taken_at, s.uploaded_at) ASC",
+}
+SEARCH_LIST_ALL_SORT_CLAUSES: dict[str, str] = {
+    "date_desc": "COALESCE(s.taken_at, s.uploaded_at) DESC",
+    "date_asc": "COALESCE(s.taken_at, s.uploaded_at) ASC",
+}
+
+
 async def search_screenshots(
     query: str,
     game_id: int | None = None,
@@ -62,14 +77,8 @@ async def search_screenshots(
     )
     total = (await count_cursor.fetchone())[0]
 
-    # Sort
-    if sort == "date_desc":
-        order = "COALESCE(s.taken_at, s.uploaded_at) DESC"
-    elif sort == "date_asc":
-        order = "COALESCE(s.taken_at, s.uploaded_at) ASC"
-    else:
-        # relevance — BM25 with weights: game_name=5, filename=1, steam_desc=3, annotation=10
-        order = "bm25(screenshots_fts, 5.0, 1.0, 3.0, 10.0)"
+    # Sort — allowlisted, falls back to relevance (BM25 with our column weights)
+    order = SEARCH_SORT_CLAUSES.get(sort, SEARCH_SORT_CLAUSES["relevance"])
 
     offset = (page - 1) * limit
     results_cursor = await db.execute(
@@ -144,10 +153,8 @@ async def _list_all_filtered(
     count_cursor = await db.execute(f"SELECT COUNT(*) {base_query}", params)
     total = (await count_cursor.fetchone())[0]
 
-    if sort == "date_asc":
-        order = "COALESCE(s.taken_at, s.uploaded_at) ASC"
-    else:
-        order = "COALESCE(s.taken_at, s.uploaded_at) DESC"
+    # No FTS query → only date_asc / date_desc make sense; default newest-first
+    order = SEARCH_LIST_ALL_SORT_CLAUSES.get(sort, SEARCH_LIST_ALL_SORT_CLAUSES["date_desc"])
 
     offset = (page - 1) * limit
     results_cursor = await db.execute(
