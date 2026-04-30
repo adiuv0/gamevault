@@ -190,6 +190,7 @@ async def save_preferences(body: PreferenceUpdate):
         raise HTTPException(status_code=400, detail="No fields to update")
 
     db = await get_db()
+    tone_map_changed = False
     for key, value in updates:
         if value == "":
             await db.execute("DELETE FROM app_settings WHERE key = ?", (key,))
@@ -199,7 +200,17 @@ async def save_preferences(body: PreferenceUpdate):
                    ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
                 (key, value),
             )
+        if key in ("tone_map_algorithm", "tone_map_exposure"):
+            tone_map_changed = True
     await db.commit()
+
+    # Invalidate the in-memory tone-map cache so the very next thumbnail
+    # generated picks up the new algorithm/exposure. Cheap (just clears a
+    # module-level dict), cleaner than waiting for process restart.
+    if tone_map_changed:
+        from backend.services.image_processor import invalidate_tone_map_cache
+        invalidate_tone_map_cache()
+
     return {"message": "Preferences saved"}
 
 

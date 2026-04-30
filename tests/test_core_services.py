@@ -37,7 +37,7 @@ class TestDatabase:
 
         expected = [
             "games", "screenshots", "annotations", "share_links",
-            "steam_import_sessions", "tags", "screenshot_tags", "app_settings",
+            "steam_import_sessions", "app_settings",
         ]
         for table in expected:
             assert table in table_names, f"Missing table: {table}"

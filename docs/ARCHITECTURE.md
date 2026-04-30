@@ -510,7 +510,8 @@ If you're new to the code, this is the order I'd recommend:
   retroactively update existing thumbnails. Adding an endpoint to walk
   all screenshots and re-call `generate_thumbnails` would be
   straightforward.
-- **No per-screenshot tags.** The schema has a `tags` and
-  `screenshot_tags` table but they're not exposed in the UI yet.
+- **No per-screenshot tags.** Earlier schemas had unused `tags` and
+  `screenshot_tags` tables; they were dropped in m005. Adding tags later
+  means a new migration plus router/service/UI work.
 - **JXR EXIF.** `imagecodecs` doesn't expose JXR IFD metadata, so JXR
   uploads have no EXIF data and `taken_at` falls back to file mtime.
