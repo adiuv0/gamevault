@@ -32,3 +32,15 @@ export async function refreshGameMetadata(id: number): Promise<Game> {
 export async function cleanupEmptyGames(): Promise<{ deleted_count: number; deleted_games: string[] }> {
   return api.post('/games/cleanup-empty');
 }
+
+export interface MergeResult {
+  moved: number;
+  had_collisions: number;
+  source_id: number;
+  target_id: number;
+  target_name: string;
+}
+
+export async function mergeGameInto(sourceId: number, targetId: number): Promise<MergeResult> {
+  return api.post(`/games/${sourceId}/merge`, { target_id: targetId });
+}

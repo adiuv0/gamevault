@@ -1,11 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Upload, Image, Trash2, Loader2, RefreshCw, CheckCircle2, Globe, Lock } from 'lucide-react';
+import { useNavigate, useParams, Link } from 'react-router-dom';
+import { ArrowLeft, Upload, Image, Trash2, Loader2, RefreshCw, CheckCircle2, Globe, Lock, GitMerge, Search } from 'lucide-react';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { ScreenshotGallery } from '@/components/screenshots/ScreenshotGallery';
 import { ScreenshotViewer } from '@/components/screenshots/ScreenshotViewer';
-import { getGame, deleteGame, updateGame, getCoverUrl } from '@/api/games';
+import { getGame, deleteGame, updateGame, getCoverUrl, listGames, mergeGameInto } from '@/api/games';
 import { listScreenshots } from '@/api/screenshots';
 import { fetchGameMetadata } from '@/api/metadata';
 import { formatCount, formatDate } from '@/lib/formatters';
@@ -13,6 +13,7 @@ import type { Game, Screenshot } from '@/lib/types';
 
 export function GamePage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const gameId = Number(id);
 
   const [game, setGame] = useState<Game | null>(null);
@@ -27,6 +28,7 @@ export function GamePage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [fetchingMeta, setFetchingMeta] = useState(false);
   const [metaResult, setMetaResult] = useState<string | null>(null);
+  const [showMergeModal, setShowMergeModal] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -178,6 +180,14 @@ export function GamePage() {
 
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setShowMergeModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-text-secondary rounded-md text-sm hover:text-text-primary hover:border-accent-primary/50 transition-colors"
+              title="Merge this game into another (e.g. consolidate Steam + Special K duplicates)"
+            >
+              <GitMerge className="h-3.5 w-3.5" />
+              Merge
+            </button>
+            <button
               onClick={async () => {
                 const updated = await updateGame(gameId, { is_public: !game.is_public });
                 setGame(updated);
@@ -315,6 +325,18 @@ export function GamePage() {
         />
       )}
 
+      {/* Merge modal */}
+      {showMergeModal && (
+        <MergeModal
+          source={game}
+          onClose={() => setShowMergeModal(false)}
+          onMerged={(targetId) => {
+            setShowMergeModal(false);
+            navigate(`/games/${targetId}`);
+          }}
+        />
+      )}
+
       {/* Delete confirmation modal */}
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -346,6 +368,153 @@ export function GamePage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ── Merge modal ─────────────────────────────────────────────────────────────
+
+
+interface MergeModalProps {
+  source: Game;
+  onClose: () => void;
+  onMerged: (targetId: number) => void;
+}
+
+function MergeModal({ source, onClose, onMerged }: MergeModalProps) {
+  const [allGames, setAllGames] = useState<Game[]>([]);
+  const [loadingList, setLoadingList] = useState(true);
+  const [filter, setFilter] = useState('');
+  const [target, setTarget] = useState<Game | null>(null);
+  const [merging, setMerging] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listGames('name')
+      .then((d) => setAllGames(d.games.filter((g) => g.id !== source.id)))
+      .catch(() => setAllGames([]))
+      .finally(() => setLoadingList(false));
+  }, [source.id]);
+
+  const filtered = allGames.filter((g) =>
+    g.name.toLowerCase().includes(filter.toLowerCase())
+  );
+
+  const handleMerge = async () => {
+    if (!target) return;
+    try {
+      setMerging(true);
+      setError(null);
+      const result = await mergeGameInto(source.id, target.id);
+      onMerged(result.target_id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Merge failed');
+      setMerging(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div className="relative bg-bg-secondary border border-border rounded-lg p-6 w-full max-w-lg shadow-xl">
+        <h2 className="text-lg font-semibold text-text-primary mb-2 flex items-center gap-2">
+          <GitMerge className="h-5 w-5 text-accent-primary" />
+          Merge Into Another Game
+        </h2>
+        <p className="text-sm text-text-secondary mb-4">
+          Pick a target game. All <strong>{source.screenshot_count}</strong> screenshots
+          from <strong>{source.name}</strong> will be moved to the target, and{' '}
+          <strong>{source.name}</strong> will be deleted. This cannot be undone.
+        </p>
+
+        {target ? (
+          <div className="space-y-4">
+            <div className="bg-bg-primary border border-border rounded-md p-3 text-sm">
+              <div className="text-text-muted text-xs mb-1">Target</div>
+              <div className="text-text-primary font-medium">{target.name}</div>
+              <div className="text-text-muted text-xs mt-1">
+                {formatCount(target.screenshot_count ?? 0)}
+              </div>
+            </div>
+            {error && (
+              <div className="px-3 py-2 bg-accent-danger/10 border border-accent-danger/30 rounded text-xs text-accent-danger">
+                {error}
+              </div>
+            )}
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setTarget(null)}
+                disabled={merging}
+                className="px-4 py-2 bg-bg-tertiary text-text-primary rounded-md text-sm hover:bg-bg-tertiary/80 transition-colors disabled:opacity-50"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleMerge}
+                disabled={merging}
+                className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors disabled:opacity-50"
+              >
+                {merging && <Loader2 className="h-3 w-3 animate-spin" />}
+                Merge {source.screenshot_count} screenshot{source.screenshot_count === 1 ? '' : 's'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-muted" />
+              <input
+                type="text"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter games..."
+                className="w-full pl-9 pr-3 py-2 bg-bg-primary border border-border rounded-md text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-accent-primary"
+                autoFocus
+              />
+            </div>
+
+            <div className="max-h-72 overflow-y-auto bg-bg-primary border border-border rounded-md divide-y divide-border">
+              {loadingList ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-4 w-4 animate-spin text-text-muted" />
+                </div>
+              ) : filtered.length === 0 ? (
+                <div className="px-3 py-8 text-center text-sm text-text-muted">
+                  {allGames.length === 0
+                    ? 'No other games to merge into.'
+                    : 'No games match the filter.'}
+                </div>
+              ) : (
+                filtered.map((g) => (
+                  <button
+                    key={g.id}
+                    onClick={() => setTarget(g)}
+                    className="w-full text-left px-3 py-2 hover:bg-bg-tertiary transition-colors"
+                  >
+                    <div className="text-sm text-text-primary">{g.name}</div>
+                    <div className="text-xs text-text-muted">
+                      {formatCount(g.screenshot_count ?? 0)}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 bg-bg-tertiary text-text-primary rounded-md text-sm hover:bg-bg-tertiary/80 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
