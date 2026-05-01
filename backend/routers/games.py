@@ -59,6 +59,30 @@ class GameByNameRequest(BaseModel):
     name: str
 
 
+class GameMergeRequest(BaseModel):
+    target_id: int
+
+
+@router.post("/{source_id}/merge")
+async def merge_into(source_id: int, body: GameMergeRequest):
+    """Merge ``source_id`` into ``body.target_id``.
+
+    Used to consolidate accidental duplicate games (typically the Special K
+    importer's name-only matching producing a separate row from a Steam
+    import). Moves all screenshots over (DB + files + thumbnails),
+    transfers the cover if the target has none, and deletes the source
+    game record. Annotations and share-links travel with their screenshots
+    automatically (they FK to screenshot IDs).
+    """
+    if source_id == body.target_id:
+        raise HTTPException(status_code=400, detail="Cannot merge a game into itself")
+    try:
+        result = await game_service.merge_games(source_id, body.target_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return result
+
+
 @router.post("/by-name")
 async def get_or_create_by_name(req: GameByNameRequest):
     """Get or create a game by display name.

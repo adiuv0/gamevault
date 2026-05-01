@@ -14,6 +14,18 @@ closing the entire 14-finding security audit
 
 ### Added
 
+- **Game merge.** Game admin page now has a "Merge" button that opens a
+  modal listing every other game, lets you pick a target, and moves all
+  screenshots (DB rows + files + thumbnails) into it. Annotations and
+  share-links travel with their screenshots automatically. The target's
+  cover is preserved; the source game and its on-disk folder are removed
+  after the merge. Use this to consolidate accidental duplicates from
+  the Special K importer (e.g. `Cyberpunk 2077` next to
+  `Cyberpunk 2077: Phantom Liberty`).
+- **HDR/SDR pair toggle in the gallery viewer.** When Special K writes
+  a `.jxr` and a `.png` of the same moment, the viewer now shows a
+  toggle button (and `h` keyboard shortcut) to flip between the two
+  variants of the same screenshot.
 - HDR JXR upload pipeline. JXR files are decoded with `imagecodecs`,
   tone-mapped to SDR with a configurable algorithm (Reinhard / ACES /
   hard clip), and SDR JPEG thumbnails are generated for the gallery.
@@ -35,6 +47,10 @@ closing the entire 14-finding security audit
 
 ### Changed
 
+- **`get_game_by_name` is now case-insensitive.** Prevents the Special K
+  importer (and manual create) from accidentally creating a duplicate
+  when an existing game with the same name in different casing already
+  exists. Matches `Cyberpunk 2077` and `cyberpunk 2077` as the same row.
 - Sync CLI (`cli/gamevault_sync.py`) supports both Steam and Special K
   sources via `--mode {steam,specialk,both}`; default `steam` for
   backward compatibility. GUI gains a Mode dropdown plus a second path

@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useMemo, useState } from 'react';
 import {
   X,
   ChevronLeft,
@@ -11,12 +11,38 @@ import {
   Check,
   Loader2,
   Trash2,
+  Repeat2,
 } from 'lucide-react';
 import { getScreenshotImageUrl } from '@/api/screenshots';
 import { toggleFavorite, createShareLink, getShareLink, deleteShareLink } from '@/api/screenshots';
 import { AnnotationEditor } from './AnnotationEditor';
 import { formatDateTime, formatFileSize } from '@/lib/formatters';
 import type { Screenshot, ShareLink } from '@/lib/types';
+
+
+// Special K writes a JXR (HDR) and a PNG (SDR) of the same moment side
+// by side; the importer keeps both and they end up as separate
+// screenshot rows that share a base filename. Find the matching sibling
+// (same stem, different extension/format) so the viewer can offer a
+// quick HDR <-> SDR toggle.
+function findPair(screenshot: Screenshot, all: Screenshot[]): Screenshot | null {
+  if (!screenshot.filename) return null;
+  const stem = screenshot.filename.replace(/\.[^.]+$/, '').toLowerCase();
+  if (!stem) return null;
+  const isHdrFmt = (fmt: string | null | undefined) =>
+    !!fmt && fmt.toLowerCase() === 'jxr';
+  for (const candidate of all) {
+    if (candidate.id === screenshot.id) continue;
+    if (!candidate.filename) continue;
+    const candidateStem = candidate.filename.replace(/\.[^.]+$/, '').toLowerCase();
+    if (candidateStem !== stem) continue;
+    // Must be a different *kind* of format — JXR <-> anything else.
+    // Don't pair two PNGs with the same base name (unlikely but possible).
+    if (isHdrFmt(candidate.format) === isHdrFmt(screenshot.format)) continue;
+    return candidate;
+  }
+  return null;
+}
 
 interface ScreenshotViewerProps {
   screenshots: Screenshot[];
@@ -48,6 +74,18 @@ export function ScreenshotViewer({
   const screenshot = screenshots[currentIndex];
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < screenshots.length - 1;
+
+  // HDR <-> SDR sibling, if Special K wrote both formats of the same shot
+  const pair = useMemo(
+    () => (screenshot ? findPair(screenshot, screenshots) : null),
+    [screenshot, screenshots],
+  );
+
+  const handleSwapToPair = useCallback(() => {
+    if (!pair) return;
+    const idx = screenshots.findIndex((s) => s.id === pair.id);
+    if (idx >= 0) onNavigate(idx);
+  }, [pair, screenshots, onNavigate]);
 
   // Reset share state when screenshot changes
   useEffect(() => {
@@ -87,9 +125,13 @@ export function ScreenshotViewer({
         case 'i':
           setShowInfo((prev) => !prev);
           break;
+        case 'h':
+          // Toggle HDR <-> SDR sibling if available
+          handleSwapToPair();
+          break;
       }
     },
-    [onClose, handlePrev, handleNext, showSharePanel],
+    [onClose, handlePrev, handleNext, handleSwapToPair, showSharePanel],
   );
 
   useEffect(() => {
@@ -195,6 +237,19 @@ export function ScreenshotViewer({
         </div>
 
         <div className="flex items-center gap-2">
+          {pair && (
+            <button
+              onClick={handleSwapToPair}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md hover:bg-white/10 transition-colors"
+              title={`Switch to the ${pair.format?.toUpperCase() || 'paired'} version (h)`}
+            >
+              <Repeat2 className="h-4 w-4 text-white/70" />
+              <span className="text-xs font-mono text-white/70">
+                {pair.format ? pair.format.toUpperCase() : 'PAIR'}
+              </span>
+            </button>
+          )}
+
           <button
             onClick={handleFavoriteToggle}
             className="p-2 rounded-md hover:bg-white/10 transition-colors"
