@@ -347,6 +347,21 @@ def generate_thumbnails_with_hash(
     return sm_rel, md_rel, perceptual_hash
 
 
+def compute_perceptual_hash(file_path: Path) -> str | None:
+    """Compute the same normalized 128-bit dHash used during import."""
+    image = _open_for_thumbnail(file_path)
+    if image is None:
+        return None
+    try:
+        row_hash, col_hash = dhash.dhash_row_col(image)
+        return dhash.format_hex(row_hash, col_hash)
+    except Exception as e:
+        logger.warning("Perceptual hash generation failed for %s: %s", file_path, e)
+        return None
+    finally:
+        image.close()
+
+
 def validate_image(file_path: Path) -> bool:
     """Validate that a file is a supported image (including JXR via hdr_processor)."""
     if hdr_processor.is_jxr(file_path):

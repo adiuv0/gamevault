@@ -1,10 +1,10 @@
 import { useNavigate } from 'react-router-dom';
-import { Search, Grid3X3, List, LogOut } from 'lucide-react';
+import { Search, Grid3X3, List, LogOut, Menu } from 'lucide-react';
 import { useState } from 'react';
 import { useViewStore } from '@/stores/viewStore';
 import { useAuthStore } from '@/stores/authStore';
 
-export function TopBar() {
+export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const [searchQuery, setSearchQuery] = useState('');
   const navigate = useNavigate();
   const { viewMode, setViewMode } = useViewStore();
@@ -24,6 +24,16 @@ export function TopBar() {
 
   return (
     <header className="h-14 bg-bg-secondary border-b border-border flex items-center px-4 gap-4 sticky top-0 z-10">
+      <button
+        type="button"
+        onClick={onMenuClick}
+        className="p-1.5 text-text-muted hover:text-text-primary transition-colors md:hidden"
+        title="Open navigation"
+        aria-label="Open navigation"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+
       {/* Search */}
       <form onSubmit={handleSearch} className="flex-1 max-w-xl">
         <div className="relative">
@@ -32,7 +42,7 @@ export function TopBar() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search screenshots and annotations..."
+          placeholder="Search..."
             className="w-full pl-9 pr-4 py-1.5 bg-bg-primary border border-border rounded-md text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-primary transition-colors"
           />
         </div>

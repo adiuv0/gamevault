@@ -17,6 +17,7 @@ MIGRATIONS = [
     "backend.migrations.m005_drop_tags",
     "backend.migrations.m006_gallery_indexes",
     "backend.migrations.m007_capture_groups",
+    "backend.migrations.m008_duplicate_review",
 ]
 
 

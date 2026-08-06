@@ -11,6 +11,7 @@ import { SteamImportPage } from '@/pages/SteamImportPage';
 import { SpecialKImportPage } from '@/pages/SpecialKImportPage';
 import { SearchPage } from '@/pages/SearchPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { DuplicateReviewPage } from '@/pages/DuplicateReviewPage';
 import { GalleryHomePage } from '@/pages/gallery/GalleryHomePage';
 import { GalleryGamePage } from '@/pages/gallery/GalleryGamePage';
 
@@ -49,6 +50,7 @@ function App() {
             <Route path="/import/steam" element={<SteamImportPage />} />
             <Route path="/import/specialk" element={<SpecialKImportPage />} />
             <Route path="/search" element={<SearchPage />} />
+            <Route path="/duplicates" element={<DuplicateReviewPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Routes>

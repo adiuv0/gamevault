@@ -127,6 +127,7 @@ def _ensure_secret_key() -> None:
     )
 from backend.routers import (
     auth,
+    duplicates,
     gallery,
     games,
     metadata,
@@ -199,6 +200,7 @@ app.include_router(search.router)
 app.include_router(share.router)
 app.include_router(metadata.router)
 app.include_router(settings_router.router)
+app.include_router(duplicates.router)
 
 
 # Health check (public, no auth)

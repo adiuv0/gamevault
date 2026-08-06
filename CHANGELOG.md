@@ -17,6 +17,10 @@ closing the entire 14-finding security audit
 - Logical capture groups and perceptual dHash fingerprints. HDR/SDR or other
   source variants can share one capture identity, and game screenshot totals
   count captures rather than physical files.
+- Resumable duplicate scanning for existing libraries, with durable progress,
+  conservative same-game candidate rules, and a review queue for grouping or
+  dismissing visually similar variants without deleting originals.
+- Responsive admin navigation for phone-sized screens.
 - Configurable SSD-friendly thumbnail cache (`GAMEVAULT_THUMBNAIL_DIR`) with
   backward-compatible legacy reads and a Settings migration action.
 - GitHub Actions CI for backend tests, frontend lint/build, and the Docker image.
@@ -152,6 +156,9 @@ Run automatically on container startup:
 | `m003_specialk` | Adds `specialk_import_sessions` table |
 | `m004_resanitize_annotations` | Re-renders every annotation through the new sanitizer |
 | `m005_drop_tags` | Drops the unused `tags` + `screenshot_tags` tables |
+| `m006_gallery_indexes` | Adds gallery and import lookup indexes |
+| `m007_capture_groups` | Adds logical capture groups and perceptual hashes |
+| `m008_duplicate_review` | Adds durable maintenance jobs and duplicate review candidates |
 
 ## [0.1.0] - 2026-02-11
 

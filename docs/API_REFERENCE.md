@@ -14,6 +14,7 @@ For configuration see [CONFIGURATION.md](CONFIGURATION.md).
 - [Health](#health)
 - [Games](#games)
 - [Screenshots](#screenshots)
+- [Duplicate Review](#duplicate-review)
 - [Upload](#upload)
 - [Steam Import](#steam-import)
 - [Special K Import](#special-k-import)
@@ -195,6 +196,40 @@ avoid uploading duplicates.
 ### `POST /api/screenshots/{id}/share`
 
 See [Sharing](#sharing).
+
+---
+
+## Duplicate Review
+
+All duplicate-review endpoints require admin authentication. Candidate matching is
+conservative: assets must belong to the same game, have identical dimensions, be
+close in capture or upload time, and have a perceptual-hash distance of eight bits
+or less. A match is never deleted automatically.
+
+### `GET /api/duplicates/scan`
+
+Returns the latest durable scan job, or `null` when no scan has run. Job fields
+include `status`, `cursor_id`, `total`, `processed`, `errors`, and timestamps.
+
+### `POST /api/duplicates/scan`
+
+Starts a new scan or resumes the latest incomplete or failed scan. Returns the job
+immediately while work continues in the background.
+
+### `GET /api/duplicates/candidates`
+
+Lists review candidates. Query parameters are `status` (`pending`, `grouped`, or
+`dismissed`), `page` (minimum 1), and `limit` (1-100).
+
+### `POST /api/duplicates/candidates/{id}/group`
+
+Places both physical assets in one logical capture group and recalculates the
+game's logical screenshot count. Every original file remains intact.
+
+### `POST /api/duplicates/candidates/{id}/dismiss`
+
+Marks a candidate as not matching. The assets and their capture groups are
+unchanged.
 
 ---
 

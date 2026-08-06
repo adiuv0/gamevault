@@ -11,15 +11,16 @@ perspective. For deployment and configuration, see
 2. [The Library](#the-library)
 3. [Game Pages](#game-pages)
 4. [Uploading Screenshots](#uploading-screenshots)
-5. [Steam Import](#steam-import)
-6. [Special K Import (HDR & SDR)](#special-k-import-hdr--sdr)
-7. [Timeline](#timeline)
-8. [Search](#search)
-9. [Annotations](#annotations)
-10. [Sharing](#sharing)
-11. [Public Gallery](#public-gallery)
-12. [Settings](#settings)
-13. [GameVault Sync (Desktop CLI)](#gamevault-sync-desktop-cli)
+5. [Duplicate Review](#duplicate-review)
+6. [Steam Import](#steam-import)
+7. [Special K Import (HDR & SDR)](#special-k-import-hdr--sdr)
+8. [Timeline](#timeline)
+9. [Search](#search)
+10. [Annotations](#annotations)
+11. [Sharing](#sharing)
+12. [Public Gallery](#public-gallery)
+13. [Settings](#settings)
+14. [GameVault Sync (Desktop CLI)](#gamevault-sync-desktop-cli)
 
 ---
 
@@ -124,6 +125,26 @@ accessible EXIF, so the file's mtime is used.
 for grid views and 800px wide for the gallery preview. HDR sources (JXR and
 16-bit PNG) are tone-mapped to SDR before thumbnail generation. The
 original file is preserved untouched.
+
+---
+
+## Duplicate Review
+
+The Duplicates page (`/duplicates`) finds visually similar files that may be
+variants of one captured moment, such as a PNG and JPEG or HDR export. Click
+**Scan library** to fingerprint existing screenshots. Progress is saved in the
+database, so an interrupted scan can resume instead of starting over.
+
+Candidates are never merged or deleted automatically. Review the two previews:
+
+- **Group variants** makes them one logical capture. Game totals count the group
+  once, while every original file remains available.
+- **Not a match** dismisses the suggestion without changing either screenshot.
+- Use the Pending, Grouped, and Dismissed tabs to review decision history.
+
+Matching is intentionally limited to screenshots from the same game with equal
+dimensions and nearby capture or upload times. Similar-looking loading screens or
+burst captures may still appear, which is why the final decision remains manual.
 
 ---
 

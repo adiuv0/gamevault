@@ -28,12 +28,13 @@ Acceptance criteria:
 
 ## Phase 2: Duplicate Review And Variant UX
 
-Status: In progress. Logical capture groups and new-import fingerprints are implemented.
+Status: In progress. Logical capture groups, new-import fingerprints, resumable backfill,
+and the duplicate-review workflow are implemented.
 
-- Backfill perceptual hashes for existing assets as a resumable background job.
-- Record duplicate candidates with confidence, reasons, and review status.
+- [x] Backfill perceptual hashes for existing assets as a resumable background job.
+- [x] Record duplicate candidates with confidence, reasons, and review status.
 - Automatically group only deterministic source siblings and tightly constrained matches.
-- Add a duplicate-review view for ambiguous candidates.
+- [x] Add a duplicate-review view for ambiguous candidates.
 - Collapse grouped assets into one gallery item with explicit HDR, SDR, and original variants.
 - Move favorites, annotations, sharing, and deletion semantics to the logical capture.
 - Never delete a physical variant automatically.
