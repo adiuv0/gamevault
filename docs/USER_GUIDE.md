@@ -138,7 +138,8 @@ database, so an interrupted scan can resume instead of starting over.
 Candidates are never merged or deleted automatically. Review the two previews:
 
 - **Group variants** makes them one logical capture. Game totals count the group
-  once, while every original file remains available.
+  once, while every original file remains available. The game and public galleries
+  show one card with a file-count badge; open it to switch formats in the viewer.
 - **Not a match** dismisses the suggestion without changing either screenshot.
 - Use the Pending, Grouped, and Dismissed tabs to review decision history.
 

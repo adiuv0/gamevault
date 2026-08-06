@@ -1,3 +1,4 @@
+import { Files } from 'lucide-react';
 import { galleryThumbUrl } from '@/api/gallery';
 import { formatDate } from '@/lib/formatters';
 import type { Screenshot } from '@/lib/types';
@@ -22,6 +23,13 @@ export function GalleryScreenshotCard({ screenshot, onClick }: GalleryScreenshot
           className="w-full h-full object-cover group-hover:brightness-110 transition-all duration-200"
           loading="lazy"
         />
+
+        {(screenshot.variant_count ?? 1) > 1 && (
+          <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/70 backdrop-blur-sm rounded-full px-1.5 py-1 text-white/80">
+            <Files className="h-3 w-3" />
+            <span className="text-[10px] leading-none">{screenshot.variant_count}</span>
+          </div>
+        )}
 
         {/* Hover overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200" />

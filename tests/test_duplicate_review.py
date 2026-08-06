@@ -174,6 +174,59 @@ async def test_dismiss_candidate_preserves_groups(duplicate_library):
 
 
 @pytest.mark.asyncio
+async def test_logical_capture_lists_once_and_shares_metadata(duplicate_library):
+    from backend.services import duplicate_service
+    from backend.services.screenshot_service import (
+        delete_annotation,
+        get_annotation,
+        list_screenshots,
+        save_annotation,
+        toggle_favorite,
+    )
+
+    db, library_dir = duplicate_library
+    game_id, left_id, right_id = await _create_similar_pair(db, library_dir)
+    job = await duplicate_service.start_scan_job()
+    await duplicate_service.run_scan_job(job["id"])
+    candidates, _ = await duplicate_service.list_candidates()
+    await duplicate_service.group_candidate(candidates[0]["id"])
+
+    screenshots, total = await list_screenshots(game_id)
+    assert total == 1
+    assert len(screenshots) == 1
+    assert screenshots[0]["variant_count"] == 2
+    assert [variant["id"] for variant in screenshots[0]["variants"]] == [
+        left_id,
+        right_id,
+    ]
+
+    assert await toggle_favorite(right_id) is True
+    cursor = await db.execute(
+        "SELECT is_favorite FROM screenshots WHERE id IN (?, ?) ORDER BY id",
+        (left_id, right_id),
+    )
+    assert [row[0] for row in await cursor.fetchall()] == [1, 1]
+
+    await save_annotation(right_id, "variant note", "<p>variant note</p>")
+    assert (await get_annotation(left_id))["content"] == "variant note"
+    await db.execute(
+        "INSERT INTO annotations (screenshot_id, content) VALUES (?, 'stale note')",
+        (left_id,),
+    )
+    await db.commit()
+    await save_annotation(left_id, "capture note", "<p>capture note</p>")
+    assert (await get_annotation(right_id))["content"] == "capture note"
+    cursor = await db.execute(
+        """SELECT COUNT(*) FROM annotations
+           WHERE screenshot_id IN (?, ?)""",
+        (left_id, right_id),
+    )
+    assert (await cursor.fetchone())[0] == 1
+    assert await delete_annotation(left_id) is True
+    assert await get_annotation(right_id) is None
+
+
+@pytest.mark.asyncio
 async def test_scan_records_missing_file_and_continues(duplicate_library):
     from backend.services import duplicate_service
     from backend.services.screenshot_service import create_screenshot

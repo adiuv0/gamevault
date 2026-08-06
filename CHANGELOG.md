@@ -20,6 +20,9 @@ closing the entire 14-finding security audit
 - Resumable duplicate scanning for existing libraries, with durable progress,
   conservative same-game candidate rules, and a review queue for grouping or
   dismissing visually similar variants without deleting originals.
+- Game and public galleries now paginate logical captures instead of physical
+  files. Grouped captures render once with an in-viewer variant selector;
+  favorites and annotations apply across the capture.
 - Responsive admin navigation for phone-sized screens.
 - Configurable SSD-friendly thumbnail cache (`GAMEVAULT_THUMBNAIL_DIR`) with
   backward-compatible legacy reads and a Settings migration action.

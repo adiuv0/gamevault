@@ -1,8 +1,19 @@
-import { useEffect, useCallback, useState } from 'react';
-import { X, ChevronLeft, ChevronRight, Info, Download } from 'lucide-react';
+import { useEffect, useCallback, useMemo, useState } from 'react';
+import { X, ChevronLeft, ChevronRight, Info, Download, Repeat2 } from 'lucide-react';
 import { galleryImageUrl } from '@/api/gallery';
 import { formatDateTime, formatFileSize } from '@/lib/formatters';
-import type { Screenshot } from '@/lib/types';
+import type { Screenshot, ScreenshotVariant } from '@/lib/types';
+
+function getVariants(screenshot: Screenshot | undefined): ScreenshotVariant[] {
+  if (!screenshot) return [];
+  return screenshot.variants?.length ? screenshot.variants : [screenshot];
+}
+
+function variantLabel(variant: ScreenshotVariant, index: number, variants: ScreenshotVariant[]): string {
+  const format = variant.format?.toUpperCase() || 'FILE';
+  const sameFormatCount = variants.filter((item) => item.format === variant.format).length;
+  return sameFormatCount > 1 ? `${format} ${index + 1}` : format;
+}
 
 interface GalleryScreenshotViewerProps {
   screenshots: Screenshot[];
@@ -18,10 +29,21 @@ export function GalleryScreenshotViewer({
   onNavigate,
 }: GalleryScreenshotViewerProps) {
   const [showInfo, setShowInfo] = useState(false);
+  const [activeVariantId, setActiveVariantId] = useState<number | null>(null);
 
   const screenshot = screenshots[currentIndex];
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < screenshots.length - 1;
+  const variants = useMemo(() => getVariants(screenshot), [screenshot]);
+  const activeVariant = variants.find((variant) => variant.id === activeVariantId)
+    || variants[0]
+    || screenshot;
+
+  const handleCycleVariant = useCallback(() => {
+    if (variants.length < 2 || !activeVariant) return;
+    const currentVariantIndex = variants.findIndex((variant) => variant.id === activeVariant.id);
+    setActiveVariantId(variants[(currentVariantIndex + 1) % variants.length].id);
+  }, [activeVariant, variants]);
 
   const handlePrev = useCallback(() => {
     if (hasPrev) onNavigate(currentIndex - 1);
@@ -46,9 +68,12 @@ export function GalleryScreenshotViewer({
         case 'i':
           setShowInfo((prev) => !prev);
           break;
+        case 'h':
+          handleCycleVariant();
+          break;
       }
     },
-    [onClose, handlePrev, handleNext],
+    [onClose, handlePrev, handleNext, handleCycleVariant],
   );
 
   useEffect(() => {
@@ -60,22 +85,42 @@ export function GalleryScreenshotViewer({
     };
   }, [handleKeyDown]);
 
-  if (!screenshot) return null;
+  if (!screenshot || !activeVariant) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-black/50">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-3 bg-black/50">
+        <div className="min-w-0 flex items-center gap-3 sm:gap-4">
           <span className="text-sm text-text-secondary">
             {currentIndex + 1} / {screenshots.length}
           </span>
-          <span className="text-sm text-text-muted truncate max-w-xs">
-            {screenshot.filename}
+          <span className="text-sm text-text-muted truncate max-w-[10rem] sm:max-w-xs">
+            {activeVariant.filename}
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-2">
+          {variants.length > 1 && (
+            <div className="flex items-center rounded-md bg-white/5 p-0.5" title="Switch file variant (h)">
+              <Repeat2 className="h-4 w-4 text-white/50 mx-1.5" />
+              {variants.map((variant, index) => (
+                <button
+                  key={variant.id}
+                  type="button"
+                  onClick={() => setActiveVariantId(variant.id)}
+                  className={`px-2 py-1 rounded text-xs transition-colors ${
+                    activeVariant.id === variant.id
+                      ? 'bg-white/15 text-white'
+                      : 'text-white/60 hover:text-white'
+                  }`}
+                >
+                  {variantLabel(variant, index, variants)}
+                </button>
+              ))}
+            </div>
+          )}
+
           <button
             onClick={() => setShowInfo(!showInfo)}
             className={`p-2 rounded-md hover:bg-white/10 transition-colors ${
@@ -87,8 +132,8 @@ export function GalleryScreenshotViewer({
           </button>
 
           <a
-            href={galleryImageUrl(screenshot.id)}
-            download={screenshot.filename}
+            href={galleryImageUrl(activeVariant.id)}
+            download={activeVariant.filename}
             className="p-2 rounded-md hover:bg-white/10 transition-colors"
             title="Download"
           >
@@ -126,11 +171,11 @@ export function GalleryScreenshotViewer({
         )}
 
         {/* Image */}
-        <div className={`flex-1 flex items-center justify-center p-4 ${showInfo ? 'mr-80' : ''}`}>
+        <div className={`flex-1 flex items-center justify-center p-4 ${showInfo ? 'sm:mr-80' : ''}`}>
           <img
-            key={screenshot.id}
-            src={galleryImageUrl(screenshot.id)}
-            alt={screenshot.filename}
+            key={activeVariant.id}
+            src={galleryImageUrl(activeVariant.id)}
+            alt={activeVariant.filename}
             className="max-w-full max-h-full object-contain select-none"
             draggable={false}
           />
@@ -138,28 +183,28 @@ export function GalleryScreenshotViewer({
 
         {/* Info panel */}
         {showInfo && (
-          <div className="absolute right-0 top-0 bottom-0 w-80 bg-bg-secondary/95 backdrop-blur border-l border-border overflow-y-auto">
+          <div className="absolute right-0 top-0 bottom-0 w-full sm:w-80 bg-bg-secondary/95 backdrop-blur border-l border-border overflow-y-auto">
             <div className="p-4 space-y-4">
               <h3 className="text-sm font-medium text-text-primary">Details</h3>
 
               <div className="space-y-3 text-sm">
-                <InfoRow label="Filename" value={screenshot.filename} />
+                <InfoRow label="Filename" value={activeVariant.filename} />
                 <InfoRow
                   label="Date"
-                  value={formatDateTime(screenshot.taken_at || screenshot.uploaded_at)}
+                  value={formatDateTime(activeVariant.taken_at || activeVariant.uploaded_at)}
                 />
-                {screenshot.width && screenshot.height && (
+                {activeVariant.width && activeVariant.height && (
                   <InfoRow
                     label="Dimensions"
-                    value={`${screenshot.width} x ${screenshot.height}`}
+                    value={`${activeVariant.width} x ${activeVariant.height}`}
                   />
                 )}
                 <InfoRow
                   label="Size"
-                  value={formatFileSize(screenshot.file_size)}
+                  value={formatFileSize(activeVariant.file_size)}
                 />
-                {screenshot.format && (
-                  <InfoRow label="Format" value={screenshot.format.toUpperCase()} />
+                {activeVariant.format && (
+                  <InfoRow label="Format" value={activeVariant.format.toUpperCase()} />
                 )}
                 {screenshot.steam_description && (
                   <div>

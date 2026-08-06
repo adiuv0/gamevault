@@ -154,6 +154,11 @@ Deletes every game with zero screenshots. Returns `{ "deleted_count": N,
 
 Returns full screenshot details + a `has_annotation` flag.
 
+Game screenshot-list endpoints paginate logical captures. Each item contains
+`variant_count` and a `variants` array describing every preserved physical file.
+The public-gallery response exposes the same relationship with internal paths and
+hashes removed.
+
 ### `DELETE /api/screenshots/{id}`
 
 Delete the screenshot record AND its files (full image + thumbnails).
@@ -172,20 +177,23 @@ Falls back to the full image if no thumbnail exists.
 
 ### `POST /api/screenshots/{id}/favorite`
 
-Toggle favorite state. Returns `{ "is_favorite": bool }`.
+Toggle favorite state for every variant in the logical capture. Returns
+`{ "is_favorite": bool }`.
 
 ### `GET /api/screenshots/{id}/annotation`
 
-Get the annotation. 404 if none.
+Get the logical capture's annotation. 404 if none.
 
 ### `POST /api/screenshots/{id}/annotation`
 
-Create or update the annotation. Body: `{ "content": "<markdown>" }`.
+Create or update the logical capture's annotation. Body:
+`{ "content": "<markdown>" }`.
 Server renders Markdown to HTML and stores both. FTS index is updated.
 
 ### `DELETE /api/screenshots/{id}/annotation`
 
-Remove the annotation. FTS index is updated.
+Remove annotations from every variant in the logical capture. FTS indexes are
+updated.
 
 ### `POST /api/screenshots/check-hashes`
 

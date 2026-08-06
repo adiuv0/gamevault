@@ -17,19 +17,25 @@ export interface Game {
   updated_at: string;
 }
 
-export interface Screenshot {
+export interface ScreenshotVariant {
   id: number;
-  game_id: number;
   filename: string;
-  file_path: string;
-  thumbnail_path_sm: string | null;
-  thumbnail_path_md: string | null;
   file_size: number | null;
   width: number | null;
   height: number | null;
   format: string | null;
   taken_at: string | null;
   uploaded_at: string;
+  source?: 'upload' | 'steam_import' | 'steam_local';
+  is_favorite?: boolean;
+  has_annotation?: boolean;
+}
+
+export interface Screenshot extends ScreenshotVariant {
+  game_id: number;
+  file_path: string;
+  thumbnail_path_sm: string | null;
+  thumbnail_path_md: string | null;
   steam_screenshot_id: string | null;
   steam_description: string | null;
   source: 'upload' | 'steam_import' | 'steam_local';
@@ -37,6 +43,9 @@ export interface Screenshot {
   view_count: number;
   exif_data: string | null;
   has_annotation: boolean;
+  capture_group_id?: number | null;
+  variant_count?: number;
+  variants?: ScreenshotVariant[];
   created_at: string;
   updated_at: string;
 }

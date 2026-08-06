@@ -35,8 +35,11 @@ and the duplicate-review workflow are implemented.
 - [x] Record duplicate candidates with confidence, reasons, and review status.
 - Automatically group only deterministic source siblings and tightly constrained matches.
 - [x] Add a duplicate-review view for ambiguous candidates.
-- Collapse grouped assets into one gallery item with explicit HDR, SDR, and original variants.
-- Move favorites, annotations, sharing, and deletion semantics to the logical capture.
+- [x] Collapse grouped assets into one gallery item with explicit file variants.
+- [x] Move gallery favorites and annotations to the logical capture; keep sharing on
+  the representative asset until share links become variant-aware.
+- Define explicit whole-capture versus single-variant deletion controls before adding
+  screenshot deletion to the gallery UI.
 - Never delete a physical variant automatically.
 
 Acceptance criteria:

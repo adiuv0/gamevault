@@ -1,6 +1,20 @@
 """Pydantic models for screenshots."""
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ScreenshotVariant(BaseModel):
+    id: int
+    filename: str
+    file_size: int | None = None
+    width: int | None = None
+    height: int | None = None
+    format: str | None = None
+    taken_at: str | None = None
+    uploaded_at: str
+    source: str = "upload"
+    is_favorite: bool = False
+    has_annotation: bool = False
 
 
 class ScreenshotResponse(BaseModel):
@@ -23,6 +37,9 @@ class ScreenshotResponse(BaseModel):
     view_count: int = 0
     exif_data: str | None = None
     has_annotation: bool = False
+    capture_group_id: int | None = None
+    variant_count: int = 1
+    variants: list[ScreenshotVariant] = Field(default_factory=list)
     created_at: str
     updated_at: str
 
@@ -47,6 +64,19 @@ class ScreenshotUpdate(BaseModel):
 # FastAPI then drops anything not declared here when serializing.
 
 
+class PublicScreenshotVariant(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    filename: str
+    file_size: int | None = None
+    width: int | None = None
+    height: int | None = None
+    format: str | None = None
+    taken_at: str | None = None
+    uploaded_at: str
+
+
 class PublicScreenshot(BaseModel):
     """Slim screenshot view for unauthenticated /api/gallery responses."""
 
@@ -61,6 +91,8 @@ class PublicScreenshot(BaseModel):
     height: int | None = None
     taken_at: str | None = None
     uploaded_at: str
+    variant_count: int = 1
+    variants: list[PublicScreenshotVariant] = Field(default_factory=list)
 
 
 class PublicScreenshotListResponse(BaseModel):

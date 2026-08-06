@@ -11,7 +11,7 @@ declared on the model when serializing.
 
 import mimetypes
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from backend.config import settings
@@ -72,8 +72,8 @@ async def gallery_get_game(game_id: int):
 @router.get("/games/{game_id}/screenshots", response_model=PublicScreenshotListResponse)
 async def gallery_game_screenshots(
     game_id: int,
-    page: int = 1,
-    limit: int = 50,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=100),
     sort: str = "date_desc",
 ):
     """List screenshots for a public game with slim response shape."""

@@ -1,6 +1,6 @@
 """Game management routes."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -204,8 +204,8 @@ async def get_cover(game_id: int):
 @router.get("/{game_id}/screenshots")
 async def get_game_screenshots(
     game_id: int,
-    page: int = 1,
-    limit: int = 50,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=100),
     sort: str = "date_desc",
 ):
     """List screenshots for a game."""

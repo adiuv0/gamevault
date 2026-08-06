@@ -1,4 +1,4 @@
-import { Heart, MessageSquare } from 'lucide-react';
+import { Files, Heart, MessageSquare } from 'lucide-react';
 import { getThumbnailUrl } from '@/api/screenshots';
 import { formatDate } from '@/lib/formatters';
 import type { Screenshot } from '@/lib/types';
@@ -29,6 +29,12 @@ export function ScreenshotCard({ screenshot, onClick }: ScreenshotCardProps) {
 
         {/* Badges overlay */}
         <div className="absolute top-2 right-2 flex items-center gap-1.5">
+          {(screenshot.variant_count ?? 1) > 1 && (
+            <div className="flex items-center gap-1 bg-black/70 backdrop-blur-sm rounded-full px-1.5 py-1 text-white/80">
+              <Files className="h-3 w-3" />
+              <span className="text-[10px] leading-none">{screenshot.variant_count}</span>
+            </div>
+          )}
           {screenshot.is_favorite && (
             <div className="bg-black/70 backdrop-blur-sm rounded-full p-1">
               <Heart className="h-3 w-3 text-red-400 fill-red-400" />

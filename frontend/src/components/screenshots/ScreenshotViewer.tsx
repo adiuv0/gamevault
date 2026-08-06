@@ -17,31 +17,18 @@ import { getScreenshotImageUrl } from '@/api/screenshots';
 import { toggleFavorite, createShareLink, getShareLink, deleteShareLink } from '@/api/screenshots';
 import { AnnotationEditor } from './AnnotationEditor';
 import { formatDateTime, formatFileSize } from '@/lib/formatters';
-import type { Screenshot, ShareLink } from '@/lib/types';
+import type { Screenshot, ScreenshotVariant, ShareLink } from '@/lib/types';
 
 
-// Special K writes a JXR (HDR) and a PNG (SDR) of the same moment side
-// by side; the importer keeps both and they end up as separate
-// screenshot rows that share a base filename. Find the matching sibling
-// (same stem, different extension/format) so the viewer can offer a
-// quick HDR <-> SDR toggle.
-function findPair(screenshot: Screenshot, all: Screenshot[]): Screenshot | null {
-  if (!screenshot.filename) return null;
-  const stem = screenshot.filename.replace(/\.[^.]+$/, '').toLowerCase();
-  if (!stem) return null;
-  const isHdrFmt = (fmt: string | null | undefined) =>
-    !!fmt && fmt.toLowerCase() === 'jxr';
-  for (const candidate of all) {
-    if (candidate.id === screenshot.id) continue;
-    if (!candidate.filename) continue;
-    const candidateStem = candidate.filename.replace(/\.[^.]+$/, '').toLowerCase();
-    if (candidateStem !== stem) continue;
-    // Must be a different *kind* of format — JXR <-> anything else.
-    // Don't pair two PNGs with the same base name (unlikely but possible).
-    if (isHdrFmt(candidate.format) === isHdrFmt(screenshot.format)) continue;
-    return candidate;
-  }
-  return null;
+function getVariants(screenshot: Screenshot | undefined): ScreenshotVariant[] {
+  if (!screenshot) return [];
+  return screenshot.variants?.length ? screenshot.variants : [screenshot];
+}
+
+function variantLabel(variant: ScreenshotVariant, index: number, variants: ScreenshotVariant[]): string {
+  const format = variant.format?.toUpperCase() || 'FILE';
+  const sameFormatCount = variants.filter((item) => item.format === variant.format).length;
+  return sameFormatCount > 1 ? `${format} ${index + 1}` : format;
 }
 
 interface ScreenshotViewerProps {
@@ -63,6 +50,7 @@ export function ScreenshotViewer({
 }: ScreenshotViewerProps) {
   const [showInfo, setShowInfo] = useState(false);
   const [togglingFav, setTogglingFav] = useState(false);
+  const [activeVariantId, setActiveVariantId] = useState<number | null>(null);
 
   // Share state
   const [showSharePanel, setShowSharePanel] = useState(false);
@@ -74,18 +62,16 @@ export function ScreenshotViewer({
   const screenshot = screenshots[currentIndex];
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < screenshots.length - 1;
+  const variants = useMemo(() => getVariants(screenshot), [screenshot]);
+  const activeVariant = variants.find((variant) => variant.id === activeVariantId)
+    || variants[0]
+    || screenshot;
 
-  // HDR <-> SDR sibling, if Special K wrote both formats of the same shot
-  const pair = useMemo(
-    () => (screenshot ? findPair(screenshot, screenshots) : null),
-    [screenshot, screenshots],
-  );
-
-  const handleSwapToPair = useCallback(() => {
-    if (!pair) return;
-    const idx = screenshots.findIndex((s) => s.id === pair.id);
-    if (idx >= 0) onNavigate(idx);
-  }, [pair, screenshots, onNavigate]);
+  const handleCycleVariant = useCallback(() => {
+    if (variants.length < 2 || !activeVariant) return;
+    const currentVariantIndex = variants.findIndex((variant) => variant.id === activeVariant.id);
+    setActiveVariantId(variants[(currentVariantIndex + 1) % variants.length].id);
+  }, [activeVariant, variants]);
 
   // Reset share state when screenshot changes
   useEffect(() => {
@@ -126,12 +112,11 @@ export function ScreenshotViewer({
           setShowInfo((prev) => !prev);
           break;
         case 'h':
-          // Toggle HDR <-> SDR sibling if available
-          handleSwapToPair();
+          handleCycleVariant();
           break;
       }
     },
-    [onClose, handlePrev, handleNext, handleSwapToPair, showSharePanel],
+    [onClose, handlePrev, handleNext, handleCycleVariant, showSharePanel],
   );
 
   useEffect(() => {
@@ -221,33 +206,40 @@ export function ScreenshotViewer({
     }
   };
 
-  if (!screenshot) return null;
+  if (!screenshot || !activeVariant) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-black/50">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-3 bg-black/50">
+        <div className="min-w-0 flex items-center gap-3 sm:gap-4">
           <span className="text-sm text-text-secondary">
             {currentIndex + 1} / {screenshots.length}
           </span>
-          <span className="text-sm text-text-muted truncate max-w-xs">
-            {screenshot.filename}
+          <span className="text-sm text-text-muted truncate max-w-[10rem] sm:max-w-xs">
+            {activeVariant.filename}
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
-          {pair && (
-            <button
-              onClick={handleSwapToPair}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md hover:bg-white/10 transition-colors"
-              title={`Switch to the ${pair.format?.toUpperCase() || 'paired'} version (h)`}
-            >
-              <Repeat2 className="h-4 w-4 text-white/70" />
-              <span className="text-xs font-mono text-white/70">
-                {pair.format ? pair.format.toUpperCase() : 'PAIR'}
-              </span>
-            </button>
+        <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-2">
+          {variants.length > 1 && (
+            <div className="flex items-center rounded-md bg-white/5 p-0.5" title="Switch file variant (h)">
+              <Repeat2 className="h-4 w-4 text-white/50 mx-1.5" />
+              {variants.map((variant, index) => (
+                <button
+                  key={variant.id}
+                  type="button"
+                  onClick={() => setActiveVariantId(variant.id)}
+                  className={`px-2 py-1 rounded text-xs transition-colors ${
+                    activeVariant.id === variant.id
+                      ? 'bg-white/15 text-white'
+                      : 'text-white/60 hover:text-white'
+                  }`}
+                >
+                  {variantLabel(variant, index, variants)}
+                </button>
+              ))}
+            </div>
           )}
 
           <button
@@ -285,8 +277,8 @@ export function ScreenshotViewer({
           </button>
 
           <a
-            href={getScreenshotImageUrl(screenshot.id)}
-            download={screenshot.filename}
+            href={getScreenshotImageUrl(activeVariant.id)}
+            download={activeVariant.filename}
             className="p-2 rounded-md hover:bg-white/10 transition-colors"
             title="Download"
           >
@@ -324,11 +316,11 @@ export function ScreenshotViewer({
         )}
 
         {/* Image */}
-        <div className={`flex-1 flex items-center justify-center p-4 ${showInfo ? 'mr-80' : ''}`}>
+        <div className={`flex-1 flex items-center justify-center p-4 ${showInfo ? 'sm:mr-80' : ''}`}>
           <img
-            key={screenshot.id}
-            src={getScreenshotImageUrl(screenshot.id)}
-            alt={screenshot.filename}
+            key={activeVariant.id}
+            src={getScreenshotImageUrl(activeVariant.id)}
+            alt={activeVariant.filename}
             className="max-w-full max-h-full object-contain select-none"
             draggable={false}
           />
@@ -336,7 +328,7 @@ export function ScreenshotViewer({
 
         {/* Share popup */}
         {showSharePanel && (
-          <div className="absolute top-2 right-4 z-20 w-80 bg-bg-secondary/95 backdrop-blur border border-border rounded-lg shadow-xl">
+          <div className="absolute top-2 right-4 z-20 w-80 max-w-[calc(100%-2rem)] bg-bg-secondary/95 backdrop-blur border border-border rounded-lg shadow-xl">
             <div className="p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium text-text-primary flex items-center gap-2">
@@ -430,32 +422,32 @@ export function ScreenshotViewer({
 
         {/* Info panel */}
         {showInfo && (
-          <div className="absolute right-0 top-0 bottom-0 w-80 bg-bg-secondary/95 backdrop-blur border-l border-border overflow-y-auto">
+          <div className="absolute right-0 top-0 bottom-0 w-full sm:w-80 bg-bg-secondary/95 backdrop-blur border-l border-border overflow-y-auto">
             <div className="p-4 space-y-4">
               <h3 className="text-sm font-medium text-text-primary">Details</h3>
 
               <div className="space-y-3 text-sm">
-                <InfoRow label="Filename" value={screenshot.filename} />
+                <InfoRow label="Filename" value={activeVariant.filename} />
                 <InfoRow
                   label="Date"
-                  value={formatDateTime(screenshot.taken_at || screenshot.uploaded_at)}
+                  value={formatDateTime(activeVariant.taken_at || activeVariant.uploaded_at)}
                 />
-                {screenshot.width && screenshot.height && (
+                {activeVariant.width && activeVariant.height && (
                   <InfoRow
                     label="Dimensions"
-                    value={`${screenshot.width} x ${screenshot.height}`}
+                    value={`${activeVariant.width} x ${activeVariant.height}`}
                   />
                 )}
                 <InfoRow
                   label="Size"
-                  value={formatFileSize(screenshot.file_size)}
+                  value={formatFileSize(activeVariant.file_size)}
                 />
-                {screenshot.format && (
-                  <InfoRow label="Format" value={screenshot.format.toUpperCase()} />
+                {activeVariant.format && (
+                  <InfoRow label="Format" value={activeVariant.format.toUpperCase()} />
                 )}
                 <InfoRow label="Source" value={
-                  screenshot.source === 'steam_import' ? 'Steam Import'
-                  : screenshot.source === 'steam_local' ? 'Steam Local'
+                  activeVariant.source === 'steam_import' ? 'Steam Import'
+                  : activeVariant.source === 'steam_local' ? 'Steam Local'
                   : 'Upload'
                 } />
                 {screenshot.steam_description && (

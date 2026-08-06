@@ -51,11 +51,16 @@ async def _find_capture_group(fields: dict) -> int | None:
 # GV-013: explicit allowlist for ORDER BY fragments — see game_service for
 # the rationale.
 SCREENSHOT_SORT_CLAUSES: dict[str, str] = {
-    "date_asc": "s.taken_at ASC, s.id ASC",
-    "date_desc": "s.taken_at DESC, s.id DESC",
-    "name": "s.filename ASC",
+    "date_asc": "MIN(taken_at) ASC, MIN(id) ASC",
+    "date_desc": "MAX(taken_at) DESC, MAX(id) DESC",
+    "name": "MIN(filename) ASC, MIN(id) ASC",
 }
-SCREENSHOT_DEFAULT_SORT = "s.taken_at DESC, s.id DESC"
+SCREENSHOT_DEFAULT_SORT = SCREENSHOT_SORT_CLAUSES["date_desc"]
+
+_VARIANT_PREFERENCE = """CASE
+    WHEN lower(COALESCE(s.format, '')) IN ('jxr', 'wdp') THEN 1
+    ELSE 0
+END, s.id"""
 
 
 async def list_screenshots(
@@ -72,27 +77,60 @@ async def list_screenshots(
 
     order_clause = SCREENSHOT_SORT_CLAUSES.get(sort, SCREENSHOT_DEFAULT_SORT)
 
-    # Get total count
+    # Paginate logical captures, not physical variants.
     cursor = await db.execute(
-        "SELECT COUNT(*) FROM screenshots WHERE game_id = ?",
+        """SELECT COUNT(DISTINCT COALESCE(capture_group_id, id))
+           FROM screenshots WHERE game_id = ?""",
         (game_id,),
     )
     total = (await cursor.fetchone())[0]
 
-    # Get page of results
+    # Page compact group IDs first so only variants for the visible captures
+    # are materialized below.
     offset = (page - 1) * limit
     cursor = await db.execute(
-        f"""SELECT s.*,
-            EXISTS(SELECT 1 FROM annotations a WHERE a.screenshot_id = s.id) as has_annotation
-        FROM screenshots s
-        WHERE s.game_id = ?
-        ORDER BY {order_clause}
-        LIMIT ? OFFSET ?""",
+        f"""SELECT COALESCE(capture_group_id, id) AS group_id
+            FROM screenshots
+            WHERE game_id = ?
+            GROUP BY COALESCE(capture_group_id, id)
+            ORDER BY {order_clause}
+            LIMIT ? OFFSET ?""",
         (game_id, limit, offset),
     )
-    columns = [desc[0] for desc in cursor.description]
-    rows = await cursor.fetchall()
-    screenshots = [dict(zip(columns, row)) for row in rows]
+    group_ids = [row[0] for row in await cursor.fetchall()]
+    if not group_ids:
+        return [], total
+
+    placeholders = ", ".join("?" for _ in group_ids)
+    cursor = await db.execute(
+        f"""SELECT s.*,
+                   EXISTS(
+                       SELECT 1 FROM annotations a WHERE a.screenshot_id = s.id
+                   ) AS has_annotation
+            FROM screenshots s
+            WHERE s.game_id = ?
+              AND COALESCE(s.capture_group_id, s.id) IN ({placeholders})
+            ORDER BY COALESCE(s.capture_group_id, s.id), {_VARIANT_PREFERENCE}""",
+        (game_id, *group_ids),
+    )
+    variant_columns = [desc[0] for desc in cursor.description]
+    variants_by_group: dict[int, list[dict]] = {group_id: [] for group_id in group_ids}
+    for row in await cursor.fetchall():
+        variant = dict(zip(variant_columns, row))
+        group_id = variant.get("capture_group_id") or variant["id"]
+        variants_by_group.setdefault(group_id, []).append(variant)
+
+    screenshots = []
+    for group_id in group_ids:
+        variants = variants_by_group.get(group_id, [])
+        if not variants:
+            continue
+        screenshot = dict(variants[0])
+        screenshot["variants"] = variants
+        screenshot["variant_count"] = len(variants)
+        screenshot["is_favorite"] = any(item.get("is_favorite") for item in variants)
+        screenshot["has_annotation"] = any(item.get("has_annotation") for item in variants)
+        screenshots.append(screenshot)
 
     return screenshots, total
 
@@ -231,17 +269,46 @@ async def delete_screenshot(screenshot_id: int) -> bool:
     return True
 
 
-async def toggle_favorite(screenshot_id: int) -> bool:
-    """Toggle favorite status. Returns new is_favorite value."""
+async def _get_capture_identity(screenshot_id: int) -> tuple[int, int] | None:
     db = await get_db()
-    screenshot = await get_screenshot(screenshot_id)
-    if not screenshot:
+    cursor = await db.execute(
+        """SELECT game_id, COALESCE(capture_group_id, id)
+           FROM screenshots WHERE id = ?""",
+        (screenshot_id,),
+    )
+    row = await cursor.fetchone()
+    return (row[0], row[1]) if row else None
+
+
+async def _get_capture_member_ids(game_id: int, capture_group_id: int) -> list[int]:
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT id FROM screenshots
+           WHERE game_id = ? AND COALESCE(capture_group_id, id) = ?
+           ORDER BY id""",
+        (game_id, capture_group_id),
+    )
+    return [row[0] for row in await cursor.fetchall()]
+
+
+async def toggle_favorite(screenshot_id: int) -> bool:
+    """Toggle favorite status for the logical capture."""
+    db = await get_db()
+    identity = await _get_capture_identity(screenshot_id)
+    if not identity:
         raise ValueError(f"Screenshot {screenshot_id} not found")
 
-    new_value = 0 if screenshot["is_favorite"] else 1
+    game_id, capture_group_id = identity
+    cursor = await db.execute(
+        """SELECT MAX(is_favorite) FROM screenshots
+           WHERE game_id = ? AND COALESCE(capture_group_id, id) = ?""",
+        (game_id, capture_group_id),
+    )
+    new_value = 0 if (await cursor.fetchone())[0] else 1
     await db.execute(
-        "UPDATE screenshots SET is_favorite = ?, updated_at = datetime('now') WHERE id = ?",
-        (new_value, screenshot_id),
+        """UPDATE screenshots SET is_favorite = ?, updated_at = datetime('now')
+           WHERE game_id = ? AND COALESCE(capture_group_id, id) = ?""",
+        (new_value, game_id, capture_group_id),
     )
     await db.commit()
     return bool(new_value)
@@ -293,11 +360,20 @@ async def check_hashes_batch(hashes: list[str]) -> set[str]:
 # ── Annotation helpers ───────────────────────────────────────────────────────
 
 async def get_annotation(screenshot_id: int) -> dict | None:
-    """Get annotation for a screenshot."""
+    """Get the annotation attached to a logical capture."""
     db = await get_db()
+    identity = await _get_capture_identity(screenshot_id)
+    if not identity:
+        return None
+    game_id, capture_group_id = identity
     cursor = await db.execute(
-        "SELECT * FROM annotations WHERE screenshot_id = ?",
-        (screenshot_id,),
+        """SELECT a.* FROM annotations a
+           JOIN screenshots s ON s.id = a.screenshot_id
+           WHERE s.game_id = ? AND COALESCE(s.capture_group_id, s.id) = ?
+           ORDER BY CASE WHEN s.id = ? THEN 0 ELSE 1 END,
+                    a.updated_at DESC, a.id DESC
+           LIMIT 1""",
+        (game_id, capture_group_id, screenshot_id),
     )
     columns = [desc[0] for desc in cursor.description]
     row = await cursor.fetchone()
@@ -307,40 +383,55 @@ async def get_annotation(screenshot_id: int) -> dict | None:
 
 
 async def save_annotation(screenshot_id: int, content: str, content_html: str | None = None) -> dict:
-    """Create or update an annotation for a screenshot."""
+    """Create or update the annotation for a logical capture."""
     db = await get_db()
 
+    identity = await _get_capture_identity(screenshot_id)
+    if not identity:
+        raise ValueError(f"Screenshot {screenshot_id} not found")
+    member_ids = await _get_capture_member_ids(*identity)
     existing = await get_annotation(screenshot_id)
     if existing:
         await db.execute(
             """UPDATE annotations SET content = ?, content_html = ?, updated_at = datetime('now')
-               WHERE screenshot_id = ?""",
-            (content, content_html, screenshot_id),
+               WHERE id = ?""",
+            (content, content_html, existing["id"]),
+        )
+        await db.execute(
+            f"""DELETE FROM annotations
+                WHERE screenshot_id IN ({', '.join('?' for _ in member_ids)})
+                  AND id != ?""",
+            (*member_ids, existing["id"]),
         )
     else:
         await db.execute(
             "INSERT INTO annotations (screenshot_id, content, content_html) VALUES (?, ?, ?)",
             (screenshot_id, content, content_html),
         )
+    # Re-sync every physical member so stale pre-group annotations disappear.
+    for member_id in member_ids:
+        await _sync_fts(member_id, commit=False)
     await db.commit()
-
-    # Re-sync FTS with updated annotation
-    await _sync_fts(screenshot_id)
 
     return await get_annotation(screenshot_id)
 
 
 async def delete_annotation(screenshot_id: int) -> bool:
-    """Delete annotation for a screenshot."""
+    """Delete every annotation attached to a logical capture."""
     db = await get_db()
+    identity = await _get_capture_identity(screenshot_id)
+    if not identity:
+        return False
+    game_id, capture_group_id = identity
+    member_ids = await _get_capture_member_ids(game_id, capture_group_id)
     cursor = await db.execute(
-        "DELETE FROM annotations WHERE screenshot_id = ?",
-        (screenshot_id,),
+        f"DELETE FROM annotations WHERE screenshot_id IN ({', '.join('?' for _ in member_ids)})",
+        member_ids,
     )
-    await db.commit()
-
     # Re-sync FTS without annotation
-    await _sync_fts(screenshot_id)
+    for member_id in member_ids:
+        await _sync_fts(member_id, commit=False)
+    await db.commit()
 
     return cursor.rowcount > 0
 
