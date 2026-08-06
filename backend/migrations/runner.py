@@ -15,6 +15,8 @@ MIGRATIONS = [
     "backend.migrations.m003_specialk",
     "backend.migrations.m004_resanitize_annotations",
     "backend.migrations.m005_drop_tags",
+    "backend.migrations.m006_gallery_indexes",
+    "backend.migrations.m007_capture_groups",
 ]
 
 

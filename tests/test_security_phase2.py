@@ -75,6 +75,47 @@ class TestSafeLibraryPath:
             assert exc.value.status_code == 404
 
 
+class TestSafeMediaPath:
+    def test_prefers_cached_thumbnail(self, monkeypatch, tmp_path):
+        from backend.config import settings
+        from backend.services.filesystem import safe_media_path
+
+        library_dir = tmp_path / "library"
+        thumbnail_dir = tmp_path / "cache" / "thumbnails"
+        monkeypatch.setattr(settings, "library_dir", library_dir)
+        monkeypatch.setattr(settings, "thumbnail_dir", thumbnail_dir)
+
+        cached = thumbnail_dir / "Game" / "300" / "shot.jpg"
+        cached.parent.mkdir(parents=True)
+        cached.write_bytes(b"cached")
+
+        resolved = safe_media_path("Game/thumbnails/300/shot.jpg")
+        assert resolved == cached.resolve()
+
+    def test_falls_back_to_legacy_thumbnail(self, monkeypatch, tmp_path):
+        from backend.config import settings
+        from backend.services.filesystem import safe_media_path
+
+        library_dir = tmp_path / "library"
+        monkeypatch.setattr(settings, "library_dir", library_dir)
+        monkeypatch.setattr(settings, "thumbnail_dir", tmp_path / "empty-cache")
+
+        legacy = library_dir / "Game" / "thumbnails" / "300" / "shot.jpg"
+        resolved = safe_media_path("Game/thumbnails/300/shot.jpg")
+        assert resolved == legacy.resolve()
+
+    @pytest.mark.parametrize("bad", ["../outside.jpg", "/etc/passwd", "Game/../../x"])
+    def test_rejects_unsafe_paths(self, monkeypatch, tmp_path, bad):
+        from backend.config import settings
+        from backend.services.filesystem import safe_media_path
+
+        monkeypatch.setattr(settings, "library_dir", tmp_path / "library")
+        monkeypatch.setattr(settings, "thumbnail_dir", tmp_path / "cache")
+
+        with pytest.raises(HTTPException, match="File not found"):
+            safe_media_path(bad)
+
+
 # ── GV-005: scoped ?token= acceptance ────────────────────────────────────────
 
 

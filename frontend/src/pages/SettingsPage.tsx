@@ -26,6 +26,7 @@ import {
   saveApiKey,
   deleteApiKey,
   savePreferences,
+  migrateThumbnailCache,
 } from '@/api/settings';
 import type { AppSettings, ToneMapAlgorithm } from '@/api/settings';
 import { Save, Trash2, Sparkles } from 'lucide-react';
@@ -35,6 +36,8 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [migratingThumbnails, setMigratingThumbnails] = useState(false);
+  const [thumbnailMigrationResult, setThumbnailMigrationResult] = useState<string | null>(null);
 
   // Password change state
   const [currentPassword, setCurrentPassword] = useState('');
@@ -88,6 +91,26 @@ export function SettingsPage() {
     }
   };
 
+  const handleMigrateThumbnails = async () => {
+    try {
+      setMigratingThumbnails(true);
+      setThumbnailMigrationResult(null);
+      const result = await migrateThumbnailCache();
+      setThumbnailMigrationResult(
+        result.moved > 0
+          ? `Moved ${result.moved.toLocaleString()} thumbnails`
+          : 'Thumbnail cache is up to date',
+      );
+      await loadSettings();
+    } catch (err) {
+      setThumbnailMigrationResult(
+        err instanceof Error ? err.message : 'Thumbnail migration failed',
+      );
+    } finally {
+      setMigratingThumbnails(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -126,6 +149,26 @@ export function SettingsPage() {
             <StatCard icon={<Share2 className="h-4 w-4" />} label="Active Shares" value={settings.active_share_count} />
             <StatCard icon={<Download className="h-4 w-4" />} label="Imports" value={settings.import_session_count} />
             <StatCard icon={<HardDrive className="h-4 w-4" />} label="Disk Usage" value={settings.library_size} />
+            <StatCard icon={<HardDrive className="h-4 w-4" />} label="Thumbnail Cache" value={settings.thumbnail_cache_size} />
+          </div>
+
+          <div className="flex items-center gap-3 mt-4">
+            <button
+              type="button"
+              onClick={handleMigrateThumbnails}
+              disabled={migratingThumbnails}
+              className="flex items-center gap-2 px-3 py-1.5 bg-bg-tertiary text-text-primary rounded-md text-sm hover:bg-bg-tertiary/80 transition-colors disabled:opacity-50"
+            >
+              {migratingThumbnails ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <HardDrive className="h-4 w-4" />
+              )}
+              Migrate thumbnails
+            </button>
+            {thumbnailMigrationResult && (
+              <span className="text-xs text-text-muted">{thumbnailMigrationResult}</span>
+            )}
           </div>
         </section>
 
@@ -139,6 +182,7 @@ export function SettingsPage() {
           <div className="space-y-3 text-sm">
             <ConfigRow label="Base URL" value={settings.base_url} />
             <ConfigRow label="Library Path" value={settings.library_dir} />
+            <ConfigRow label="Thumbnail Cache" value={settings.thumbnail_dir} />
             <ConfigRow label="Max Upload Size" value={`${settings.max_upload_size_mb} MB`} />
             <ConfigRow label="Thumbnail Quality" value={`${settings.thumbnail_quality}%`} />
             <ConfigRow label="Import Rate Limit" value={`${settings.import_rate_limit_ms}ms`} />

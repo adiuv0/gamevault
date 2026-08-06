@@ -97,6 +97,7 @@ These enable richer game metadata and cover art. Add them anytime from the Setti
 | `GAMEVAULT_IMPORT_RATE_LIMIT_MS` | `1000` | Delay between Steam requests during import |
 | `GAMEVAULT_MAX_UPLOAD_SIZE_MB` | `50` | Max file size for uploads |
 | `GAMEVAULT_THUMBNAIL_QUALITY` | `85` | JPEG quality for thumbnails (1-100) |
+| `GAMEVAULT_THUMBNAIL_DIR` | `/data/cache/thumbnails` | Fast local storage for generated thumbnails |
 | `GAMEVAULT_TOKEN_EXPIRY_DAYS` | `30` | Login token lifetime |
 | `TZ` | `UTC` | Container timezone |
 
@@ -104,7 +105,7 @@ These enable richer game metadata and cover art. Add them anytime from the Setti
 
 | Container Path | Purpose |
 |---------------|---------|
-| `/data` | Database (`gamevault.db`), thumbnails, config |
+| `/data` | Database (`gamevault.db`), generated-thumbnail cache, config |
 | `/data/library` | Full-size screenshot files, organized by game |
 
 You can mount `/data/library` separately if you want screenshots on a different drive or array:
@@ -114,6 +115,9 @@ volumes:
   - /mnt/user/appdata/gamevault:/data
   - /mnt/user/screenshots:/data/library
 ```
+
+Keep `/data/cache/thumbnails` on SSD-backed appdata. Existing installations can
+move legacy thumbnails there from **Settings > Library Stats > Migrate thumbnails**.
 
 ## Unraid Installation
 

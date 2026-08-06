@@ -40,7 +40,7 @@ from backend.services.image_processor import (
     compute_sha256,
     extract_date_taken,
     extract_exif,
-    generate_thumbnails,
+    generate_thumbnails_with_hash,
     get_image_dimensions,
     get_image_format,
     validate_image,
@@ -475,7 +475,7 @@ async def _import_single_file(
 ) -> str:
     """Import a single Special K screenshot file. Returns 'completed' | 'skipped' | 'failed'."""
 
-    if not validate_image(src_path):
+    if not await asyncio.to_thread(validate_image, src_path):
         await emit_progress(session_id, "screenshot_failed", {
             "filename": src_path.name,
             "game_name": game_name,
@@ -525,8 +525,8 @@ async def _import_single_file(
     taken_at = (date_taken or mtime).isoformat()
 
     filename_stem = Path(filename).stem
-    sm, md = await asyncio.to_thread(
-        generate_thumbnails, dest_path, game_folder, filename_stem
+    sm, md, perceptual_hash = await asyncio.to_thread(
+        generate_thumbnails_with_hash, dest_path, game_folder, filename_stem
     )
 
     rel_path = f"{game_folder}/screenshots/{filename}"
@@ -536,6 +536,7 @@ async def _import_single_file(
         filename=filename,
         file_path=rel_path,
         source="specialk_import",
+        recalculate_stats=False,
         sha256_hash=sha256,
         width=width,
         height=height,
@@ -545,6 +546,8 @@ async def _import_single_file(
         exif_data=json.dumps(exif) if exif else None,
         thumbnail_path_sm=sm,
         thumbnail_path_md=md,
+        perceptual_hash=perceptual_hash,
+        source_key=f"specialk:{src_path.stem.casefold()}",
     )
 
     await emit_progress(session_id, "screenshot_complete", {

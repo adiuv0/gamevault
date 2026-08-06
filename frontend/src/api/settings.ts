@@ -5,6 +5,7 @@ export type ToneMapAlgorithm = 'reinhard' | 'aces' | 'clip';
 export interface AppSettings {
   base_url: string;
   library_dir: string;
+  thumbnail_dir: string;
   auth_disabled: boolean;
   import_rate_limit_ms: number;
   thumbnail_quality: number;
@@ -15,6 +16,8 @@ export interface AppSettings {
   has_igdb_credentials: boolean;
   library_size: string;
   library_size_bytes: number;
+  thumbnail_cache_size: string;
+  thumbnail_cache_size_bytes: number;
   game_count: number;
   screenshot_count: number;
   annotation_count: number;
@@ -39,6 +42,17 @@ export async function savePreferences(
 
 export async function getSettings(): Promise<AppSettings> {
   return api.get('/settings');
+}
+
+export interface ThumbnailMigrationResult {
+  moved: number;
+  already_cached: number;
+  missing: number;
+  invalid: number;
+}
+
+export async function migrateThumbnailCache(): Promise<ThumbnailMigrationResult> {
+  return api.post('/settings/thumbnail-cache/migrate');
 }
 
 export async function changePassword(

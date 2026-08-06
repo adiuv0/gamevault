@@ -28,6 +28,8 @@ async def db_with_library(monkeypatch, tmp_path: Path):
     from backend.database import close_db, get_db, init_db
 
     monkeypatch.setattr(app_settings, "library_dir", tmp_path)
+    thumbnail_dir = tmp_path / "cache" / "thumbnails"
+    monkeypatch.setattr(app_settings, "thumbnail_dir", thumbnail_dir)
     await init_db()
 
     db = await get_db()
@@ -113,14 +115,16 @@ class TestMergeGames:
     ):
         from backend.services import game_service, screenshot_service
 
+        library_dir = db_with_library
+        thumbnail_dir = library_dir / "cache" / "thumbnails"
         source = await game_service.create_game(name="Cyberpunk 2077")
         target = await game_service.create_game(name="Cyberpunk")
 
         # Plant two on-disk files for the source's screenshots
         s_folder = source["folder_name"]
-        _write(tmp_path / s_folder / "screenshots" / "shot_a.jpg", b"AAAA")
-        _write(tmp_path / s_folder / "thumbnails" / "300" / "shot_a.jpg", b"sm")
-        _write(tmp_path / s_folder / "thumbnails" / "800" / "shot_a.jpg", b"md")
+        _write(library_dir / s_folder / "screenshots" / "shot_a.jpg", b"AAAA")
+        _write(thumbnail_dir / s_folder / "300" / "shot_a.jpg", b"sm")
+        _write(thumbnail_dir / s_folder / "800" / "shot_a.jpg", b"md")
 
         s1 = await screenshot_service.create_screenshot(
             game_id=source["id"],
@@ -146,13 +150,14 @@ class TestMergeGames:
 
         # Files actually live in the target folder now
         t_folder = target["folder_name"]
-        assert (tmp_path / t_folder / "screenshots" / "shot_a.jpg").read_bytes() == b"AAAA"
-        assert (tmp_path / t_folder / "thumbnails" / "300" / "shot_a.jpg").exists()
-        assert (tmp_path / t_folder / "thumbnails" / "800" / "shot_a.jpg").exists()
+        assert (library_dir / t_folder / "screenshots" / "shot_a.jpg").read_bytes() == b"AAAA"
+        assert (thumbnail_dir / t_folder / "300" / "shot_a.jpg").exists()
+        assert (thumbnail_dir / t_folder / "800" / "shot_a.jpg").exists()
         assert moved["file_path"] == f"{t_folder}/screenshots/shot_a.jpg"
 
         # Source folder is cleaned up
-        assert not (tmp_path / s_folder).exists()
+        assert not (library_dir / s_folder).exists()
+        assert not (thumbnail_dir / s_folder).exists()
 
     @pytest.mark.asyncio
     async def test_resolves_filename_collisions(

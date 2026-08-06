@@ -14,6 +14,7 @@ from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ExifTags
+import dhash
 
 from backend.config import settings
 from backend.services import hdr_processor
@@ -265,24 +266,37 @@ def generate_thumbnail(
         if img is None:
             return False
 
-        # Calculate proportional height
-        width, height = img.size
-        if width <= max_width:
-            ratio = 1.0
-        else:
-            ratio = max_width / width
-
-        new_width = int(width * ratio)
-        new_height = int(height * ratio)
-
-        if ratio < 1.0:
-            img = img.resize((new_width, new_height), Image.LANCZOS)
-
-        img.save(dest_path, "JPEG", quality=quality, optimize=True)
-        return True
+        try:
+            return _save_thumbnail(img, dest_path, max_width, quality)
+        finally:
+            img.close()
     except Exception as e:
         logger.warning("Thumbnail generation failed for %s: %s", source_path, e)
         return False
+
+
+def _save_thumbnail(
+    source: Image.Image,
+    dest_path: Path,
+    max_width: int,
+    quality: int,
+) -> bool:
+    """Resize and save one thumbnail from an already-decoded image."""
+    width, height = source.size
+    ratio = min(1.0, max_width / width)
+    new_size = (int(width * ratio), int(height * ratio))
+
+    image = source.copy()
+    try:
+        if ratio < 1.0:
+            resized = image.resize(new_size, Image.LANCZOS)
+            image.close()
+            image = resized
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        image.save(dest_path, "JPEG", quality=quality, optimize=True)
+        return True
+    finally:
+        image.close()
 
 
 def generate_thumbnails(
@@ -294,24 +308,43 @@ def generate_thumbnails(
 
     Returns (sm_relative_path, md_relative_path) relative to library root.
     """
+    sm, md, _ = generate_thumbnails_with_hash(source_path, game_folder, filename_stem)
+    return sm, md
+
+
+def generate_thumbnails_with_hash(
+    source_path: Path,
+    game_folder: str,
+    filename_stem: str,
+) -> tuple[str | None, str | None, str | None]:
+    """Generate both thumbnails and a 128-bit perceptual dHash in one decode."""
     from backend.services.filesystem import get_thumbnails_dir
 
     thumb_filename = f"{filename_stem}.jpg"
 
-    # Small thumbnail (300px) for grid cards
-    sm_dir = get_thumbnails_dir(game_folder, "300")
-    sm_path = sm_dir / thumb_filename
-    sm_ok = generate_thumbnail(source_path, sm_path, 300)
+    sm_path = get_thumbnails_dir(game_folder, "300") / thumb_filename
+    md_path = get_thumbnails_dir(game_folder, "800") / thumb_filename
 
-    # Medium thumbnail (800px) for gallery preview
-    md_dir = get_thumbnails_dir(game_folder, "800")
-    md_path = md_dir / thumb_filename
-    md_ok = generate_thumbnail(source_path, md_path, 800)
+    image = _open_for_thumbnail(source_path)
+    if image is None:
+        return None, None, None
+    try:
+        row_hash, col_hash = dhash.dhash_row_col(image)
+        perceptual_hash = dhash.format_hex(row_hash, col_hash)
+        quality = settings.thumbnail_quality
+        sm_ok = _save_thumbnail(image, sm_path, 300, quality)
+        md_ok = _save_thumbnail(image, md_path, 800, quality)
+    except Exception as e:
+        logger.warning("Thumbnail generation failed for %s: %s", source_path, e)
+        sm_ok = md_ok = False
+        perceptual_hash = None
+    finally:
+        image.close()
 
     sm_rel = f"{game_folder}/thumbnails/300/{thumb_filename}" if sm_ok else None
     md_rel = f"{game_folder}/thumbnails/800/{thumb_filename}" if md_ok else None
 
-    return sm_rel, md_rel
+    return sm_rel, md_rel, perceptual_hash
 
 
 def validate_image(file_path: Path) -> bool:

@@ -62,8 +62,8 @@ def get_screenshots_dir(folder_name: str) -> Path:
 
 
 def get_thumbnails_dir(folder_name: str, size: str) -> Path:
-    """Get the path to a game's thumbnails directory for a given size."""
-    return get_game_dir(folder_name) / "thumbnails" / size
+    """Get a game's generated-thumbnail directory on fast cache storage."""
+    return settings.thumbnail_dir / folder_name / size
 
 
 def get_metadata_dir(folder_name: str) -> Path:
@@ -111,11 +111,56 @@ def safe_library_path(rel_path: str | None) -> Path:
     return candidate
 
 
+def thumbnail_cache_path(rel_path: str | None) -> Path | None:
+    """Map a legacy-shaped thumbnail path to cache storage."""
+    if not rel_path:
+        return None
+    relative = Path(rel_path)
+    parts = relative.parts
+    if len(parts) < 4 or parts[1] != "thumbnails" or parts[2] not in {"300", "800"}:
+        return None
+
+    cache_root = settings.thumbnail_dir.resolve()
+    cache_relative = Path(parts[0], *parts[2:])
+    cache_path = (cache_root / cache_relative).resolve()
+    try:
+        cache_path.relative_to(cache_root)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="File not found")
+    return cache_path
+
+
+def safe_media_path(rel_path: str | None) -> Path:
+    """Resolve a stored media path, preferring the thumbnail cache.
+
+    Thumbnail paths retain their historical database shape
+    (``Game/thumbnails/300/file.jpg``). New files live under
+    ``thumbnail_dir/Game/300`` while legacy files continue to resolve from
+    ``library_dir``. Non-thumbnail paths always resolve under ``library_dir``.
+    """
+    legacy_path = safe_library_path(rel_path)
+    cache_path = thumbnail_cache_path(rel_path)
+    if cache_path is not None and cache_path.exists():
+        return cache_path
+
+    return legacy_path
+
+
 def get_library_size_bytes() -> int:
     """Calculate total size of the screenshot library on disk."""
     total = 0
     if settings.library_dir.exists():
         for f in settings.library_dir.rglob("*"):
+            if f.is_file():
+                total += f.stat().st_size
+    return total
+
+
+def get_thumbnail_cache_size_bytes() -> int:
+    """Calculate the size of generated thumbnails on cache storage."""
+    total = 0
+    if settings.thumbnail_dir.exists():
+        for f in settings.thumbnail_dir.rglob("*"):
             if f.is_file():
                 total += f.stat().st_size
     return total

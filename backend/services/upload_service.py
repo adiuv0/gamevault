@@ -15,12 +15,12 @@ from backend.config import settings
 logger = logging.getLogger(__name__)
 
 from backend.services.filesystem import get_screenshots_dir, sanitize_filename
-from backend.services.game_service import get_game
+from backend.services.game_service import get_game, update_screenshot_stats
 from backend.services.image_processor import (
     compute_sha256,
     extract_date_taken,
     extract_exif,
-    generate_thumbnails,
+    generate_thumbnails_with_hash,
     get_image_dimensions,
     get_image_format,
     validate_image,
@@ -155,7 +155,7 @@ async def process_upload(
             })
 
             # Validate image
-            if not validate_image(temp_path):
+            if not await asyncio.to_thread(validate_image, temp_path):
                 logger.warning("process_upload: INVALID IMAGE %s (size=%d)",
                                original_name, temp_path.stat().st_size if temp_path.exists() else -1)
                 await emit_progress(task_id, {
@@ -168,7 +168,7 @@ async def process_upload(
 
             # Determine real format from magic bytes and enforce whitelist.
             # This prevents Stored XSS via malicious extensions (e.g. .html).
-            detected_format = (get_image_format(temp_path) or "").lower()
+            detected_format = (await asyncio.to_thread(get_image_format, temp_path) or "").lower()
             if detected_format not in ALLOWED_IMAGE_FORMATS:
                 await emit_progress(task_id, {
                     "type": "file_error",
@@ -179,12 +179,12 @@ async def process_upload(
                 continue
             ext = ALLOWED_IMAGE_FORMATS[detected_format]
 
-            img_dims = get_image_dimensions(temp_path)
-            img_format = get_image_format(temp_path)
+            img_dims = await asyncio.to_thread(get_image_dimensions, temp_path)
+            img_format = detected_format
             file_size = temp_path.stat().st_size
-            sha256 = compute_sha256(temp_path)
-            exif = extract_exif(temp_path)
-            date_taken_exif = extract_date_taken(temp_path)
+            sha256 = await asyncio.to_thread(compute_sha256, temp_path)
+            exif = await asyncio.to_thread(extract_exif, temp_path)
+            date_taken_exif = await asyncio.to_thread(extract_date_taken, temp_path)
 
             img_data = {
                 "width": img_dims[0] if img_dims else None,
@@ -224,12 +224,14 @@ async def process_upload(
             filename = _ensure_unique_filename(screenshots_dir, filename)
             final_path = screenshots_dir / filename
 
-            shutil.copy2(str(temp_path), str(final_path))
+            await asyncio.to_thread(shutil.copy2, str(temp_path), str(final_path))
             logger.info("process_upload: SAVED %s -> %s (%d bytes)",
                         original_name, final_path, final_path.stat().st_size)
 
             # Generate thumbnails
-            sm, md = generate_thumbnails(final_path, folder_name, Path(filename).stem)
+            sm, md, perceptual_hash = await asyncio.to_thread(
+                generate_thumbnails_with_hash, final_path, folder_name, Path(filename).stem
+            )
 
             # Create file_path relative to library
             rel_path = f"{folder_name}/screenshots/{filename}"
@@ -240,6 +242,7 @@ async def process_upload(
                 filename=filename,
                 file_path=rel_path,
                 source="upload",
+                recalculate_stats=False,
                 thumbnail_path_sm=sm,
                 thumbnail_path_md=md,
                 file_size=img_data.get("file_size"),
@@ -249,6 +252,8 @@ async def process_upload(
                 taken_at=taken_at.isoformat() if taken_at else None,
                 sha256_hash=img_data.get("sha256_hash"),
                 exif_data=img_data.get("exif_data"),
+                perceptual_hash=perceptual_hash,
+                source_key=f"upload:{task_id}:{Path(original_name).stem.casefold()}",
             )
 
             results.append(screenshot)
@@ -276,6 +281,9 @@ async def process_upload(
                 temp_path.unlink(missing_ok=True)
             except Exception:
                 pass
+
+    if results:
+        await update_screenshot_stats(game_id)
 
     await emit_progress(task_id, {
         "type": "complete",

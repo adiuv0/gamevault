@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Search, Filter, Heart, MessageSquare, X, Loader2, Image } from 'lucide-react';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
@@ -30,29 +30,7 @@ export function SearchPage() {
   // Game list for filter dropdown
   const [games, setGames] = useState<Game[]>([]);
 
-  useEffect(() => {
-    loadGames();
-  }, []);
-
-  useEffect(() => {
-    if (query) {
-      performSearch(1);
-    } else {
-      setResults([]);
-      setTotal(0);
-    }
-  }, [query, selectedGameId, dateFrom, dateTo, favoritesOnly, sortBy]);
-
-  const loadGames = async () => {
-    try {
-      const data = await listGames('name');
-      setGames(data.games);
-    } catch {
-      // ignore
-    }
-  };
-
-  const performSearch = async (pageNum: number) => {
+  const performSearch = useCallback(async (pageNum: number) => {
     try {
       setLoading(true);
       const data = await search({
@@ -78,7 +56,28 @@ export function SearchPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [dateFrom, dateTo, favoritesOnly, query, selectedGameId, sortBy]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listGames('name')
+      .then((data) => {
+        if (!cancelled) setGames(data.games);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (query) {
+      void performSearch(1);
+    } else {
+      setResults([]);
+      setTotal(0);
+    }
+  }, [query, performSearch]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();

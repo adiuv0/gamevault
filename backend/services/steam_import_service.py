@@ -23,7 +23,7 @@ from backend.services.screenshot_service import (
 )
 from backend.services.image_processor import (
     compute_sha256_bytes,
-    generate_thumbnails,
+    generate_thumbnails_with_hash,
     get_image_dimensions,
     get_image_format,
 )
@@ -502,17 +502,19 @@ async def _import_single_screenshot(
     screenshots_dir = get_screenshots_dir(game_folder)
     screenshots_dir.mkdir(parents=True, exist_ok=True)
     file_path = screenshots_dir / filename
-    file_path.write_bytes(image_data)
+    await asyncio.to_thread(file_path.write_bytes, image_data)
 
     # Get image metadata
-    dims = get_image_dimensions(file_path)
+    dims = await asyncio.to_thread(get_image_dimensions, file_path)
     width, height = dims if dims else (None, None)
-    fmt = get_image_format(file_path)
+    fmt = await asyncio.to_thread(get_image_format, file_path)
     file_size = len(image_data)
 
     # Generate thumbnails
     filename_stem = Path(filename).stem
-    thumb_sm, thumb_md = generate_thumbnails(file_path, game_folder, filename_stem)
+    thumb_sm, thumb_md, perceptual_hash = await asyncio.to_thread(
+        generate_thumbnails_with_hash, file_path, game_folder, filename_stem
+    )
 
     # Parse date from scraper
     taken_at = screenshot.date_taken  # already ISO string or None
@@ -526,6 +528,7 @@ async def _import_single_screenshot(
         filename=filename,
         file_path=rel_path,
         source="steam_import",
+        recalculate_stats=False,
         steam_screenshot_id=steam_id,
         steam_description=screenshot.description or None,
         sha256_hash=sha256,
@@ -536,6 +539,8 @@ async def _import_single_screenshot(
         taken_at=taken_at,
         thumbnail_path_sm=thumb_sm,
         thumbnail_path_md=thumb_md,
+        perceptual_hash=perceptual_hash,
+        source_key=f"steam:{steam_id}",
     )
 
     await emit_progress(session_id, "screenshot_complete", {

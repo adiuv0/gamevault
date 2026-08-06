@@ -165,6 +165,7 @@ class TestConfig:
         from backend.config import settings
         assert isinstance(settings.data_dir, Path)
         assert isinstance(settings.library_dir, Path)
+        assert isinstance(settings.thumbnail_dir, Path)
         assert isinstance(settings.db_path, Path)
 
 

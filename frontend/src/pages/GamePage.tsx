@@ -30,7 +30,7 @@ export function GamePage() {
   const [metaResult, setMetaResult] = useState<string | null>(null);
   const [showMergeModal, setShowMergeModal] = useState(false);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -47,11 +47,11 @@ export function GamePage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [gameId]);
 
   useEffect(() => {
-    fetchData();
-  }, [gameId]);
+    void fetchData();
+  }, [fetchData]);
 
   const loadMore = async () => {
     if (loadingMore || !hasMore) return;

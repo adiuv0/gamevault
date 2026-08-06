@@ -35,7 +35,7 @@ COPY backend/ ./backend/
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 # Create data directory and non-root user
-RUN mkdir -p /data/library \
+RUN mkdir -p /data/library /data/cache/thumbnails \
     && groupadd -r gamevault && useradd -r -g gamevault -d /app gamevault \
     && chown -R gamevault:gamevault /app /data
 
@@ -47,6 +47,7 @@ ENTRYPOINT ["/entrypoint.sh"]
 # Environment defaults
 ENV GAMEVAULT_DATA_DIR=/data
 ENV GAMEVAULT_LIBRARY_DIR=/data/library
+ENV GAMEVAULT_THUMBNAIL_DIR=/data/cache/thumbnails
 ENV GAMEVAULT_DB_PATH=/data/gamevault.db
 ENV PYTHONUNBUFFERED=1
 

@@ -31,8 +31,9 @@ in [backend/config.py](../backend/config.py). They can also be set via a
 
 | Variable | Default | Notes |
 |---|---|---|
-| `GAMEVAULT_DATA_DIR` | `/data` | Holds `gamevault.db`, `.secret_key`, thumbnails directory, library. |
-| `GAMEVAULT_LIBRARY_DIR` | `/data/library` | Per-game folders with `screenshots/`, `thumbnails/300/`, `thumbnails/800/`, `metadata/`. Mount on a separate drive if you want screenshots elsewhere. |
+| `GAMEVAULT_DATA_DIR` | `/data` | Holds `gamevault.db`, `.secret_key`, cache, and library by default. |
+| `GAMEVAULT_LIBRARY_DIR` | `/data/library` | Per-game original screenshots and metadata. Mount on a separate drive or array for large collections. |
+| `GAMEVAULT_THUMBNAIL_DIR` | `/data/cache/thumbnails` | Generated 300px and 800px JPEGs. Keep this on fast local or SSD-backed appdata storage. |
 | `GAMEVAULT_DB_PATH` | `/data/gamevault.db` | SQLite database file (WAL mode). |
 
 ### Authentication
@@ -69,7 +70,7 @@ take precedence over env vars.
 
 These are set automatically and rarely need overriding:
 
-- `GAMEVAULT_DATA_DIR`, `GAMEVAULT_LIBRARY_DIR`, `GAMEVAULT_DB_PATH` are
+- `GAMEVAULT_DATA_DIR`, `GAMEVAULT_LIBRARY_DIR`, `GAMEVAULT_THUMBNAIL_DIR`, `GAMEVAULT_DB_PATH` are
   baked into the Docker image.
 
 ---

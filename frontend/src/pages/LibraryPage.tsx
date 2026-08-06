@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Gamepad2, Plus, Loader2, RefreshCw, CheckCircle2, Trash2 } from 'lucide-react';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
@@ -21,7 +21,7 @@ export function LibraryPage() {
   const [metaResult, setMetaResult] = useState<string | null>(null);
   const [cleaningUp, setCleaningUp] = useState(false);
 
-  const fetchGames = async () => {
+  const fetchGames = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -32,11 +32,11 @@ export function LibraryPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [sortBy]);
 
   useEffect(() => {
-    fetchGames();
-  }, [sortBy]);
+    void fetchGames();
+  }, [fetchGames]);
 
   const handleCreateGame = async (e: React.FormEvent) => {
     e.preventDefault();

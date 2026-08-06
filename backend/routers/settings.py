@@ -6,7 +6,12 @@ from pydantic import BaseModel, Field
 from backend.auth import require_auth
 from backend.config import settings
 from backend.database import get_db
-from backend.services.filesystem import format_file_size, get_library_size_bytes
+from backend.services.filesystem import (
+    format_file_size,
+    get_library_size_bytes,
+    get_thumbnail_cache_size_bytes,
+)
+from backend.services.thumbnail_cache_service import migrate_legacy_thumbnails
 
 router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_auth)])
 
@@ -60,6 +65,7 @@ async def _read_preference(key_name: str, default: str = "") -> str:
 async def get_settings():
     """Get application settings (secrets redacted)."""
     lib_size = get_library_size_bytes()
+    cache_size = get_thumbnail_cache_size_bytes()
 
     # Database stats
     db = await get_db()
@@ -99,6 +105,7 @@ async def get_settings():
     return {
         "base_url": settings.base_url,
         "library_dir": str(settings.library_dir),
+        "thumbnail_dir": str(settings.thumbnail_dir),
         "auth_disabled": settings.disable_auth,
         "import_rate_limit_ms": settings.import_rate_limit_ms,
         "thumbnail_quality": settings.thumbnail_quality,
@@ -109,6 +116,8 @@ async def get_settings():
         "has_igdb_credentials": has_igdb,
         "library_size": format_file_size(lib_size),
         "library_size_bytes": lib_size,
+        "thumbnail_cache_size": format_file_size(cache_size),
+        "thumbnail_cache_size_bytes": cache_size,
         # Database stats
         "game_count": game_count,
         "screenshot_count": screenshot_count,
@@ -218,3 +227,9 @@ async def save_preferences(body: PreferenceUpdate):
 async def health_check():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+@router.post("/thumbnail-cache/migrate")
+async def migrate_thumbnail_cache():
+    """Move existing generated thumbnails from library storage to cache."""
+    return await migrate_legacy_thumbnails()

@@ -7,6 +7,47 @@ from backend.database import get_db
 from backend.services.game_service import update_screenshot_stats
 
 
+def _hash_distance(left: str, right: str) -> int:
+    return (int(left, 16) ^ int(right, 16)).bit_count()
+
+
+async def _find_capture_group(fields: dict) -> int | None:
+    """Find a high-confidence logical capture match for a new asset."""
+    db = await get_db()
+    game_id = fields["game_id"]
+    source_key = fields.get("source_key")
+    if source_key:
+        cursor = await db.execute(
+            """SELECT COALESCE(capture_group_id, id) FROM screenshots
+               WHERE game_id = ? AND source_key = ? ORDER BY id LIMIT 1""",
+            (game_id, source_key),
+        )
+        row = await cursor.fetchone()
+        if row:
+            return row[0]
+
+    perceptual_hash = fields.get("perceptual_hash")
+    width = fields.get("width")
+    height = fields.get("height")
+    taken_at = fields.get("taken_at")
+    if not perceptual_hash or not width or not height or not taken_at:
+        return None
+
+    cursor = await db.execute(
+        """SELECT COALESCE(capture_group_id, id), perceptual_hash
+           FROM screenshots
+           WHERE game_id = ? AND width = ? AND height = ?
+             AND perceptual_hash IS NOT NULL
+             AND ABS(strftime('%s', taken_at) - strftime('%s', ?)) <= 10
+           ORDER BY id DESC LIMIT 50""",
+        (game_id, width, height, taken_at),
+    )
+    for capture_group_id, candidate_hash in await cursor.fetchall():
+        if _hash_distance(perceptual_hash, candidate_hash) <= 4:
+            return capture_group_id
+    return None
+
+
 # GV-013: explicit allowlist for ORDER BY fragments — see game_service for
 # the rationale.
 SCREENSHOT_SORT_CLAUSES: dict[str, str] = {
@@ -73,11 +114,27 @@ async def get_screenshot(screenshot_id: int) -> dict | None:
     return dict(zip(columns, row))
 
 
+async def get_screenshot_media(screenshot_id: int) -> dict | None:
+    """Get only fields required to serve screenshot media."""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT id, file_path, thumbnail_path_sm, thumbnail_path_md, format
+           FROM screenshots WHERE id = ?""",
+        (screenshot_id,),
+    )
+    columns = [desc[0] for desc in cursor.description]
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return dict(zip(columns, row))
+
+
 async def create_screenshot(
     game_id: int,
     filename: str,
     file_path: str,
     source: str = "upload",
+    recalculate_stats: bool = True,
     **extra_fields,
 ) -> dict:
     """Create a screenshot record in the database and sync FTS index."""
@@ -91,6 +148,11 @@ async def create_screenshot(
         **{k: v for k, v in extra_fields.items() if v is not None},
     }
 
+    if "capture_group_id" not in fields:
+        capture_group_id = await _find_capture_group(fields)
+        if capture_group_id is not None:
+            fields["capture_group_id"] = capture_group_id
+
     columns = ", ".join(fields.keys())
     placeholders = ", ".join(["?"] * len(fields))
     values = list(fields.values())
@@ -100,13 +162,19 @@ async def create_screenshot(
         values,
     )
     screenshot_id = cursor.lastrowid
-    await db.commit()
-
+    if fields.get("capture_group_id") is None:
+        await db.execute(
+            "UPDATE screenshots SET capture_group_id = ? WHERE id = ?",
+            (screenshot_id, screenshot_id),
+        )
     # Sync FTS index
-    await _sync_fts(screenshot_id)
+    await _sync_fts(screenshot_id, commit=False)
 
     # Update game stats
-    await update_screenshot_stats(game_id)
+    if recalculate_stats:
+        await update_screenshot_stats(game_id, commit=False)
+
+    await db.commit()
 
     return await get_screenshot(screenshot_id)
 
@@ -279,7 +347,7 @@ async def delete_annotation(screenshot_id: int) -> bool:
 
 # ── FTS sync ─────────────────────────────────────────────────────────────────
 
-async def _sync_fts(screenshot_id: int) -> None:
+async def _sync_fts(screenshot_id: int, *, commit: bool = True) -> None:
     """Sync the FTS index for a screenshot."""
     db = await get_db()
 
@@ -311,4 +379,5 @@ async def _sync_fts(screenshot_id: int) -> None:
                annotation_content = excluded.annotation_content""",
         (screenshot_id, game_name, filename, steam_desc or "", annotation or ""),
     )
-    await db.commit()
+    if commit:
+        await db.commit()

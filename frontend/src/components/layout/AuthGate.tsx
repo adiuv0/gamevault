@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useCallback, useEffect, type ReactNode } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { api } from '@/api/client';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
@@ -12,11 +12,7 @@ interface AuthGateProps {
 export function AuthGate({ children }: AuthGateProps) {
   const { status, isLoading, setStatus, setLoading, token } = useAuthStore();
 
-  useEffect(() => {
-    checkAuth();
-  }, [token]);
-
-  async function checkAuth() {
+  const checkAuth = useCallback(async () => {
     setLoading(true);
     try {
       const authStatus = await api.get<AuthStatus>('/auth/verify');
@@ -50,7 +46,11 @@ export function AuthGate({ children }: AuthGateProps) {
       setStatus({ authenticated: false, setup_required: false, auth_disabled: false });
     }
     setLoading(false);
-  }
+  }, [setLoading, setStatus, token]);
+
+  useEffect(() => {
+    void checkAuth();
+  }, [checkAuth]);
 
   if (isLoading) {
     return (

@@ -20,35 +20,38 @@ export function AnnotationEditor({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    if (hasAnnotation && !loaded) {
-      loadAnnotation();
-    } else if (!hasAnnotation) {
+    let cancelled = false;
+
+    if (!hasAnnotation) {
       setContent('');
       setContentHtml('');
       setOriginalContent('');
-      setLoaded(false);
+      return;
     }
-  }, [screenshotId, hasAnnotation]);
 
-  const loadAnnotation = async () => {
-    try {
-      setLoading(true);
-      const annotation = await getAnnotation(screenshotId);
-      if (annotation) {
-        setContent(annotation.content);
-        setContentHtml(annotation.content_html || '');
-        setOriginalContent(annotation.content);
+    const loadAnnotation = async () => {
+      try {
+        setLoading(true);
+        const annotation = await getAnnotation(screenshotId);
+        if (annotation && !cancelled) {
+          setContent(annotation.content);
+          setContentHtml(annotation.content_html || '');
+          setOriginalContent(annotation.content);
+        }
+      } catch {
+        // No annotation exists
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setLoaded(true);
-    } catch {
-      // No annotation exists
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
+
+    void loadAnnotation();
+    return () => {
+      cancelled = true;
+    };
+  }, [screenshotId, hasAnnotation]);
 
   const handleSave = async () => {
     if (!content.trim()) return;

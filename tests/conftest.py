@@ -21,6 +21,7 @@ collect_ignore = [
 _tmp = tempfile.mkdtemp(prefix="gv_pytest_")
 os.environ["GAMEVAULT_DATA_DIR"] = _tmp
 os.environ["GAMEVAULT_LIBRARY_DIR"] = os.path.join(_tmp, "library")
+os.environ["GAMEVAULT_THUMBNAIL_DIR"] = os.path.join(_tmp, "cache", "thumbnails")
 os.environ["GAMEVAULT_DB_PATH"] = os.path.join(_tmp, "test.db")
 os.environ["GAMEVAULT_SECRET_KEY"] = "pytest-secret-key"
 os.environ["GAMEVAULT_DISABLE_AUTH"] = "true"

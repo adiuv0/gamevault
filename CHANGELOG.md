@@ -14,6 +14,12 @@ closing the entire 14-finding security audit
 
 ### Added
 
+- Logical capture groups and perceptual dHash fingerprints. HDR/SDR or other
+  source variants can share one capture identity, and game screenshot totals
+  count captures rather than physical files.
+- Configurable SSD-friendly thumbnail cache (`GAMEVAULT_THUMBNAIL_DIR`) with
+  backward-compatible legacy reads and a Settings migration action.
+- GitHub Actions CI for backend tests, frontend lint/build, and the Docker image.
 - **Game merge.** Game admin page now has a "Merge" button that opens a
   modal listing every other game, lets you pick a target, and moves all
   screenshots (DB rows + files + thumbnails) into it. Annotations and
@@ -47,6 +53,11 @@ closing the entire 14-finding security audit
 
 ### Changed
 
+- Gallery cards use responsive 300/800px sources, private media receives browser
+  caching headers, and media requests use narrow database lookups.
+- Imports decode each source once for both thumbnail sizes, perform image work
+  outside the async request loop, and recalculate game statistics once per batch.
+- Added composite gallery indexes for game/date and game/filename ordering.
 - **`get_game_by_name` is now case-insensitive.** Prevents the Special K
   importer (and manual create) from accidentally creating a duplicate
   when an existing game with the same name in different casing already

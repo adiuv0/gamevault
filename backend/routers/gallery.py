@@ -19,7 +19,7 @@ from backend.database import get_db
 from backend.models.game import PublicGame, PublicGameListResponse
 from backend.models.screenshot import PublicScreenshot, PublicScreenshotListResponse
 from backend.services import game_service
-from backend.services.filesystem import safe_library_path
+from backend.services.filesystem import safe_library_path, safe_media_path
 from backend.services.screenshot_service import list_screenshots
 
 router = APIRouter(prefix="/api/gallery", tags=["gallery"])
@@ -146,7 +146,7 @@ async def gallery_screenshot_thumb(screenshot_id: int, size: str):
     path_field = "thumbnail_path_sm" if size == "sm" else "thumbnail_path_md"
     rel_path = screenshot.get(path_field) or screenshot.get("file_path")
 
-    full_path = safe_library_path(rel_path)
+    full_path = safe_media_path(rel_path)
     if not full_path.exists():
         raise HTTPException(status_code=404, detail="Thumbnail not found")
 

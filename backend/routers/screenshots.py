@@ -16,7 +16,7 @@ from backend.auth import require_auth
 from backend.config import settings
 from backend.models.annotation import AnnotationCreate
 from backend.services import screenshot_service
-from backend.services.filesystem import safe_library_path
+from backend.services.filesystem import safe_library_path, safe_media_path
 
 
 class HashCheckRequest(BaseModel):
@@ -63,7 +63,8 @@ async def delete_screenshot(screenshot_id: int):
         if not rel_path:
             continue
         try:
-            full_path = safe_library_path(rel_path)
+            resolver = safe_library_path if path_field == "file_path" else safe_media_path
+            full_path = resolver(rel_path)
         except HTTPException:
             # Unsafe stored path — skip the unlink rather than fail the
             # whole delete. The DB row will still be removed below.
@@ -78,7 +79,7 @@ async def delete_screenshot(screenshot_id: int):
 @router.get("/{screenshot_id}/image")
 async def get_image(screenshot_id: int):
     """Serve the full-resolution screenshot image."""
-    screenshot = await screenshot_service.get_screenshot(screenshot_id)
+    screenshot = await screenshot_service.get_screenshot_media(screenshot_id)
     if not screenshot:
         raise HTTPException(status_code=404, detail="Screenshot not found")
 
@@ -98,6 +99,7 @@ async def get_image(screenshot_id: int):
         headers={
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "default-src 'none'",
+            "Cache-Control": "private, max-age=86400",
         },
     )
 
@@ -108,7 +110,7 @@ async def get_thumbnail(screenshot_id: int, size: str):
     if size not in ("sm", "md"):
         raise HTTPException(status_code=400, detail="Size must be 'sm' or 'md'")
 
-    screenshot = await screenshot_service.get_screenshot(screenshot_id)
+    screenshot = await screenshot_service.get_screenshot_media(screenshot_id)
     if not screenshot:
         raise HTTPException(status_code=404, detail="Screenshot not found")
 
@@ -118,7 +120,7 @@ async def get_thumbnail(screenshot_id: int, size: str):
     if not rel_path:
         rel_path = screenshot.get("file_path")
 
-    full_path = safe_library_path(rel_path)
+    full_path = safe_media_path(rel_path)
     if not full_path.exists():
         raise HTTPException(status_code=404, detail="Thumbnail not found")
 
@@ -128,6 +130,7 @@ async def get_thumbnail(screenshot_id: int, size: str):
         headers={
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "default-src 'none'",
+            "Cache-Control": "private, max-age=86400",
         },
     )
 

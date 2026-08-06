@@ -12,6 +12,10 @@ from backend.services.filesystem import (
     ensure_game_directories,
     sanitize_folder_name,
     get_game_dir,
+    get_screenshots_dir,
+    get_thumbnails_dir,
+    safe_library_path,
+    safe_media_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -180,13 +184,13 @@ async def delete_game(game_id: int) -> bool:
     return True
 
 
-async def update_screenshot_stats(game_id: int) -> None:
+async def update_screenshot_stats(game_id: int, *, commit: bool = True) -> None:
     """Recalculate denormalized screenshot stats for a game."""
     db = await get_db()
 
     cursor = await db.execute(
         """SELECT
-            COUNT(*) as count,
+            COUNT(DISTINCT COALESCE(capture_group_id, id)) as count,
             MIN(taken_at) as first_date,
             MAX(taken_at) as last_date
         FROM screenshots
@@ -205,7 +209,8 @@ async def update_screenshot_stats(game_id: int) -> None:
         WHERE id = ?""",
         (count, first_date, last_date, game_id),
     )
-    await db.commit()
+    if commit:
+        await db.commit()
 
 
 async def get_or_create_game(
@@ -286,9 +291,9 @@ async def merge_games(source_id: int, target_id: int) -> dict:
     rows = [dict(zip(cols, row)) for row in await cursor.fetchall()]
 
     target_folder = target["folder_name"]
-    target_screenshots_dir = settings.library_dir / target_folder / "screenshots"
-    target_thumb_sm_dir = settings.library_dir / target_folder / "thumbnails" / "300"
-    target_thumb_md_dir = settings.library_dir / target_folder / "thumbnails" / "800"
+    target_screenshots_dir = get_screenshots_dir(target_folder)
+    target_thumb_sm_dir = get_thumbnails_dir(target_folder, "300")
+    target_thumb_md_dir = get_thumbnails_dir(target_folder, "800")
     target_screenshots_dir.mkdir(parents=True, exist_ok=True)
     target_thumb_sm_dir.mkdir(parents=True, exist_ok=True)
     target_thumb_md_dir.mkdir(parents=True, exist_ok=True)
@@ -317,16 +322,14 @@ async def merge_games(source_id: int, target_id: int) -> dict:
         # Physical moves — best-effort. If a source file is missing we
         # still update the DB row so it points at the (intended) target
         # location; serving will 404 the same way it would now.
-        old_main = (
-            settings.library_dir / ss["file_path"] if ss["file_path"] else None
-        )
+        old_main = safe_library_path(ss["file_path"]) if ss["file_path"] else None
         old_sm = (
-            settings.library_dir / ss["thumbnail_path_sm"]
+            safe_media_path(ss["thumbnail_path_sm"])
             if ss["thumbnail_path_sm"]
             else None
         )
         old_md = (
-            settings.library_dir / ss["thumbnail_path_md"]
+            safe_media_path(ss["thumbnail_path_md"])
             if ss["thumbnail_path_md"]
             else None
         )
@@ -404,6 +407,13 @@ async def merge_games(source_id: int, target_id: int) -> dict:
             shutil.rmtree(source_dir)
         except OSError as e:
             logger.warning("merge_games: source folder cleanup failed: %s", e)
+
+    source_thumbnail_dir = settings.thumbnail_dir / source["folder_name"]
+    if source_thumbnail_dir.exists():
+        try:
+            shutil.rmtree(source_thumbnail_dir)
+        except OSError as e:
+            logger.warning("merge_games: source thumbnail cleanup failed: %s", e)
 
     target_fresh = await get_game(target_id)
     return {

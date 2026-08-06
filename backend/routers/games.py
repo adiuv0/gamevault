@@ -194,7 +194,11 @@ async def get_cover(game_id: int):
     if not cover_path.exists():
         raise HTTPException(status_code=404, detail="Cover image file not found")
 
-    return FileResponse(cover_path, media_type="image/jpeg")
+    return FileResponse(
+        cover_path,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
 
 
 @router.get("/{game_id}/screenshots")

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # Data paths
     data_dir: Path = Path("/data")
     library_dir: Path = Path("/data/library")
+    thumbnail_dir: Path = Path("/data/cache/thumbnails")
     db_path: Path = Path("/data/gamevault.db")
 
     # Authentication

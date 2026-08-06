@@ -1,6 +1,7 @@
 """Authentication: single-password auth with JWT tokens."""
 
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -11,6 +12,8 @@ from backend.config import settings
 from backend.database import get_db
 
 ALGORITHM = "HS256"
+_PASSWORD_HASH_CACHE_TTL_SECONDS = 30.0
+_password_hash_cache: tuple[float, str | None] | None = None
 
 
 # Endpoints where ``?token=`` query-string auth is allowed.
@@ -70,16 +73,27 @@ def decode_token(token: str) -> dict:
 
 async def get_password_hash() -> str | None:
     """Get the stored password hash from app_settings, or None if not set."""
+    global _password_hash_cache
+    now = time.monotonic()
+    if (
+        _password_hash_cache is not None
+        and now - _password_hash_cache[0] < _PASSWORD_HASH_CACHE_TTL_SECONDS
+    ):
+        return _password_hash_cache[1]
+
     db = await get_db()
     cursor = await db.execute(
         "SELECT value FROM app_settings WHERE key = 'auth_password_hash'"
     )
     row = await cursor.fetchone()
-    return row[0] if row else None
+    stored_hash = row[0] if row else None
+    _password_hash_cache = (now, stored_hash)
+    return stored_hash
 
 
 async def set_password(password: str) -> None:
     """Store a hashed password in app_settings."""
+    global _password_hash_cache
     db = await get_db()
     hashed = hash_password(password)
     await db.execute(
@@ -88,6 +102,7 @@ async def set_password(password: str) -> None:
         (hashed,),
     )
     await db.commit()
+    _password_hash_cache = (time.monotonic(), hashed)
 
 
 async def require_auth(request: Request) -> dict | None:
