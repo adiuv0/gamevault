@@ -19,6 +19,13 @@ setting up GameVault or troubleshooting a config issue.
 
 ## For developers and integrators
 
+[**PRODUCT_ROADMAP.md**](PRODUCT_ROADMAP.md) — current product direction,
+feature priorities, sequencing, and acceptance principles. This replaces the
+dated implementation-agent feature handoff.
+
+[**MAINTENANCE_PLAN.md**](MAINTENANCE_PLAN.md) — technical delivery phases for
+performance, duplicate handling, scaling, releases, and recovery.
+
 [**API_REFERENCE.md**](API_REFERENCE.md) — every REST endpoint with method,
 path, parameters, request/response shapes, and SSE event vocabularies.
 Covers admin and public endpoints.

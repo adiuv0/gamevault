@@ -1,5 +1,8 @@
 # GameVault Maintainer Plan
 
+This document tracks technical delivery and operational reliability. Product feature
+priority lives in [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md).
+
 ## Objectives
 
 1. Keep large screenshot libraries responsive on Unraid and similar storage.
@@ -51,6 +54,8 @@ Acceptance criteria:
   auto-group.
 
 ## Phase 3: Large-Library Scaling
+
+Status: Next.
 
 - Add a browser-compatible large preview so the viewer does not fetch 4K originals by default.
 - Virtualize long galleries and replace deep offset pagination with cursor pagination.
