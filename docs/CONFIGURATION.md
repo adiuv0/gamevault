@@ -33,7 +33,7 @@ in [backend/config.py](../backend/config.py). They can also be set via a
 |---|---|---|
 | `GAMEVAULT_DATA_DIR` | `/data` | Holds `gamevault.db`, `.secret_key`, cache, and library by default. |
 | `GAMEVAULT_LIBRARY_DIR` | `/data/library` | Per-game original screenshots and metadata. Mount on a separate drive or array for large collections. |
-| `GAMEVAULT_THUMBNAIL_DIR` | `/data/cache/thumbnails` | Generated 300px and 800px JPEGs. Keep this on fast local or SSD-backed appdata storage. |
+| `GAMEVAULT_THUMBNAIL_DIR` | `/data/cache/thumbnails` | Generated 300px, 800px, and large-preview JPEGs. Keep this on fast local or SSD-backed appdata storage. |
 | `GAMEVAULT_DB_PATH` | `/data/gamevault.db` | SQLite database file (WAL mode). |
 
 ### Authentication
@@ -62,6 +62,7 @@ take precedence over env vars.
 | `GAMEVAULT_IMPORT_RATE_LIMIT_MS` | `1000` | Delay between Steam HTML requests during import. Lower = faster but may hit Steam's rate limiter. |
 | `GAMEVAULT_MAX_UPLOAD_SIZE_MB` | `50` | Per-file upload limit. Web requests over this return HTTP 413. |
 | `GAMEVAULT_THUMBNAIL_QUALITY` | `85` | JPEG quality (1-100) for generated thumbnails. |
+| `GAMEVAULT_PREVIEW_MAX_WIDTH` | `1920` | Maximum width of the browser viewer derivative (800-7680). Originals are unaffected. |
 | `GAMEVAULT_CORS_ORIGINS` | `""` | Comma-separated list of additional origins beyond the localhost defaults. Required if you serve the frontend from a different host than the backend. |
 | `GAMEVAULT_SPECIALK_ALLOWED_ROOTS` | `""` | Comma-separated absolute paths the Special K importer is allowed to scan. **Required when `GAMEVAULT_DISABLE_AUTH=true`** — otherwise the endpoint refuses with HTTP 403. When auth is enabled, an empty value falls back to "any path" for backward compatibility. See [Special K import safety](#special-k-import-safety) below. |
 | `TZ` | `UTC` | Container timezone. Affects timestamps in logs and the `taken_at` displayed in the UI. |
@@ -90,10 +91,9 @@ Settings page and the `PUT /api/settings/preferences` /
 | `tone_map_exposure` | float | `0.05` – `8.0` | `1.0` | Multiplier applied before tone-mapping. |
 
 Tone-map settings are read by [`image_processor.py`](../backend/services/image_processor.py)
-on each thumbnail generation, opening a fresh sqlite connection
-(synchronous) since the surrounding Pillow code is synchronous. Changes
-take effect on the next thumbnail generated; existing thumbnails are not
-regenerated.
+from an in-memory cache that is invalidated when preferences change. Changes take
+effect on the next display derivative generated; existing thumbnails and previews
+are not regenerated automatically.
 
 ### API Keys (set via `PUT /api/settings/api-keys`)
 
@@ -157,18 +157,20 @@ After tone-mapping, the linear-ish output is encoded with the sRGB OETF
 │   │   │   ├── steam_3041234567890123.jpg           # from Steam import
 │   │   │   ├── specialk_20251204_201822_001.jxr    # from Special K import
 │   │   │   └── specialk_20251204_201833_002.png
-│   │   ├── thumbnails/
-│   │   │   ├── 300/                                 # grid view (300px wide)
-│   │   │   └── 800/                                 # gallery preview (800px)
 │   │   ├── metadata/                                # reserved, currently unused
 │   │   └── cover.jpg                                # auto-fetched cover
 │   └── Elden Ring/
 │       └── ...
+├── cache/thumbnails/                                # GAMEVAULT_THUMBNAIL_DIR
+│   └── Cyberpunk 2077/
+│       ├── 300/                                     # grid cards
+│       ├── 800/                                     # responsive grid images
+│       └── 1920/                                    # bounded viewer previews
 └── ...
 ```
 
 The `screenshots/` directory holds the **original** files at their native
-format and resolution. The `thumbnails/` directory holds the SDR JPEG
+format and resolution. `GAMEVAULT_THUMBNAIL_DIR` holds disposable SDR JPEG
 derivatives shown in the UI. HDR JXR/PNG screenshots are downloaded from
 the gallery as the original file via `GET /api/screenshots/{id}/image`.
 

@@ -1,6 +1,5 @@
 """Game management service: CRUD operations and folder management."""
 
-import json
 import logging
 import os
 import shutil
@@ -10,12 +9,12 @@ from backend.config import settings
 from backend.database import get_db
 from backend.services.filesystem import (
     ensure_game_directories,
-    sanitize_folder_name,
     get_game_dir,
     get_screenshots_dir,
     get_thumbnails_dir,
     safe_library_path,
     safe_media_path,
+    sanitize_folder_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -283,7 +282,8 @@ async def merge_games(source_id: int, target_id: int) -> dict:
 
     # Pull every screenshot row attached to the source
     cursor = await db.execute(
-        """SELECT id, filename, file_path, thumbnail_path_sm, thumbnail_path_md
+        """SELECT id, filename, file_path, thumbnail_path_sm, thumbnail_path_md,
+                  preview_path
            FROM screenshots WHERE game_id = ?""",
         (source_id,),
     )
@@ -294,9 +294,12 @@ async def merge_games(source_id: int, target_id: int) -> dict:
     target_screenshots_dir = get_screenshots_dir(target_folder)
     target_thumb_sm_dir = get_thumbnails_dir(target_folder, "300")
     target_thumb_md_dir = get_thumbnails_dir(target_folder, "800")
+    preview_width = str(settings.preview_max_width)
+    target_preview_dir = get_thumbnails_dir(target_folder, preview_width)
     target_screenshots_dir.mkdir(parents=True, exist_ok=True)
     target_thumb_sm_dir.mkdir(parents=True, exist_ok=True)
     target_thumb_md_dir.mkdir(parents=True, exist_ok=True)
+    target_preview_dir.mkdir(parents=True, exist_ok=True)
 
     moved = 0
     collisions = 0
@@ -333,10 +336,12 @@ async def merge_games(source_id: int, target_id: int) -> dict:
             if ss["thumbnail_path_md"]
             else None
         )
+        old_preview = safe_media_path(ss["preview_path"]) if ss["preview_path"] else None
 
         new_main = target_screenshots_dir / new_name
         new_sm = target_thumb_sm_dir / new_thumb_filename
         new_md = target_thumb_md_dir / new_thumb_filename
+        new_preview = target_preview_dir / new_thumb_filename
 
         if old_main and old_main.exists():
             shutil.move(str(old_main), str(new_main))
@@ -344,6 +349,8 @@ async def merge_games(source_id: int, target_id: int) -> dict:
             shutil.move(str(old_sm), str(new_sm))
         if old_md and old_md.exists():
             shutil.move(str(old_md), str(new_md))
+        if old_preview and old_preview.exists():
+            shutil.move(str(old_preview), str(new_preview))
 
         # Update DB row to point at the new game + new paths
         new_file_path = f"{target_folder}/screenshots/{new_name}"
@@ -357,14 +364,27 @@ async def merge_games(source_id: int, target_id: int) -> dict:
             if ss["thumbnail_path_md"]
             else None
         )
+        new_preview_rel = (
+            f"{target_folder}/thumbnails/{preview_width}/{new_thumb_filename}"
+            if ss["preview_path"]
+            else None
+        )
 
         await db.execute(
             """UPDATE screenshots
                SET game_id = ?, filename = ?, file_path = ?,
-                   thumbnail_path_sm = ?, thumbnail_path_md = ?,
+                   thumbnail_path_sm = ?, thumbnail_path_md = ?, preview_path = ?,
                    updated_at = datetime('now')
                WHERE id = ?""",
-            (target_id, new_name, new_file_path, new_sm_rel, new_md_rel, ss["id"]),
+            (
+                target_id,
+                new_name,
+                new_file_path,
+                new_sm_rel,
+                new_md_rel,
+                new_preview_rel,
+                ss["id"],
+            ),
         )
         moved += 1
 

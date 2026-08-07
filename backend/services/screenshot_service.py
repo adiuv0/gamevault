@@ -1,8 +1,6 @@
 """Screenshot management service: CRUD, file management, FTS sync."""
 
-from pathlib import Path
 
-from backend.config import settings
 from backend.database import get_db
 from backend.services.game_service import update_screenshot_stats
 
@@ -156,7 +154,7 @@ async def get_screenshot_media(screenshot_id: int) -> dict | None:
     """Get only fields required to serve screenshot media."""
     db = await get_db()
     cursor = await db.execute(
-        """SELECT id, file_path, thumbnail_path_sm, thumbnail_path_md, format
+        """SELECT id, file_path, thumbnail_path_sm, thumbnail_path_md, preview_path, format
            FROM screenshots WHERE id = ?""",
         (screenshot_id,),
     )

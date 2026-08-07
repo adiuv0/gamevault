@@ -1,16 +1,12 @@
 """Upload processing service with progress tracking."""
 
 import asyncio
+import json as _json
 import logging
-import re
 import shutil
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
-
-import json as _json
-
-from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -229,7 +225,7 @@ async def process_upload(
                         original_name, final_path, final_path.stat().st_size)
 
             # Generate thumbnails
-            sm, md, perceptual_hash = await asyncio.to_thread(
+            sm, md, preview, perceptual_hash = await asyncio.to_thread(
                 generate_thumbnails_with_hash, final_path, folder_name, Path(filename).stem
             )
 
@@ -245,6 +241,7 @@ async def process_upload(
                 recalculate_stats=False,
                 thumbnail_path_sm=sm,
                 thumbnail_path_md=md,
+                preview_path=preview,
                 file_size=img_data.get("file_size"),
                 width=img_data.get("width"),
                 height=img_data.get("height"),

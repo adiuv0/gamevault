@@ -16,7 +16,6 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-
 # ── GV-008: safe_library_path ────────────────────────────────────────────────
 
 
@@ -139,6 +138,7 @@ class TestScopedQueryToken:
         "/api/steam/import/42/progress",
         "/api/specialk/import/42/progress",
         "/api/screenshots/1/image",
+        "/api/screenshots/1/preview",
         "/api/screenshots/1/thumb/sm",
         "/api/screenshots/1/thumb/md",
         "/api/games/7/cover",
@@ -225,6 +225,7 @@ class TestPublicGalleryShapes:
             "uploaded_at": "2026-04-01T12:01:00",
             # Internal fields the public must NOT see
             "file_path": "Game/screenshots/shot.png",
+            "preview_path": "Game/thumbnails/1920/shot.jpg",
             "sha256_hash": "abc123" * 10,
             "exif_data": '{"GPS": "...", "DeviceModel": "..."}',
             "steam_screenshot_id": "9999",
@@ -247,7 +248,7 @@ class TestPublicGalleryShapes:
             assert k in slim
 
         # Sensitive fields dropped
-        for k in ("file_path", "sha256_hash", "exif_data",
+        for k in ("file_path", "preview_path", "sha256_hash", "exif_data",
                   "steam_screenshot_id", "steam_description", "source",
                   "is_favorite", "view_count", "format", "file_size",
                   "created_at", "updated_at"):

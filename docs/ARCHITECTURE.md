@@ -103,8 +103,9 @@ calls.
 Cross-cutting helpers:
 
 - [`services/filesystem.py`](../backend/services/filesystem.py) — sanitization, directory layout, library size
-- [`services/image_processor.py`](../backend/services/image_processor.py) — Pillow-based hash, EXIF, dimensions, thumbnail generation. Routes HDR sources through `hdr_processor`.
+- [`services/image_processor.py`](../backend/services/image_processor.py) — Pillow-based hash, EXIF, dimensions, and display-derivative generation. Routes HDR sources through `hdr_processor`.
 - [`services/hdr_processor.py`](../backend/services/hdr_processor.py) — JXR magic detection + decode (lazy `imagecodecs`), 16-bit PNG decode, Reinhard/ACES/clip tone-map, sRGB OETF.
+- [`services/preview_service.py`](../backend/services/preview_service.py) — durable, resumable preview-cache audits and backfill.
 
 ### Authentication flow
 
@@ -174,14 +175,14 @@ Source (upload / Steam / Special K)
    Save original to library/<game>/screenshots/<filename>
         │
         ▼
-[generate_thumbnails]
+[generate_thumbnails_with_hash]
         │
         ├─ if HDR source:
         │     hdr_processor.render_sdr_pil()
         │       → decode_jxr / decode_hdr_png
         │       → tone_map (algorithm + exposure from app_settings)
         │       → to_8bit_srgb
-        │     → resize → JPEG → save to thumbnails/300/ and /800/
+        │     → resize → JPEG → save to cache widths 300, 800, and 1920
         │
         └─ else: Pillow open → convert RGB → resize → JPEG → save
         │
@@ -201,8 +202,8 @@ execution.
   source's native dtype; `decode_jxr` normalizes to float32.
 - **Tone map** — Reinhard / ACES / hard clip (see
   [CONFIGURATION.md](CONFIGURATION.md#algorithm-reference)). The
-  algorithm and exposure are read from `app_settings` synchronously by
-  `_get_tone_map_settings` opening a fresh sqlite connection.
+  algorithm and exposure are read from the in-memory settings cache, which is
+  invalidated when preferences change.
 - **Encode** — sRGB OETF then `astype(uint8)`.
 - **Original preservation** — the JXR/PNG file is copied untouched to the
   library; only the thumbnails are SDR.
@@ -506,10 +507,9 @@ If you're new to the code, this is the order I'd recommend:
   limiting are in-process. Scaling beyond one process means
   externalizing all three (Redis pub/sub for SSE, persistent storage for
   rate limiting).
-- **No bulk thumbnail regeneration.** Changing tone-map settings doesn't
-  retroactively update existing thumbnails. Adding an endpoint to walk
-  all screenshots and re-call `generate_thumbnails` would be
-  straightforward.
+- **No bulk tone-map regeneration.** Preview backfill can audit and rebuild the
+  bounded viewer derivative, but changing tone-map settings does not retroactively
+  rebuild every thumbnail and preview.
 - **No per-screenshot tags.** Earlier schemas had unused `tags` and
   `screenshot_tags` tables; they were dropped in m005. Adding tags later
   means a new migration plus router/service/UI work.

@@ -4,34 +4,31 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from io import BytesIO
 from pathlib import Path
 
-from backend.config import settings
 from backend.database import get_db
 from backend.routers.settings import get_effective_key
-from backend.services.steam_scraper import (
-    SteamScraper,
-    SteamScreenshot,
-    SteamGameScreenshots,
+from backend.services.filesystem import (
+    get_screenshots_dir,
 )
 from backend.services.game_service import get_or_create_game, update_screenshot_stats
-from backend.services.screenshot_service import (
-    create_screenshot,
-    check_duplicate_steam_id,
-    check_duplicate_hash,
-)
 from backend.services.image_processor import (
     compute_sha256_bytes,
     generate_thumbnails_with_hash,
     get_image_dimensions,
     get_image_format,
 )
-from backend.services.filesystem import (
-    sanitize_filename,
-    get_screenshots_dir,
-)
 from backend.services.metadata_service import fetch_and_apply_metadata
+from backend.services.screenshot_service import (
+    check_duplicate_hash,
+    check_duplicate_steam_id,
+    create_screenshot,
+)
+from backend.services.steam_scraper import (
+    SteamGameScreenshots,
+    SteamScraper,
+    SteamScreenshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -512,7 +509,7 @@ async def _import_single_screenshot(
 
     # Generate thumbnails
     filename_stem = Path(filename).stem
-    thumb_sm, thumb_md, perceptual_hash = await asyncio.to_thread(
+    thumb_sm, thumb_md, preview, perceptual_hash = await asyncio.to_thread(
         generate_thumbnails_with_hash, file_path, game_folder, filename_stem
     )
 
@@ -539,6 +536,7 @@ async def _import_single_screenshot(
         taken_at=taken_at,
         thumbnail_path_sm=thumb_sm,
         thumbnail_path_md=thumb_md,
+        preview_path=preview,
         perceptual_hash=perceptual_hash,
         source_key=f"steam:{steam_id}",
     )

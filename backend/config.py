@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -38,6 +39,7 @@ class Settings(BaseSettings):
 
     # Image processing
     thumbnail_quality: int = 85
+    preview_max_width: int = Field(default=1920, ge=800, le=7680)
     max_upload_size_mb: int = 50
 
     # Special K import — server-side scanning is gated by an optional path

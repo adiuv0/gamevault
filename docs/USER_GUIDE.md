@@ -121,10 +121,10 @@ are generated, so duplicates cost almost nothing.
 `DateTimeDigitized`, `DateTime` in priority order). For JXR there's no
 accessible EXIF, so the file's mtime is used.
 
-**Thumbnails.** Two JPEG thumbnails are generated per upload — 300px wide
-for grid views and 800px wide for the gallery preview. HDR sources (JXR and
-16-bit PNG) are tone-mapped to SDR before thumbnail generation. The
-original file is preserved untouched.
+**Display images.** Three JPEG derivatives are generated per upload: 300px and
+800px thumbnails for grids, plus a bounded 1920px preview for the full-screen
+viewer. HDR sources (JXR and 16-bit PNG) are tone-mapped to SDR before these are
+generated. The original file is preserved untouched and remains the download source.
 
 ---
 
@@ -375,11 +375,16 @@ at runtime.
 Game count, screenshot count, annotation count, active share count, total
 imports, and disk usage of the `library/` directory.
 
+The storage section also includes **Build previews**. Use it after upgrading an
+existing library or clearing the disposable thumbnail cache. Progress survives a
+restart, and missing originals are reported as errors without stopping the rest of
+the library.
+
 ### Configuration (read-only)
 
 Surfaces the current values of environment variables — base URL, library
-path, max upload size, thumbnail quality, import rate limit, token expiry,
-auth state.
+path, max upload size, thumbnail quality, viewer preview width, import rate limit,
+token expiry, and auth state.
 
 ### API Keys
 

@@ -175,6 +175,11 @@ rather than trying to render. CSP headers prevent inline script execution.
 Thumbnail. `sm` = 300px wide, `md` = 800px wide. Always `image/jpeg`.
 Falls back to the full image if no thumbnail exists.
 
+### `GET /api/screenshots/{id}/preview`
+
+Serves the configured bounded JPEG viewer preview. While backfill is incomplete or a
+cache entry is missing, it falls back to the 800px thumbnail and then the original.
+
 ### `POST /api/screenshots/{id}/favorite`
 
 Toggle favorite state for every variant in the logical capture. Returns
@@ -498,6 +503,7 @@ preferences + library stats). Secrets are redacted as `has_*` booleans.
   "auth_disabled": false,
   "import_rate_limit_ms": 1000,
   "thumbnail_quality": 85,
+  "preview_max_width": 1920,
   "max_upload_size_mb": 50,
   "token_expiry_days": 30,
   "has_steam_api_key": true,
@@ -544,6 +550,17 @@ required):
 `tone_map_exposure` is bounded `[0.05, 8.0]`.
 
 Setting `specialk_path` to an empty string clears the preference.
+
+### `GET /api/settings/preview-cache/backfill`
+
+Returns the latest durable preview-cache audit, or `null` before the first run. The
+job reports `status`, `total`, `processed`, `errors`, and timestamps.
+
+### `POST /api/settings/preview-cache/backfill`
+
+Starts a new preview-cache audit or resumes an interrupted one. Existing valid previews
+are checked and skipped; missing previews are rebuilt in the background. Returns the
+durable job record immediately.
 
 ---
 
@@ -607,6 +624,11 @@ Full image — only if the game is public. Same caching headers as cover.
 ### `GET /api/gallery/screenshots/{id}/thumb/{sm|md}`
 
 Thumbnail — only if the game is public.
+
+### `GET /api/gallery/screenshots/{id}/preview`
+
+Bounded viewer preview — only if the game is public. Falls back to the 800px thumbnail
+and then the original while preview backfill is incomplete.
 
 ---
 

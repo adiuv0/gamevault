@@ -27,8 +27,10 @@ import {
   deleteApiKey,
   savePreferences,
   migrateThumbnailCache,
+  getPreviewBackfill,
+  startPreviewBackfill,
 } from '@/api/settings';
-import type { AppSettings, ToneMapAlgorithm } from '@/api/settings';
+import type { AppSettings, PreviewBackfillJob, ToneMapAlgorithm } from '@/api/settings';
 import { Save, Trash2, Sparkles } from 'lucide-react';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 
@@ -38,6 +40,8 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [migratingThumbnails, setMigratingThumbnails] = useState(false);
   const [thumbnailMigrationResult, setThumbnailMigrationResult] = useState<string | null>(null);
+  const [previewJob, setPreviewJob] = useState<PreviewBackfillJob | null>(null);
+  const [startingPreviews, setStartingPreviews] = useState(false);
 
   // Password change state
   const [currentPassword, setCurrentPassword] = useState('');
@@ -50,7 +54,16 @@ export function SettingsPage() {
 
   useEffect(() => {
     loadSettings();
+    getPreviewBackfill().then(setPreviewJob).catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (!previewJob || !['pending', 'running'].includes(previewJob.status)) return;
+    const timer = window.setInterval(() => {
+      getPreviewBackfill().then(setPreviewJob).catch(() => undefined);
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [previewJob]);
 
   const loadSettings = async () => {
     try {
@@ -108,6 +121,18 @@ export function SettingsPage() {
       );
     } finally {
       setMigratingThumbnails(false);
+    }
+  };
+
+  const handleBuildPreviews = async () => {
+    try {
+      setStartingPreviews(true);
+      setError(null);
+      setPreviewJob(await startPreviewBackfill());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start preview generation');
+    } finally {
+      setStartingPreviews(false);
     }
   };
 
@@ -170,6 +195,30 @@ export function SettingsPage() {
               <span className="text-xs text-text-muted">{thumbnailMigrationResult}</span>
             )}
           </div>
+
+          <div className="flex flex-wrap items-center gap-3 mt-3">
+            <button
+              type="button"
+              onClick={handleBuildPreviews}
+              disabled={startingPreviews || previewJob?.status === 'pending' || previewJob?.status === 'running'}
+              className="flex items-center gap-2 px-3 py-1.5 bg-bg-tertiary text-text-primary rounded-md text-sm hover:bg-bg-tertiary/80 transition-colors disabled:opacity-50"
+            >
+              {(startingPreviews || previewJob?.status === 'pending' || previewJob?.status === 'running') ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Monitor className="h-4 w-4" />
+              )}
+              Build previews
+            </button>
+            {previewJob && (
+              <span className="text-xs text-text-muted">
+                {previewJob.status === 'completed'
+                  ? `${previewJob.processed.toLocaleString()} previews checked`
+                  : `${previewJob.processed.toLocaleString()} / ${previewJob.total.toLocaleString()}`}
+                {previewJob.errors > 0 ? ` · ${previewJob.errors.toLocaleString()} errors` : ''}
+              </span>
+            )}
+          </div>
         </section>
 
         {/* Configuration */}
@@ -185,6 +234,7 @@ export function SettingsPage() {
             <ConfigRow label="Thumbnail Cache" value={settings.thumbnail_dir} />
             <ConfigRow label="Max Upload Size" value={`${settings.max_upload_size_mb} MB`} />
             <ConfigRow label="Thumbnail Quality" value={`${settings.thumbnail_quality}%`} />
+            <ConfigRow label="Preview Width" value={`${settings.preview_max_width}px`} />
             <ConfigRow label="Import Rate Limit" value={`${settings.import_rate_limit_ms}ms`} />
             <ConfigRow label="Token Expiry" value={`${settings.token_expiry_days} days`} />
             <ConfigRow

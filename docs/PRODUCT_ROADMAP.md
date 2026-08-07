@@ -41,9 +41,9 @@ later curation feature.
 
 Deliverables:
 
-- Reproducible benchmarks at 1,000 and 10,000 logical captures.
+- [x] Reproducible benchmarks at 1,000 and 10,000 logical captures.
 - Structured timings for list queries, media responses, imports, and image processing.
-- Browser-friendly large previews so the viewer does not fetch 4K/HDR originals by
+- [x] Browser-friendly large previews so the viewer does not fetch 4K/HDR originals by
   default.
 - Slim gallery payloads with full metadata fetched only when needed.
 - Cursor pagination and gallery virtualization where measurements justify them.

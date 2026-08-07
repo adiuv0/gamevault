@@ -13,7 +13,7 @@ import {
   Trash2,
   Repeat2,
 } from 'lucide-react';
-import { getScreenshotImageUrl } from '@/api/screenshots';
+import { getScreenshotImageUrl, getScreenshotPreviewUrl } from '@/api/screenshots';
 import { toggleFavorite, createShareLink, getShareLink, deleteShareLink } from '@/api/screenshots';
 import { AnnotationEditor } from './AnnotationEditor';
 import { formatDateTime, formatFileSize } from '@/lib/formatters';
@@ -319,7 +319,7 @@ export function ScreenshotViewer({
         <div className={`flex-1 flex items-center justify-center p-4 ${showInfo ? 'sm:mr-80' : ''}`}>
           <img
             key={activeVariant.id}
-            src={getScreenshotImageUrl(activeVariant.id)}
+            src={getScreenshotPreviewUrl(activeVariant.id)}
             alt={activeVariant.filename}
             className="max-w-full max-h-full object-contain select-none"
             draggable={false}

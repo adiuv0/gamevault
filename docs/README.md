@@ -26,6 +26,9 @@ dated implementation-agent feature handoff.
 [**MAINTENANCE_PLAN.md**](MAINTENANCE_PLAN.md) — technical delivery phases for
 performance, duplicate handling, scaling, releases, and recovery.
 
+[**PERFORMANCE_BASELINE.md**](PERFORMANCE_BASELINE.md) — reproducible 1,000- and
+10,000-capture gallery service measurements and interpretation.
+
 [**API_REFERENCE.md**](API_REFERENCE.md) — every REST endpoint with method,
 path, parameters, request/response shapes, and SSE event vocabularies.
 Covers admin and public endpoints.

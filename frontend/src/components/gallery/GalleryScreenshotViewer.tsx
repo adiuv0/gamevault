@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useMemo, useState } from 'react';
 import { X, ChevronLeft, ChevronRight, Info, Download, Repeat2 } from 'lucide-react';
-import { galleryImageUrl } from '@/api/gallery';
+import { galleryImageUrl, galleryPreviewUrl } from '@/api/gallery';
 import { formatDateTime, formatFileSize } from '@/lib/formatters';
 import type { Screenshot, ScreenshotVariant } from '@/lib/types';
 
@@ -174,7 +174,7 @@ export function GalleryScreenshotViewer({
         <div className={`flex-1 flex items-center justify-center p-4 ${showInfo ? 'sm:mr-80' : ''}`}>
           <img
             key={activeVariant.id}
-            src={galleryImageUrl(activeVariant.id)}
+            src={galleryPreviewUrl(activeVariant.id)}
             alt={activeVariant.filename}
             className="max-w-full max-h-full object-contain select-none"
             draggable={false}

@@ -9,6 +9,7 @@ export interface AppSettings {
   auth_disabled: boolean;
   import_rate_limit_ms: number;
   thumbnail_quality: number;
+  preview_max_width: number;
   max_upload_size_mb: number;
   token_expiry_days: number;
   has_steam_api_key: boolean;
@@ -53,6 +54,23 @@ export interface ThumbnailMigrationResult {
 
 export async function migrateThumbnailCache(): Promise<ThumbnailMigrationResult> {
   return api.post('/settings/thumbnail-cache/migrate');
+}
+
+export interface PreviewBackfillJob {
+  id: number;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  total: number;
+  processed: number;
+  errors: number;
+  error_message: string | null;
+}
+
+export async function getPreviewBackfill(): Promise<PreviewBackfillJob | null> {
+  return api.get('/settings/preview-cache/backfill');
+}
+
+export async function startPreviewBackfill(): Promise<PreviewBackfillJob> {
+  return api.post('/settings/preview-cache/backfill');
 }
 
 export async function changePassword(

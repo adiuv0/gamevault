@@ -74,12 +74,13 @@ def get_metadata_dir(folder_name: str) -> Path:
 def ensure_game_directories(folder_name: str) -> None:
     """Create all required directories for a game.
 
-    Creates: screenshots/, thumbnails/300/, thumbnails/800/, metadata/
+    Creates: screenshots/, thumbnails/300/, thumbnails/800/, preview cache, metadata/
     """
     dirs = [
         get_screenshots_dir(folder_name),
         get_thumbnails_dir(folder_name, "300"),
         get_thumbnails_dir(folder_name, "800"),
+        get_thumbnails_dir(folder_name, str(settings.preview_max_width)),
         get_metadata_dir(folder_name),
     ]
     for d in dirs:
@@ -117,7 +118,8 @@ def thumbnail_cache_path(rel_path: str | None) -> Path | None:
         return None
     relative = Path(rel_path)
     parts = relative.parts
-    if len(parts) < 4 or parts[1] != "thumbnails" or parts[2] not in {"300", "800"}:
+    cache_sizes = {"300", "800", str(settings.preview_max_width)}
+    if len(parts) < 4 or parts[1] != "thumbnails" or parts[2] not in cache_sizes:
         return None
 
     cache_root = settings.thumbnail_dir.resolve()

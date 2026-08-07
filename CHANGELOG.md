@@ -26,6 +26,9 @@ closing the entire 14-finding security audit
 - Responsive admin navigation for phone-sized screens.
 - Configurable SSD-friendly thumbnail cache (`GAMEVAULT_THUMBNAIL_DIR`) with
   backward-compatible legacy reads and a Settings migration action.
+- Disposable 1920px viewer previews generated alongside thumbnails from the same image
+  decode, plus a durable Settings backfill for existing or cache-wiped libraries.
+- Reproducible metadata-only benchmarks for 1,000 and 10,000 logical captures.
 - GitHub Actions CI for backend tests, frontend lint/build, and the Docker image.
 - **Game merge.** Game admin page now has a "Merge" button that opens a
   modal listing every other game, lets you pick a target, and moves all
@@ -62,6 +65,8 @@ closing the entire 14-finding security audit
 
 - Gallery cards use responsive 300/800px sources, private media receives browser
   caching headers, and media requests use narrow database lookups.
+- Admin and public viewers load bounded previews by default; download links continue to
+  serve untouched full-resolution originals.
 - Imports decode each source once for both thumbnail sizes, perform image work
   outside the async request loop, and recalculate game statistics once per batch.
 - Added composite gallery indexes for game/date and game/filename ordering.
@@ -162,6 +167,7 @@ Run automatically on container startup:
 | `m006_gallery_indexes` | Adds gallery and import lookup indexes |
 | `m007_capture_groups` | Adds logical capture groups and perceptual hashes |
 | `m008_duplicate_review` | Adds durable maintenance jobs and duplicate review candidates |
+| `m009_preview_cache` | Tracks disposable browser-friendly large previews |
 
 ## [0.1.0] - 2026-02-11
 

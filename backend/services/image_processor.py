@@ -5,16 +5,14 @@ routed through ``hdr_processor`` for tone-mapped SDR thumbnails. The
 original file is always preserved on disk for download.
 """
 
-import asyncio
 import hashlib
 import json
 import logging
 from datetime import datetime
-from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, ExifTags
 import dhash
+from PIL import ExifTags, Image
 
 from backend.config import settings
 from backend.services import hdr_processor
@@ -308,7 +306,9 @@ def generate_thumbnails(
 
     Returns (sm_relative_path, md_relative_path) relative to library root.
     """
-    sm, md, _ = generate_thumbnails_with_hash(source_path, game_folder, filename_stem)
+    sm, md, _, _ = generate_thumbnails_with_hash(
+        source_path, game_folder, filename_stem
+    )
     return sm, md
 
 
@@ -316,35 +316,61 @@ def generate_thumbnails_with_hash(
     source_path: Path,
     game_folder: str,
     filename_stem: str,
-) -> tuple[str | None, str | None, str | None]:
-    """Generate both thumbnails and a 128-bit perceptual dHash in one decode."""
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Generate thumbnails, a large preview, and perceptual dHash in one decode."""
     from backend.services.filesystem import get_thumbnails_dir
 
     thumb_filename = f"{filename_stem}.jpg"
 
     sm_path = get_thumbnails_dir(game_folder, "300") / thumb_filename
     md_path = get_thumbnails_dir(game_folder, "800") / thumb_filename
+    preview_width = settings.preview_max_width
+    preview_path = get_thumbnails_dir(game_folder, str(preview_width)) / thumb_filename
 
     image = _open_for_thumbnail(source_path)
     if image is None:
-        return None, None, None
+        return None, None, None, None
     try:
         row_hash, col_hash = dhash.dhash_row_col(image)
         perceptual_hash = dhash.format_hex(row_hash, col_hash)
         quality = settings.thumbnail_quality
         sm_ok = _save_thumbnail(image, sm_path, 300, quality)
         md_ok = _save_thumbnail(image, md_path, 800, quality)
+        preview_ok = _save_thumbnail(image, preview_path, preview_width, quality)
     except Exception as e:
         logger.warning("Thumbnail generation failed for %s: %s", source_path, e)
-        sm_ok = md_ok = False
+        sm_ok = md_ok = preview_ok = False
         perceptual_hash = None
     finally:
         image.close()
 
     sm_rel = f"{game_folder}/thumbnails/300/{thumb_filename}" if sm_ok else None
     md_rel = f"{game_folder}/thumbnails/800/{thumb_filename}" if md_ok else None
+    preview_rel = (
+        f"{game_folder}/thumbnails/{preview_width}/{thumb_filename}"
+        if preview_ok
+        else None
+    )
 
-    return sm_rel, md_rel, perceptual_hash
+    return sm_rel, md_rel, preview_rel, perceptual_hash
+
+
+def generate_preview(
+    source_path: Path,
+    game_folder: str,
+    filename_stem: str,
+) -> str | None:
+    """Generate only the disposable large preview for an existing asset."""
+    from backend.services.filesystem import get_thumbnails_dir
+
+    preview_width = settings.preview_max_width
+    preview_path = (
+        get_thumbnails_dir(game_folder, str(preview_width))
+        / f"{filename_stem}.jpg"
+    )
+    if not generate_thumbnail(source_path, preview_path, preview_width):
+        return None
+    return f"{game_folder}/thumbnails/{preview_width}/{filename_stem}.jpg"
 
 
 def compute_perceptual_hash(file_path: Path) -> str | None:
@@ -385,7 +411,7 @@ def process_image(file_path: Path, game_folder: str, filename_stem: str) -> dict
     - width, height, format, file_size
     - sha256_hash, exif_data (JSON string)
     - taken_at (ISO string or None)
-    - thumbnail_path_sm, thumbnail_path_md
+    - thumbnail_path_sm, thumbnail_path_md, preview_path
     """
     result = {}
 
@@ -412,8 +438,12 @@ def process_image(file_path: Path, game_folder: str, filename_stem: str) -> dict
     result["taken_at"] = date_taken.isoformat() if date_taken else None
 
     # Thumbnails
-    sm, md = generate_thumbnails(file_path, game_folder, filename_stem)
+    sm, md, preview, perceptual_hash = generate_thumbnails_with_hash(
+        file_path, game_folder, filename_stem
+    )
     result["thumbnail_path_sm"] = sm
     result["thumbnail_path_md"] = md
+    result["preview_path"] = preview
+    result["perceptual_hash"] = perceptual_hash
 
     return result

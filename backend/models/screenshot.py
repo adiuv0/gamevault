@@ -24,6 +24,7 @@ class ScreenshotResponse(BaseModel):
     file_path: str
     thumbnail_path_sm: str | None = None
     thumbnail_path_md: str | None = None
+    preview_path: str | None = None
     file_size: int | None = None
     width: int | None = None
     height: int | None = None

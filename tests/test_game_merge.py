@@ -10,7 +10,6 @@ Covers:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -125,6 +124,7 @@ class TestMergeGames:
         _write(library_dir / s_folder / "screenshots" / "shot_a.jpg", b"AAAA")
         _write(thumbnail_dir / s_folder / "300" / "shot_a.jpg", b"sm")
         _write(thumbnail_dir / s_folder / "800" / "shot_a.jpg", b"md")
+        _write(thumbnail_dir / s_folder / "1920" / "shot_a.jpg", b"preview")
 
         s1 = await screenshot_service.create_screenshot(
             game_id=source["id"],
@@ -132,6 +132,7 @@ class TestMergeGames:
             file_path=f"{s_folder}/screenshots/shot_a.jpg",
             thumbnail_path_sm=f"{s_folder}/thumbnails/300/shot_a.jpg",
             thumbnail_path_md=f"{s_folder}/thumbnails/800/shot_a.jpg",
+            preview_path=f"{s_folder}/thumbnails/1920/shot_a.jpg",
             sha256_hash="hash_a",
         )
 
@@ -153,6 +154,7 @@ class TestMergeGames:
         assert (library_dir / t_folder / "screenshots" / "shot_a.jpg").read_bytes() == b"AAAA"
         assert (thumbnail_dir / t_folder / "300" / "shot_a.jpg").exists()
         assert (thumbnail_dir / t_folder / "800" / "shot_a.jpg").exists()
+        assert (thumbnail_dir / t_folder / "1920" / "shot_a.jpg").exists()
         assert moved["file_path"] == f"{t_folder}/screenshots/shot_a.jpg"
 
         # Source folder is cleaned up
@@ -306,8 +308,9 @@ class TestMergeGames:
 class TestMergeEndpoint:
     @pytest.mark.asyncio
     async def test_400_on_self_merge(self, db_with_library):
-        from backend.routers.games import GameMergeRequest, merge_into
         from fastapi import HTTPException
+
+        from backend.routers.games import GameMergeRequest, merge_into
 
         with pytest.raises(HTTPException) as exc:
             await merge_into(source_id=42, body=GameMergeRequest(target_id=42))
@@ -315,8 +318,9 @@ class TestMergeEndpoint:
 
     @pytest.mark.asyncio
     async def test_404_on_missing_game(self, db_with_library):
-        from backend.routers.games import GameMergeRequest, merge_into
         from fastapi import HTTPException
+
+        from backend.routers.games import GameMergeRequest, merge_into
 
         with pytest.raises(HTTPException) as exc:
             await merge_into(source_id=99998, body=GameMergeRequest(target_id=99999))

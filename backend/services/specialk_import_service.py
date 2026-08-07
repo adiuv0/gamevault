@@ -525,7 +525,7 @@ async def _import_single_file(
     taken_at = (date_taken or mtime).isoformat()
 
     filename_stem = Path(filename).stem
-    sm, md, perceptual_hash = await asyncio.to_thread(
+    sm, md, preview, perceptual_hash = await asyncio.to_thread(
         generate_thumbnails_with_hash, dest_path, game_folder, filename_stem
     )
 
@@ -546,6 +546,7 @@ async def _import_single_file(
         exif_data=json.dumps(exif) if exif else None,
         thumbnail_path_sm=sm,
         thumbnail_path_md=md,
+        preview_path=preview,
         perceptual_hash=perceptual_hash,
         source_key=f"specialk:{src_path.stem.casefold()}",
     )

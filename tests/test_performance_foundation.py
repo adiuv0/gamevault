@@ -1,7 +1,7 @@
 """Regression tests for gallery and media performance foundations."""
 
-import pytest
 import aiosqlite
+import pytest
 
 
 @pytest.fixture
@@ -54,7 +54,12 @@ async def test_media_lookup_returns_only_serve_fields(performance_db):
 
     media = await get_screenshot_media(screenshot_id)
     assert set(media) == {
-        "id", "file_path", "thumbnail_path_sm", "thumbnail_path_md", "format"
+        "id",
+        "file_path",
+        "thumbnail_path_sm",
+        "thumbnail_path_md",
+        "preview_path",
+        "format",
     }
 
 
@@ -124,6 +129,12 @@ def test_thumbnail_pair_decodes_source_once(monkeypatch, tmp_path):
     assert md == "Test/thumbnails/800/shot.jpg"
     assert (settings.thumbnail_dir / "Test" / "300" / "shot.jpg").exists()
     assert (settings.thumbnail_dir / "Test" / "800" / "shot.jpg").exists()
+    assert (
+        settings.thumbnail_dir
+        / "Test"
+        / str(settings.preview_max_width)
+        / "shot.jpg"
+    ).exists()
 
 
 @pytest.mark.asyncio

@@ -43,6 +43,10 @@ export function galleryImageUrl(screenshotId: number): string {
   return `${GALLERY_BASE}/screenshots/${screenshotId}/image`;
 }
 
+export function galleryPreviewUrl(screenshotId: number): string {
+  return `${GALLERY_BASE}/screenshots/${screenshotId}/preview`;
+}
+
 export function galleryThumbUrl(screenshotId: number, size: 'sm' | 'md'): string {
   return `${GALLERY_BASE}/screenshots/${screenshotId}/thumb/${size}`;
 }

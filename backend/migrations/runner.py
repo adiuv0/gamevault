@@ -18,6 +18,7 @@ MIGRATIONS = [
     "backend.migrations.m006_gallery_indexes",
     "backend.migrations.m007_capture_groups",
     "backend.migrations.m008_duplicate_review",
+    "backend.migrations.m009_preview_cache",
 ]
 
 

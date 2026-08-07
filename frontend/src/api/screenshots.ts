@@ -34,6 +34,10 @@ export function getScreenshotImageUrl(id: number): string {
   return `/api/screenshots/${id}/image${tokenQs()}`;
 }
 
+export function getScreenshotPreviewUrl(id: number): string {
+  return `/api/screenshots/${id}/preview${tokenQs()}`;
+}
+
 export function getThumbnailUrl(id: number, size: 'sm' | 'md'): string {
   return `/api/screenshots/${id}/thumb/${size}${tokenQs()}`;
 }

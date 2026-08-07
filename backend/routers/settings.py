@@ -1,11 +1,12 @@
 """Application settings routes."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.auth import require_auth
 from backend.config import settings
 from backend.database import get_db
+from backend.services import preview_service
 from backend.services.filesystem import (
     format_file_size,
     get_library_size_bytes,
@@ -109,6 +110,7 @@ async def get_settings():
         "auth_disabled": settings.disable_auth,
         "import_rate_limit_ms": settings.import_rate_limit_ms,
         "thumbnail_quality": settings.thumbnail_quality,
+        "preview_max_width": settings.preview_max_width,
         "max_upload_size_mb": settings.max_upload_size_mb,
         "token_expiry_days": settings.token_expiry_days,
         "has_steam_api_key": has_steam,
@@ -233,3 +235,17 @@ async def health_check():
 async def migrate_thumbnail_cache():
     """Move existing generated thumbnails from library storage to cache."""
     return await migrate_legacy_thumbnails()
+
+
+@router.get("/preview-cache/backfill")
+async def get_preview_backfill():
+    """Return the latest durable preview-cache audit."""
+    return await preview_service.get_latest_backfill_job()
+
+
+@router.post("/preview-cache/backfill")
+async def start_preview_backfill(background_tasks: BackgroundTasks):
+    """Start or resume generation of browser-friendly large previews."""
+    job = await preview_service.start_backfill_job()
+    background_tasks.add_task(preview_service.run_backfill_job, job["id"])
+    return job

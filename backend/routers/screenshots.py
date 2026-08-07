@@ -13,7 +13,6 @@ _EXTRA_MIME_TYPES = {
 }
 
 from backend.auth import require_auth
-from backend.config import settings
 from backend.models.annotation import AnnotationCreate
 from backend.services import screenshot_service
 from backend.services.filesystem import safe_library_path, safe_media_path
@@ -58,7 +57,12 @@ async def delete_screenshot(screenshot_id: int):
 
     # Delete files from disk — every path resolution goes through the
     # library-containment check so a poisoned DB row can't reach outside.
-    for path_field in ["file_path", "thumbnail_path_sm", "thumbnail_path_md"]:
+    for path_field in [
+        "file_path",
+        "thumbnail_path_sm",
+        "thumbnail_path_md",
+        "preview_path",
+    ]:
         rel_path = screenshot.get(path_field)
         if not rel_path:
             continue
@@ -127,6 +131,50 @@ async def get_thumbnail(screenshot_id: int, size: str):
     return FileResponse(
         full_path,
         media_type="image/jpeg",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
+            "Cache-Control": "private, max-age=86400",
+        },
+    )
+
+
+@router.get("/{screenshot_id}/preview")
+async def get_preview(screenshot_id: int):
+    """Serve a bounded browser preview, falling back while backfill runs."""
+    screenshot = await screenshot_service.get_screenshot_media(screenshot_id)
+    if not screenshot:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+
+    rel_path = None
+    full_path = None
+    for candidate in (
+        screenshot.get("preview_path"),
+        screenshot.get("thumbnail_path_md"),
+        screenshot.get("file_path"),
+    ):
+        if not candidate:
+            continue
+        try:
+            resolved = safe_media_path(candidate)
+        except HTTPException:
+            continue
+        if resolved.exists():
+            rel_path = candidate
+            full_path = resolved
+            break
+    if rel_path is None or full_path is None:
+        raise HTTPException(status_code=404, detail="Preview not found")
+
+    is_derivative = rel_path != screenshot.get("file_path")
+    media_type = "image/jpeg" if is_derivative else (
+        _EXTRA_MIME_TYPES.get(full_path.suffix.lower())
+        or mimetypes.guess_type(str(full_path))[0]
+        or "image/jpeg"
+    )
+    return FileResponse(
+        full_path,
+        media_type=media_type,
         headers={
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "default-src 'none'",

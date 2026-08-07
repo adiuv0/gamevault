@@ -14,10 +14,9 @@ import mimetypes
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from backend.config import settings
 from backend.database import get_db
 from backend.models.game import PublicGame, PublicGameListResponse
-from backend.models.screenshot import PublicScreenshot, PublicScreenshotListResponse
+from backend.models.screenshot import PublicScreenshotListResponse
 from backend.services import game_service
 from backend.services.filesystem import safe_library_path, safe_media_path
 from backend.services.screenshot_service import list_screenshots
@@ -153,6 +152,47 @@ async def gallery_screenshot_thumb(screenshot_id: int, size: str):
     return FileResponse(
         full_path,
         media_type="image/jpeg",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
+            "Cache-Control": "public, max-age=86400",
+        },
+    )
+
+
+@router.get("/screenshots/{screenshot_id}/preview")
+async def gallery_screenshot_preview(screenshot_id: int):
+    """Serve a bounded public preview, falling back while backfill runs."""
+    screenshot = await _get_public_screenshot(screenshot_id)
+    rel_path = None
+    full_path = None
+    for candidate in (
+        screenshot.get("preview_path"),
+        screenshot.get("thumbnail_path_md"),
+        screenshot.get("file_path"),
+    ):
+        if not candidate:
+            continue
+        try:
+            resolved = safe_media_path(candidate)
+        except HTTPException:
+            continue
+        if resolved.exists():
+            rel_path = candidate
+            full_path = resolved
+            break
+    if rel_path is None or full_path is None:
+        raise HTTPException(status_code=404, detail="Preview not found")
+
+    is_derivative = rel_path != screenshot.get("file_path")
+    media_type = (
+        "image/jpeg"
+        if is_derivative
+        else mimetypes.guess_type(str(full_path))[0] or "image/jpeg"
+    )
+    return FileResponse(
+        full_path,
+        media_type=media_type,
         headers={
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "default-src 'none'",

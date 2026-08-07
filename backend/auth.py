@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
-from fastapi import Depends, HTTPException, Request
+from fastapi import HTTPException, Request
 from jose import JWTError, jwt
 
 from backend.config import settings
@@ -34,6 +34,7 @@ _QUERY_TOKEN_ALLOWED_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^/api/specialk/import/\d+/progress$"),
     # Image / thumbnail / cover serves used as <img src=...>
     re.compile(r"^/api/screenshots/\d+/image$"),
+    re.compile(r"^/api/screenshots/\d+/preview$"),
     re.compile(r"^/api/screenshots/\d+/thumb/(sm|md)$"),
     re.compile(r"^/api/games/\d+/cover$"),
 )
