@@ -69,6 +69,7 @@ class ScreenshotListResponse(BaseModel):
     page: int
     limit: int
     has_more: bool
+    next_cursor: str | None = None
 
 
 class ScreenshotUpdate(BaseModel):
@@ -136,3 +137,4 @@ class PublicScreenshotListResponse(BaseModel):
     page: int
     limit: int
     has_more: bool
+    next_cursor: str | None = None

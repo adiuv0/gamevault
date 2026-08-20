@@ -18,3 +18,7 @@ async def test_large_library_benchmark_preserves_logical_counts():
     assert result["deep_page"]["page"] == 3
     assert result["deep_page"]["items"] == 20
     assert result["deep_page"]["total"] == 120
+    assert result["cursor_deep_page"]["page"] == 3
+    assert result["cursor_deep_page"]["items"] == 20
+    assert result["cursor_deep_page"]["total"] == 120
+    assert result["cursor_deep_page"]["has_more"] is False

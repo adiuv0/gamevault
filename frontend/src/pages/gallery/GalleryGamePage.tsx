@@ -1,11 +1,16 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Image, Loader2 } from 'lucide-react';
+import { ArrowLeft, Image, Loader2, RefreshCw } from 'lucide-react';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { GalleryScreenshotCard } from '@/components/gallery/GalleryScreenshotCard';
 import { GalleryScreenshotViewer } from '@/components/gallery/GalleryScreenshotViewer';
-import { galleryGetGame, galleryListScreenshots, galleryCoverUrl } from '@/api/gallery';
+import { VirtualizedScreenshotGrid } from '@/components/screenshots/VirtualizedScreenshotGrid';
+import {
+  galleryCoverUrl,
+  galleryGetGame,
+  galleryListScreenshotsCursor,
+} from '@/api/gallery';
 import { formatCount, formatDate } from '@/lib/formatters';
 import type { Game, ScreenshotListItem } from '@/lib/types';
 
@@ -18,9 +23,10 @@ export function GalleryGamePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(false);
+  const loadingMoreRef = useRef(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -29,12 +35,12 @@ export function GalleryGamePage() {
         setError(null);
         const [gameData, screenshotData] = await Promise.all([
           galleryGetGame(gameId),
-          galleryListScreenshots(gameId, 1, 50),
+          galleryListScreenshotsCursor(gameId),
         ]);
         setGame(gameData);
         setScreenshots(screenshotData.screenshots);
-        setHasMore(screenshotData.has_more);
-        setPage(1);
+        setNextCursor(screenshotData.next_cursor);
+        setLoadMoreError(false);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load game');
       } finally {
@@ -45,20 +51,26 @@ export function GalleryGamePage() {
   }, [gameId]);
 
   const loadMore = useCallback(async () => {
-    if (loadingMore || !hasMore) return;
+    if (loadingMoreRef.current || !nextCursor) return;
+    loadingMoreRef.current = true;
     try {
       setLoadingMore(true);
-      const nextPage = page + 1;
-      const data = await galleryListScreenshots(gameId, nextPage, 50);
-      setScreenshots((prev) => [...prev, ...data.screenshots]);
-      setHasMore(data.has_more);
-      setPage(nextPage);
+      setLoadMoreError(false);
+      const data = await galleryListScreenshotsCursor(gameId, nextCursor);
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+      setScreenshots((current) => {
+        const existingIds = new Set(current.map((item) => item.id));
+        return [...current, ...data.screenshots.filter((item) => !existingIds.has(item.id))];
+      });
+      setNextCursor(data.next_cursor);
     } catch {
-      // ignore
+      setLoadMoreError(true);
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, page, gameId]);
+  }, [gameId, nextCursor]);
 
   if (loading) {
     return (
@@ -158,26 +170,32 @@ export function GalleryGamePage() {
         />
       ) : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-            {screenshots.map((screenshot, index) => (
+          <VirtualizedScreenshotGrid
+            screenshots={screenshots}
+            onSelect={setViewerIndex}
+            onEndReached={nextCursor ? () => void loadMore() : undefined}
+            renderItem={(screenshot, onClick) => (
               <GalleryScreenshotCard
-                key={screenshot.id}
                 screenshot={screenshot}
-                onClick={() => setViewerIndex(index)}
+                onClick={onClick}
               />
-            ))}
-          </div>
+            )}
+          />
 
-          {/* Load more */}
-          {hasMore && (
+          {loadingMore && (
+            <div className="flex justify-center mt-6" aria-live="polite">
+              <Loader2 className="h-5 w-5 animate-spin text-text-muted" />
+              <span className="sr-only">Loading more screenshots</span>
+            </div>
+          )}
+          {loadMoreError && nextCursor && (
             <div className="flex justify-center mt-6">
               <button
-                onClick={loadMore}
-                disabled={loadingMore}
-                className="flex items-center gap-2 px-6 py-2 bg-bg-secondary border border-border rounded-md text-sm text-text-primary hover:bg-bg-tertiary transition-colors disabled:opacity-50"
+                onClick={() => void loadMore()}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-bg-secondary border border-border rounded-md text-sm text-text-primary hover:bg-bg-tertiary transition-colors"
               >
-                {loadingMore && <Loader2 className="h-4 w-4 animate-spin" />}
-                Load More
+                <RefreshCw className="h-4 w-4" />
+                Retry
               </button>
             </div>
           )}

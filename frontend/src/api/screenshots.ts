@@ -1,13 +1,24 @@
 import { api, tokenQs } from './client';
-import type { Screenshot, ScreenshotListItem, Annotation, ShareLink } from '@/lib/types';
+import type { Annotation, Screenshot, ScreenshotPage, ShareLink } from '@/lib/types';
 
 export async function listScreenshots(
   gameId: number,
   page = 1,
   limit = 50,
   sort = 'date_desc',
-): Promise<{ screenshots: ScreenshotListItem[]; total: number; page: number; limit: number; has_more: boolean }> {
+): Promise<ScreenshotPage> {
   return api.get(`/games/${gameId}/screenshots?page=${page}&limit=${limit}&sort=${sort}`);
+}
+
+export async function listScreenshotsCursor(
+  gameId: number,
+  cursor: string | null = null,
+  limit = 50,
+  sort = 'date_desc',
+): Promise<ScreenshotPage> {
+  const params = new URLSearchParams({ limit: String(limit), sort });
+  if (cursor) params.set('cursor', cursor);
+  return api.get(`/games/${gameId}/screenshots?${params}`);
 }
 
 export async function getScreenshot(id: number): Promise<Screenshot> {

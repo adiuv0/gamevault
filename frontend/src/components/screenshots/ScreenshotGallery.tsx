@@ -1,21 +1,29 @@
 import { ScreenshotCard } from './ScreenshotCard';
+import { VirtualizedScreenshotGrid } from './VirtualizedScreenshotGrid';
 import type { ScreenshotListItem } from '@/lib/types';
 
 interface ScreenshotGalleryProps {
   screenshots: ScreenshotListItem[];
   onSelect: (index: number) => void;
+  onEndReached?: () => void;
 }
 
-export function ScreenshotGallery({ screenshots, onSelect }: ScreenshotGalleryProps) {
+export function ScreenshotGallery({
+  screenshots,
+  onSelect,
+  onEndReached,
+}: ScreenshotGalleryProps) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-      {screenshots.map((screenshot, index) => (
+    <VirtualizedScreenshotGrid
+      screenshots={screenshots}
+      onSelect={onSelect}
+      onEndReached={onEndReached}
+      renderItem={(screenshot, onClick) => (
         <ScreenshotCard
-          key={screenshot.id}
           screenshot={screenshot}
-          onClick={() => onSelect(index)}
+          onClick={onClick}
         />
-      ))}
-    </div>
+      )}
+    />
   );
 }

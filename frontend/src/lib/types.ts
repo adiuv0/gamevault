@@ -44,6 +44,15 @@ export interface ScreenshotListItem {
   variant_count: number;
 }
 
+export interface ScreenshotPage {
+  screenshots: ScreenshotListItem[];
+  total: number;
+  page: number;
+  limit: number;
+  has_more: boolean;
+  next_cursor: string | null;
+}
+
 export interface PublicScreenshot extends ScreenshotVariant {
   game_id: number;
   variant_count: number;

@@ -9,7 +9,7 @@ from backend.models.game import GameCreate, GameListResponse, GameResponse, Game
 from backend.models.screenshot import ScreenshotListResponse
 from backend.services import game_service
 from backend.services.filesystem import safe_library_path
-from backend.services.screenshot_service import list_screenshots
+from backend.services.screenshot_service import list_screenshots, list_screenshots_cursor
 
 router = APIRouter(prefix="/api/games", tags=["games"], dependencies=[Depends(require_auth)])
 
@@ -207,19 +207,31 @@ async def get_game_screenshots(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
     sort: str = "date_desc",
+    cursor: str | None = None,
 ):
     """List screenshots for a game."""
     game = await game_service.get_game(game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    screenshots, total = await list_screenshots(game_id, page, limit, sort)
+    using_cursor = cursor is not None or page == 1
+    next_cursor = None
+    if using_cursor:
+        try:
+            screenshots, total, next_cursor = await list_screenshots_cursor(
+                game_id, cursor or None, limit, sort
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+    else:
+        screenshots, total = await list_screenshots(game_id, page, limit, sort)
     return {
         "screenshots": screenshots,
         "total": total,
         "page": page,
         "limit": limit,
-        "has_more": (page * limit) < total,
+        "has_more": next_cursor is not None if using_cursor else (page * limit) < total,
+        "next_cursor": next_cursor,
     }
 
 

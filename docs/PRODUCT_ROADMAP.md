@@ -47,7 +47,8 @@ Deliverables:
   default.
 - [x] Slim gallery payloads with full metadata fetched only when needed.
 - [x] Revisioned media URLs with immutable private caching for warm navigation.
-- Cursor pagination and gallery virtualization where measurements justify them.
+- [x] Cursor pagination and window-scrolling virtualization for admin and public
+  game galleries.
 - [x] Durable Steam and Special K import jobs that resume cleanly after restart.
 - Durable browser-upload staging and replay.
 

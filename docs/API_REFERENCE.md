@@ -118,7 +118,10 @@ Serves the game's cover image as `image/jpeg`. 404 if no cover.
 ### `GET /api/games/{id}/screenshots?page=1&limit=50&sort=date_desc`
 
 Paginated list of screenshots for a game. Sort: `date_desc` (default),
-`date_asc`, `name`.
+`date_asc`, `name`. The response includes an opaque `next_cursor`. Pass it
+back as `cursor=<token>` to fetch the next stable keyset page. Cursors are
+bound to the selected sort and invalid tokens return HTTP 400. Numbered
+`page` requests remain supported for backward compatibility.
 
 ### `POST /api/games/{id}/refresh-metadata`
 
@@ -160,6 +163,10 @@ Game screenshot-list endpoints paginate logical captures and return card-sized i
 `id`, `game_id`, `filename`, `media_version`, `taken_at`, `uploaded_at`, `variant_count`, and the
 authenticated favorite/annotation flags. Variant metadata is intentionally omitted
 from list responses.
+
+The public equivalent, `GET /api/gallery/games/{id}/screenshots`, supports
+the same `limit`, `sort`, `page`, and `cursor` contract while retaining its
+slimmer public response model.
 
 ### `DELETE /api/screenshots/{id}`
 

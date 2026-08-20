@@ -1,5 +1,8 @@
 """Screenshot management service: CRUD, file management, FTS sync."""
 
+import base64
+import binascii
+import json
 
 from backend.database import get_db
 from backend.services.game_service import update_screenshot_stats
@@ -61,45 +64,62 @@ _VARIANT_PREFERENCE = """CASE
     ELSE 0
 END, s.id"""
 
+_CURSOR_VERSION = 1
 
-async def list_screenshots(
-    game_id: int,
-    page: int = 1,
-    limit: int = 50,
-    sort: str = "date_desc",
-) -> tuple[list[dict], int]:
-    """List screenshots for a game with pagination.
 
-    Returns (screenshots_list, total_count).
-    """
+def _normalized_sort(sort: str) -> str:
+    return sort if sort in SCREENSHOT_SORT_CLAUSES else "date_desc"
+
+
+def _encode_screenshot_cursor(sort: str, value: str | None, tie_id: int) -> str:
+    payload = json.dumps(
+        {"v": _CURSOR_VERSION, "sort": sort, "value": value, "tie_id": tie_id},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+
+
+def _decode_screenshot_cursor(encoded: str, sort: str) -> tuple[str | None, int]:
+    try:
+        padding = "=" * (-len(encoded) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(encoded + padding))
+        value = payload["value"]
+        tie_id = payload["tie_id"]
+        if (
+            payload.get("v") != _CURSOR_VERSION
+            or payload.get("sort") != sort
+            or (value is not None and not isinstance(value, str))
+            or not isinstance(tie_id, int)
+            or isinstance(tie_id, bool)
+        ):
+            raise ValueError
+    except (
+        binascii.Error,
+        KeyError,
+        TypeError,
+        UnicodeDecodeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as error:
+        raise ValueError("Invalid or incompatible screenshot cursor") from error
+    return value, tie_id
+
+
+async def _capture_total(game_id: int) -> int:
     db = await get_db()
-
-    order_clause = SCREENSHOT_SORT_CLAUSES.get(sort, SCREENSHOT_DEFAULT_SORT)
-
-    # Paginate logical captures, not physical variants.
     cursor = await db.execute(
         """SELECT COUNT(DISTINCT COALESCE(capture_group_id, id))
            FROM screenshots WHERE game_id = ?""",
         (game_id,),
     )
-    total = (await cursor.fetchone())[0]
+    return (await cursor.fetchone())[0]
 
-    # Page compact group IDs first so only variants for the visible captures
-    # are materialized below.
-    offset = (page - 1) * limit
-    cursor = await db.execute(
-        f"""SELECT COALESCE(capture_group_id, id) AS group_id
-            FROM screenshots
-            WHERE game_id = ?
-            GROUP BY COALESCE(capture_group_id, id)
-            ORDER BY {order_clause}
-            LIMIT ? OFFSET ?""",
-        (game_id, limit, offset),
-    )
-    group_ids = [row[0] for row in await cursor.fetchall()]
+
+async def _materialize_capture_groups(game_id: int, group_ids: list[int]) -> list[dict]:
     if not group_ids:
-        return [], total
+        return []
 
+    db = await get_db()
     placeholders = ", ".join("?" for _ in group_ids)
     cursor = await db.execute(
         f"""SELECT s.id, s.game_id, s.filename, s.taken_at, s.uploaded_at,
@@ -133,8 +153,113 @@ async def list_screenshots(
         screenshot["is_favorite"] = any(item.get("is_favorite") for item in variants)
         screenshot["has_annotation"] = any(item.get("has_annotation") for item in variants)
         screenshots.append(screenshot)
+    return screenshots
 
-    return screenshots, total
+
+async def list_screenshots(
+    game_id: int,
+    page: int = 1,
+    limit: int = 50,
+    sort: str = "date_desc",
+) -> tuple[list[dict], int]:
+    """List screenshots for a game with pagination.
+
+    Returns (screenshots_list, total_count).
+    """
+    db = await get_db()
+
+    order_clause = SCREENSHOT_SORT_CLAUSES.get(sort, SCREENSHOT_DEFAULT_SORT)
+
+    # Paginate logical captures, not physical variants.
+    total = await _capture_total(game_id)
+
+    # Page compact group IDs first so only variants for the visible captures
+    # are materialized below.
+    offset = (page - 1) * limit
+    cursor = await db.execute(
+        f"""SELECT COALESCE(capture_group_id, id) AS group_id
+            FROM screenshots
+            WHERE game_id = ?
+            GROUP BY COALESCE(capture_group_id, id)
+            ORDER BY {order_clause}
+            LIMIT ? OFFSET ?""",
+        (game_id, limit, offset),
+    )
+    group_ids = [row[0] for row in await cursor.fetchall()]
+    return await _materialize_capture_groups(game_id, group_ids), total
+
+
+async def list_screenshots_cursor(
+    game_id: int,
+    cursor: str | None = None,
+    limit: int = 50,
+    sort: str = "date_desc",
+) -> tuple[list[dict], int, str | None]:
+    """List logical captures after an opaque, sort-bound cursor."""
+    db = await get_db()
+    sort = _normalized_sort(sort)
+    order_clause = SCREENSHOT_SORT_CLAUSES[sort]
+    having_clause = ""
+    params: list[object] = [game_id]
+
+    if cursor:
+        value, tie_id = _decode_screenshot_cursor(cursor, sort)
+        if sort == "date_desc":
+            if value is None:
+                having_clause = "HAVING MAX(taken_at) IS NULL AND MAX(id) < ?"
+                params.append(tie_id)
+            else:
+                having_clause = """HAVING MAX(taken_at) IS NULL
+                    OR MAX(taken_at) < ?
+                    OR (MAX(taken_at) = ? AND MAX(id) < ?)"""
+                params.extend((value, value, tie_id))
+        elif sort == "date_asc":
+            if value is None:
+                having_clause = """HAVING (MIN(taken_at) IS NULL AND MIN(id) > ?)
+                    OR MIN(taken_at) IS NOT NULL"""
+                params.append(tie_id)
+            else:
+                having_clause = """HAVING MIN(taken_at) > ?
+                    OR (MIN(taken_at) = ? AND MIN(id) > ?)"""
+                params.extend((value, value, tie_id))
+        else:
+            if value is None:
+                raise ValueError("Invalid or incompatible screenshot cursor")
+            having_clause = """HAVING MIN(filename) > ?
+                OR (MIN(filename) = ? AND MIN(id) > ?)"""
+            params.extend((value, value, tie_id))
+
+    if sort == "date_desc":
+        sort_projection = "MAX(taken_at) AS sort_value, MAX(id) AS tie_id"
+    elif sort == "date_asc":
+        sort_projection = "MIN(taken_at) AS sort_value, MIN(id) AS tie_id"
+    else:
+        sort_projection = "MIN(filename) AS sort_value, MIN(id) AS tie_id"
+
+    params.append(limit + 1)
+    page_cursor = await db.execute(
+        f"""SELECT COALESCE(capture_group_id, id) AS group_id,
+                   {sort_projection}
+            FROM screenshots
+            WHERE game_id = ?
+            GROUP BY COALESCE(capture_group_id, id)
+            {having_clause}
+            ORDER BY {order_clause}
+            LIMIT ?""",
+        params,
+    )
+    rows = await page_cursor.fetchall()
+    has_more = len(rows) > limit
+    visible_rows = rows[:limit]
+    group_ids = [row[0] for row in visible_rows]
+    total = await _capture_total(game_id)
+    screenshots = await _materialize_capture_groups(game_id, group_ids)
+
+    next_cursor = None
+    if has_more and visible_rows:
+        _, value, tie_id = visible_rows[-1]
+        next_cursor = _encode_screenshot_cursor(sort, value, tie_id)
+    return screenshots, total, next_cursor
 
 
 async def get_screenshot(screenshot_id: int) -> dict | None:

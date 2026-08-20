@@ -56,10 +56,12 @@ Acceptance criteria:
 ## Phase 3: Large-Library Scaling
 
 Status: In progress. Repeatable 1k/10k benchmarks, bounded viewer previews, slim payloads,
-revisioned browser caching, and durable filesystem imports are implemented.
+revisioned browser caching, cursor pagination, virtualized galleries, and durable
+filesystem imports are implemented.
 
 - [x] Add a browser-compatible large preview so the viewer does not fetch 4K originals by default.
-- Virtualize long galleries and replace deep offset pagination with cursor pagination.
+- [x] Virtualize long admin/public galleries and replace their deep offset pagination
+  with opaque cursor pagination. Numbered pages remain compatible for older clients.
 - [x] Return slim list payloads and fetch full metadata only when requested.
 - [x] Version media URLs so warm authenticated navigation stays in the browser cache.
 - [x] Replace Steam and Special K request-bound tasks with a durable SQLite-backed job

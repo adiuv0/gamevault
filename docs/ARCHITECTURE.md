@@ -341,6 +341,19 @@ TanStack Query is set up but used only by parts of the gallery flow that
 need cache + revalidation. Adding TanStack Query elsewhere is a
 non-breaking change if you want it.
 
+### Gallery delivery
+
+Admin and public game galleries request 50 logical captures at a time. The
+first response includes an opaque, sort-bound cursor; subsequent requests use
+keyset pagination while legacy numbered pages remain available. The shared
+`VirtualizedScreenshotGrid` uses `react-virtuoso` with window scrolling, so
+loaded captures remain available to the viewer but only the visible grid
+window and overscan buffer stay mounted in the DOM.
+
+The reproducible 10,000-capture benchmark measures both paths. In the
+2026-08-19 local verification run, the deepest cursor page had a 17.3 ms
+median versus 25.3 ms for the equivalent offset page.
+
 ### API clients
 
 One TypeScript module in [`api/`](../frontend/src/api/) per backend

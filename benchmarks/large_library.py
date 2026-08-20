@@ -101,7 +101,10 @@ async def run_case(
 ) -> dict:
     from backend.config import settings
     from backend.database import close_db, get_db, init_db
-    from backend.services.screenshot_service import list_screenshots
+    from backend.services.screenshot_service import (
+        list_screenshots,
+        list_screenshots_cursor,
+    )
 
     await close_db()
     with tempfile.TemporaryDirectory(prefix="gamevault-benchmark-") as temp_dir:
@@ -117,11 +120,18 @@ async def run_case(
             seed_seconds = time.perf_counter() - started
 
             deep_page = max(1, (capture_count + 49) // 50)
+            deep_cursor = None
+            for _ in range(deep_page - 1):
+                _, _, deep_cursor = await list_screenshots_cursor(
+                    game_id, deep_cursor, 50
+                )
             await list_screenshots(game_id, 1, 50)
             await list_screenshots(game_id, deep_page, 50)
+            await list_screenshots_cursor(game_id, deep_cursor, 50)
 
             first_page_times = []
             deep_page_times = []
+            cursor_page_times = []
             for _ in range(iterations):
                 started = time.perf_counter()
                 first_items, total = await list_screenshots(game_id, 1, 50)
@@ -132,6 +142,12 @@ async def run_case(
                     game_id, deep_page, 50
                 )
                 deep_page_times.append(time.perf_counter() - started)
+
+                started = time.perf_counter()
+                cursor_items, cursor_total, next_cursor = (
+                    await list_screenshots_cursor(game_id, deep_cursor, 50)
+                )
+                cursor_page_times.append(time.perf_counter() - started)
 
             first_page_payload = json.dumps(
                 first_items, separators=(",", ":")
@@ -157,6 +173,13 @@ async def run_case(
                     "page": deep_page,
                     "items": len(deep_items),
                     "total": deep_total,
+                },
+                "cursor_deep_page": {
+                    **_summary(cursor_page_times),
+                    "page": deep_page,
+                    "items": len(cursor_items),
+                    "total": cursor_total,
+                    "has_more": next_cursor is not None,
                 },
             }
         finally:

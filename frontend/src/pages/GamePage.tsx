@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Upload, Image, Trash2, Loader2, RefreshCw, CheckCircle2, Globe, Lock, GitMerge, Search } from 'lucide-react';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
@@ -6,7 +6,7 @@ import { EmptyState } from '@/components/shared/EmptyState';
 import { ScreenshotGallery } from '@/components/screenshots/ScreenshotGallery';
 import { ScreenshotViewer } from '@/components/screenshots/ScreenshotViewer';
 import { getGame, deleteGame, updateGame, getCoverUrl, listGames, mergeGameInto } from '@/api/games';
-import { listScreenshots } from '@/api/screenshots';
+import { listScreenshotsCursor } from '@/api/screenshots';
 import { fetchGameMetadata } from '@/api/metadata';
 import { formatCount, formatDate } from '@/lib/formatters';
 import type { Game, ScreenshotListItem } from '@/lib/types';
@@ -21,9 +21,10 @@ export function GamePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(false);
+  const loadingMoreRef = useRef(false);
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [fetchingMeta, setFetchingMeta] = useState(false);
@@ -36,12 +37,12 @@ export function GamePage() {
       setError(null);
       const [gameData, screenshotData] = await Promise.all([
         getGame(gameId),
-        listScreenshots(gameId, 1, 50),
+        listScreenshotsCursor(gameId),
       ]);
       setGame(gameData);
       setScreenshots(screenshotData.screenshots);
-      setHasMore(screenshotData.has_more);
-      setPage(1);
+      setNextCursor(screenshotData.next_cursor);
+      setLoadMoreError(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load game');
     } finally {
@@ -53,21 +54,27 @@ export function GamePage() {
     void fetchData();
   }, [fetchData]);
 
-  const loadMore = async () => {
-    if (loadingMore || !hasMore) return;
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current || !nextCursor) return;
+    loadingMoreRef.current = true;
     try {
       setLoadingMore(true);
-      const nextPage = page + 1;
-      const data = await listScreenshots(gameId, nextPage, 50);
-      setScreenshots((prev) => [...prev, ...data.screenshots]);
-      setHasMore(data.has_more);
-      setPage(nextPage);
+      setLoadMoreError(false);
+      const data = await listScreenshotsCursor(gameId, nextCursor);
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+      setScreenshots((current) => {
+        const existingIds = new Set(current.map((item) => item.id));
+        return [...current, ...data.screenshots.filter((item) => !existingIds.has(item.id))];
+      });
+      setNextCursor(data.next_cursor);
     } catch {
-      // ignore
+      setLoadMoreError(true);
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  };
+  }, [gameId, nextCursor]);
 
   const handleFavoriteToggle = useCallback((screenshotId: number, isFav: boolean) => {
     setScreenshots((prev) =>
@@ -289,18 +296,23 @@ export function GamePage() {
           <ScreenshotGallery
             screenshots={screenshots}
             onSelect={(index) => setViewerIndex(index)}
+            onEndReached={nextCursor ? () => void loadMore() : undefined}
           />
 
-          {/* Load more */}
-          {hasMore && (
+          {loadingMore && (
+            <div className="flex justify-center mt-6" aria-live="polite">
+              <Loader2 className="h-5 w-5 animate-spin text-text-muted" />
+              <span className="sr-only">Loading more screenshots</span>
+            </div>
+          )}
+          {loadMoreError && nextCursor && (
             <div className="flex justify-center mt-6">
               <button
-                onClick={loadMore}
-                disabled={loadingMore}
-                className="flex items-center gap-2 px-6 py-2 bg-bg-secondary border border-border rounded-md text-sm text-text-primary hover:bg-bg-tertiary transition-colors disabled:opacity-50"
+                onClick={() => void loadMore()}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-bg-secondary border border-border rounded-md text-sm text-text-primary hover:bg-bg-tertiary transition-colors"
               >
-                {loadingMore && <Loader2 className="h-4 w-4 animate-spin" />}
-                Load More
+                <RefreshCw className="h-4 w-4" />
+                Retry
               </button>
             </div>
           )}
