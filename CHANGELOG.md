@@ -29,6 +29,9 @@ closing the entire 14-finding security audit
 - Disposable 1920px viewer previews generated alongside thumbnails from the same image
   decode, plus a durable Settings backfill for existing or cache-wiped libraries.
 - Reproducible metadata-only benchmarks for 1,000 and 10,000 logical captures.
+- Restart-safe Steam and Special K imports backed by an encrypted SQLite job queue.
+  Interrupted jobs resume on startup, terminal progress remains available after restart,
+  and completed or cancelled jobs discard their encrypted payloads.
 - GitHub Actions CI for backend tests, frontend lint/build, and the Docker image.
 - **Game merge.** Game admin page now has a "Merge" button that opens a
   modal listing every other game, lets you pick a target, and moves all
@@ -175,6 +178,7 @@ Run automatically on container startup:
 | `m007_capture_groups` | Adds logical capture groups and perceptual hashes |
 | `m008_duplicate_review` | Adds durable maintenance jobs and duplicate review candidates |
 | `m009_preview_cache` | Tracks disposable browser-friendly large previews |
+| `m010_durable_import_jobs` | Adds the encrypted, restart-safe Steam and Special K job queue |
 
 ## [0.1.0] - 2026-02-11
 

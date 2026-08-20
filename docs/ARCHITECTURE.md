@@ -235,8 +235,15 @@ detail-page HTML when not available via API.
 
 ### SSE progress
 
-Three import/upload flows stream progress to the client. The pattern is
-shared:
+Three import/upload flows stream progress to the client. Steam and Special K
+first create a session and encrypted job payload in one SQLite transaction.
+[`import_job_service.py`](../backend/services/import_job_service.py) runs those
+jobs through one in-process worker and returns interrupted work to `pending` on
+startup. Import logic is idempotent by source ID or content hash, and Special K
+also adopts an identical destination file left behind by a crash before the
+database row was committed.
+
+Live progress uses a shared pattern:
 
 1. Service holds an in-memory `dict[int, asyncio.Queue]` keyed by session ID
 2. The router's progress endpoint reads from the queue and writes
@@ -246,9 +253,15 @@ shared:
 4. Cancellation is a separate `dict[int, bool]` flag the service polls
    between batches
 
-This is intentionally simple — no Redis, no broker. Per-process state is
-fine for a single-user self-hosted app. If you ever scale to multiple
-backend instances you'd need to externalize this.
+The event queues and cancellation flags remain process-local. Session counters
+and job state are durable, so reconnecting to a terminal session after restart
+returns a synthesized terminal event followed by `done`. Browser uploads are
+still request-bound because their temporary request bodies are not durably
+staged.
+
+This is intentionally simple — no Redis, no broker. The single worker matches
+the single-instance, single-user deployment model. A multi-instance deployment
+would need an external queue or stronger cross-process claim semantics.
 
 ### Special K import
 

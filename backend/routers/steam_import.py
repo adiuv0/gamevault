@@ -3,27 +3,30 @@
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from backend.auth import require_auth
 from backend.models.steam_import import (
-    SteamValidateRequest,
-    SteamValidateResponse,
     SteamGameInfo,
     SteamImportRequest,
     SteamImportSessionResponse,
+    SteamValidateRequest,
+    SteamValidateResponse,
 )
 from backend.routers.settings import get_effective_key
-from backend.services.steam_scraper import SteamScraper
+from backend.services.import_job_service import (
+    cancel_pending_import_job,
+    create_steam_import_job,
+    terminal_progress_event,
+)
 from backend.services.steam_import_service import (
-    create_import_session,
+    cleanup_session,
     get_import_session,
     get_progress_queue,
-    cleanup_session,
     request_cancel,
-    run_import,
 )
+from backend.services.steam_scraper import SteamScraper
 
 router = APIRouter(prefix="/api/steam", tags=["steam"], dependencies=[Depends(require_auth)])
 
@@ -98,21 +101,18 @@ async def list_steam_games(req: SteamValidateRequest):
 # ── Start import ──────────────────────────────────────────────────────────────
 
 @router.post("/import")
-async def start_import(req: SteamImportRequest, bg: BackgroundTasks):
+async def start_import(req: SteamImportRequest):
     """Start a Steam import session. Returns session_id for progress tracking."""
-    session_id = await create_import_session(req.user_id)
-
-    # Launch import as a background task
-    bg.add_task(
-        run_import,
-        session_id=session_id,
-        user_id=req.user_id,
-        steam_login_secure=req.steam_login_secure,
-        session_id_cookie=req.session_id,
-        game_ids=req.game_ids or None,
-        is_numeric_id=req.is_numeric_id,
+    session_id = await create_steam_import_job(
+        req.user_id,
+        {
+            "user_id": req.user_id,
+            "steam_login_secure": req.steam_login_secure,
+            "session_id_cookie": req.session_id,
+            "game_ids": req.game_ids or None,
+            "is_numeric_id": req.is_numeric_id,
+        },
     )
-
     return {"session_id": session_id}
 
 
@@ -126,6 +126,14 @@ async def import_progress(session_id: int):
         raise HTTPException(status_code=404, detail="Import session not found")
 
     async def event_generator():
+        terminal = terminal_progress_event(session)
+        if terminal is not None:
+            event_type, terminal_data = terminal
+            yield f"event: {event_type}\ndata: {json.dumps(terminal_data)}\n\n"
+            yield "event: done\ndata: {}\n\n"
+            cleanup_session(session_id)
+            return
+
         queue = get_progress_queue(session_id)
         try:
             while True:
@@ -176,6 +184,10 @@ async def cancel_import(session_id: int):
     session = await get_import_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Import session not found")
+
+    if session["status"] == "pending":
+        if await cancel_pending_import_job("steam", session_id):
+            return {"message": "Import cancelled"}
 
     if session["status"] != "running":
         raise HTTPException(status_code=400, detail="Import is not running")

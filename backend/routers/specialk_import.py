@@ -5,7 +5,7 @@ import json
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from backend.auth import require_auth
@@ -17,13 +17,16 @@ from backend.models.specialk_import import (
     SpecialKScanRequest,
     SpecialKScanResponse,
 )
+from backend.services.import_job_service import (
+    cancel_pending_import_job,
+    create_specialk_import_job,
+    terminal_progress_event,
+)
 from backend.services.specialk_import_service import (
     cleanup_session,
-    create_import_session,
     get_import_session,
     get_progress_queue,
     request_cancel,
-    run_import,
     scan_path,
 )
 
@@ -158,7 +161,7 @@ async def scan(req: SpecialKScanRequest):
 
 
 @router.post("/import")
-async def start_import(req: SpecialKImportRequest, bg: BackgroundTasks):
+async def start_import(req: SpecialKImportRequest):
     """Start a Special K import session. Returns session_id for SSE."""
     raw_path = req.path.strip()
     if not raw_path:
@@ -169,12 +172,12 @@ async def start_import(req: SpecialKImportRequest, bg: BackgroundTasks):
     if not root.exists() or not root.is_dir():
         raise HTTPException(status_code=400, detail=f"Path is not a directory: {raw_path}")
 
-    session_id = await create_import_session(raw_path)
-    bg.add_task(
-        run_import,
-        session_id=session_id,
-        scan_path_str=raw_path,
-        folder_names=req.folder_names or None,
+    session_id = await create_specialk_import_job(
+        raw_path,
+        {
+            "scan_path_str": raw_path,
+            "folder_names": req.folder_names or None,
+        },
     )
     return {"session_id": session_id}
 
@@ -187,6 +190,14 @@ async def import_progress(session_id: int):
         raise HTTPException(status_code=404, detail="Import session not found")
 
     async def event_generator():
+        terminal = terminal_progress_event(session)
+        if terminal is not None:
+            event_type, terminal_data = terminal
+            yield f"event: {event_type}\ndata: {json.dumps(terminal_data)}\n\n"
+            yield "event: done\ndata: {}\n\n"
+            cleanup_session(session_id)
+            return
+
         queue = get_progress_queue(session_id)
         try:
             while True:
@@ -231,6 +242,10 @@ async def cancel_import(session_id: int):
     session = await get_import_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Import session not found")
+    if session["status"] == "pending":
+        if await cancel_pending_import_job("specialk", session_id):
+            return {"message": "Import cancelled"}
+
     if session["status"] != "running":
         raise HTTPException(status_code=400, detail="Import is not running")
     request_cancel(session_id)

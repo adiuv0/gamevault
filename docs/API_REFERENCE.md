@@ -308,8 +308,10 @@ on the grid page.
 
 ### `POST /api/steam/import`
 
-Start a background import. Body adds `game_ids` (empty = all) and
-`is_numeric_id` to the validate body. Returns `{ "session_id": int }`.
+Queue a durable background import. Body adds `game_ids` (empty = all) and
+`is_numeric_id` to the validate body. Returns `{ "session_id": int }`. The job
+is resumed after application restart; Steam cookies in the pending payload are
+encrypted at rest and removed when the job reaches a terminal state.
 
 ### `GET /api/steam/import/{session_id}` — *snapshot*
 
@@ -320,6 +322,9 @@ screenshots, timestamps.
 ### `GET /api/steam/import/{session_id}/progress` — *SSE*
 
 Stream of named events:
+
+Connecting after a completed, failed, or cancelled import returns the persisted
+terminal summary followed by `done`, including after an application restart.
 
 | Event | Payload |
 |---|---|
@@ -340,8 +345,9 @@ Stream of named events:
 
 ### `POST /api/steam/import/{session_id}/cancel`
 
-Request cancellation. Mid-flight screenshots may still complete; new ones
-won't start. Returns 400 if the session isn't running.
+Request cancellation. A queued import is cancelled immediately. Mid-flight
+screenshots may still complete; new ones won't start. Returns 400 if the session
+is already terminal.
 
 ---
 
@@ -381,7 +387,8 @@ If the path is invalid or empty, `valid: false` and `error` is populated.
 ### `POST /api/specialk/import`
 
 Body: `{ "path": "...", "folder_names": ["GameA", "GameB"] }`. Empty
-`folder_names` imports everything found. Returns `{ "session_id": int }`.
+`folder_names` imports everything found. Returns `{ "session_id": int }`. The
+filesystem job is persisted and resumed after application restart.
 
 ### `GET /api/specialk/import/{session_id}` — *snapshot*
 

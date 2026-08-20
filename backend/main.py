@@ -22,7 +22,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from backend.config import settings
 from backend.database import close_db, init_db
-
+from backend.services.import_job_service import start_import_worker, stop_import_worker
 
 # ── Per-context Content-Security-Policy strings ──────────────────────────────
 #
@@ -133,13 +133,13 @@ from backend.routers import (
     metadata,
     screenshots,
     search,
-    settings as settings_router,
     share,
     specialk_import,
     steam_import,
     timeline,
     upload,
 )
+from backend.routers import settings as settings_router
 
 
 @asynccontextmanager
@@ -150,6 +150,7 @@ async def lifespan(app: FastAPI):
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     _ensure_secret_key()
     await init_db()
+    await start_import_worker()
 
     if settings.disable_auth:
         logger.warning(
@@ -158,9 +159,12 @@ async def lifespan(app: FastAPI):
             "a trusted reverse proxy with its own authentication."
         )
 
-    yield
-    # Shutdown
-    await close_db()
+    try:
+        yield
+    finally:
+        # Stop the worker before closing SQLite. Running jobs are requeued on startup.
+        await stop_import_worker()
+        await close_db()
 
 
 app = FastAPI(

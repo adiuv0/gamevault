@@ -56,13 +56,14 @@ Acceptance criteria:
 ## Phase 3: Large-Library Scaling
 
 Status: In progress. Repeatable 1k/10k benchmarks, bounded viewer previews, slim payloads,
-and revisioned browser caching are implemented.
+revisioned browser caching, and durable filesystem imports are implemented.
 
 - [x] Add a browser-compatible large preview so the viewer does not fetch 4K originals by default.
 - Virtualize long galleries and replace deep offset pagination with cursor pagination.
 - [x] Return slim list payloads and fetch full metadata only when requested.
 - [x] Version media URLs so warm authenticated navigation stays in the browser cache.
-- Replace in-process import queues with a durable SQLite-backed job worker.
+- [x] Replace Steam and Special K request-bound tasks with a durable SQLite-backed job
+  worker. Browser upload-body staging remains separate work.
 - [x] Add a reproducible gallery service benchmark at 1,000 and 10,000 captures.
 - Add structured runtime timings and diagnostics for media, database, and import stages.
 
@@ -70,7 +71,8 @@ Acceptance criteria:
 
 - [x] Benchmark libraries at 1,000 and 10,000 logical captures.
 - [x] Warm gallery navigation reuses cached media without application database work.
-- [ ] Imports survive an application restart and resume without duplicated rows.
+- [ ] All imports survive an application restart and resume without duplicated rows.
+  Steam and Special K satisfy this criterion; browser uploads do not yet.
 
 ## Phase 4: Release And Recovery
 

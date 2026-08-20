@@ -24,7 +24,7 @@ in [backend/config.py](../backend/config.py). They can also be set via a
 
 | Variable | Default | Notes |
 |---|---|---|
-| `GAMEVAULT_SECRET_KEY` | auto-generated on first run | JWT signing key. If left default, GameVault generates a random 32-byte hex key on first boot and persists it to `/data/.secret_key` so tokens survive restarts. Set this explicitly to a long random value (e.g. `python -c "import secrets; print(secrets.token_hex(32))"`) for production deployments. |
+| `GAMEVAULT_SECRET_KEY` | auto-generated on first run | JWT signing key and key material for encrypted pending-import payloads. If left default, GameVault generates a random 32-byte hex key on first boot and persists it to `/data/.secret_key` so tokens and queued imports survive restarts. Set this explicitly to a long random value (e.g. `python -c "import secrets; print(secrets.token_hex(32))"`) for production deployments. Do not change it while import jobs are pending. |
 | `GAMEVAULT_BASE_URL` | `http://localhost:8080` | Public URL for share links. Set to your real public URL or share previews on Discord/Slack/etc. won't work. |
 
 ### Paths
@@ -207,6 +207,13 @@ Current migrations:
 - `m001_initial` — all core tables, indexes, FTS5 virtual table, triggers
 - `m002_gallery` — adds `is_public` column to `games`
 - `m003_specialk` — adds `specialk_import_sessions` table
+- `m004_resanitize_annotations` — re-sanitizes stored annotations
+- `m005_drop_tags` — removes unused placeholder tag tables
+- `m006_gallery_indexes` — adds gallery and import lookup indexes
+- `m007_capture_groups` — adds logical captures and perceptual hashes
+- `m008_duplicate_review` — adds duplicate review and maintenance jobs
+- `m009_preview_cache` — tracks generated large-preview state
+- `m010_durable_import_jobs` — adds the encrypted Steam and Special K job queue
 
 To add a new migration: create `mNNN_<name>.py` with an
 `async upgrade(db)` function and append it to `MIGRATIONS` in

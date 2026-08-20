@@ -509,11 +509,15 @@ async def _import_single_file(
     dest_path = dest_dir / filename
     counter = 1
     while dest_path.exists():
+        existing_hash = await asyncio.to_thread(compute_sha256, dest_path)
+        if existing_hash == sha256:
+            break
         filename = f"{base_stem} ({counter}){ext}"
         dest_path = dest_dir / filename
         counter += 1
 
-    await asyncio.to_thread(shutil.copy2, str(src_path), str(dest_path))
+    if not dest_path.exists():
+        await asyncio.to_thread(shutil.copy2, str(src_path), str(dest_path))
 
     # Image metadata + thumbnails (HDR-aware via image_processor)
     dims = await asyncio.to_thread(get_image_dimensions, dest_path)

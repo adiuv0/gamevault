@@ -48,13 +48,15 @@ Deliverables:
 - [x] Slim gallery payloads with full metadata fetched only when needed.
 - [x] Revisioned media URLs with immutable private caching for warm navigation.
 - Cursor pagination and gallery virtualization where measurements justify them.
-- Durable import jobs that resume cleanly after restart.
+- [x] Durable Steam and Special K import jobs that resume cleanly after restart.
+- Durable browser-upload staging and replay.
 
 Exit criteria:
 
 - [x] Warm gallery navigation reuses cached media without database work.
 - [x] Viewer bandwidth is bounded by preview size unless the original is requested.
-- [ ] Imports survive restart without duplicate rows or lost progress.
+- [ ] All imports survive restart without duplicate rows or lost progress. Filesystem and
+  Steam imports are covered; browser uploads still require durable body staging.
 
 ## P1: Collections
 

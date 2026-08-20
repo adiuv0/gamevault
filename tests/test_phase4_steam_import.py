@@ -7,13 +7,12 @@ dedup by steam_id, dedup by hash, cancel, DB records, file creation.
 """
 
 import asyncio
-import json
 import os
 import sys
 import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
 from io import BytesIO
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -22,7 +21,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 os.environ["GAMEVAULT_SECRET_KEY"] = "test-secret"
 os.environ["GAMEVAULT_DISABLE_AUTH"] = "true"
 
-import aiosqlite
 from PIL import Image
 
 # Create temp dirs for test
@@ -32,37 +30,38 @@ os.environ["GAMEVAULT_LIBRARY_DIR"] = str(Path(_tmp) / "library")
 os.environ["GAMEVAULT_DB_PATH"] = str(Path(_tmp) / "test.db")
 
 # Re-import settings to pick up new env
-from backend.config import Settings
 import backend.config
+from backend.config import Settings
+
 backend.config.settings = Settings()
 settings = backend.config.settings
 
-from backend.database import get_db, init_db, close_db
+from backend.database import close_db, init_db
+from backend.services.game_service import list_games
+from backend.services.screenshot_service import (
+    check_duplicate_steam_id,
+    get_screenshot,
+    list_screenshots,
+)
 
 # Import services under test
 from backend.services.steam_import_service import (
-    create_import_session,
-    get_import_session,
-    update_import_session,
-    get_progress_queue,
     cleanup_session,
-    request_cancel,
-    is_cancelled,
-    run_import,
+    create_import_session,
     emit_progress,
+    get_import_session,
+    get_progress_queue,
+    is_cancelled,
+    request_cancel,
+    run_import,
+    update_import_session,
 )
 from backend.services.steam_scraper import (
-    SteamScraper,
-    SteamProfile,
-    SteamScreenshot,
     SteamGameScreenshots,
+    SteamProfile,
+    SteamScraper,
+    SteamScreenshot,
 )
-from backend.services.game_service import get_or_create_game, list_games
-from backend.services.screenshot_service import (
-    list_screenshots,
-    check_duplicate_steam_id,
-)
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -209,7 +208,7 @@ async def test_full_import_pipeline():
         mock_scraper = mock_enter.return_value
         mock_scraper.validate_profile = AsyncMock(return_value=mock_profile)
         mock_scraper.discover_games = AsyncMock(return_value=[mock_game])
-        mock_scraper.scrape_game_screenshots = AsyncMock(return_value=mock_screenshots)
+        mock_scraper.get_game_screenshots = AsyncMock(return_value=mock_screenshots)
         mock_scraper.get_screenshot_details = AsyncMock(side_effect=lambda s: s)
 
         # Return different images for each screenshot
@@ -265,10 +264,11 @@ async def test_full_import_pipeline():
     screenshots, total = await list_screenshots(cs2_games[0]["id"])
     report("2 screenshots in DB", total == 2, str(total))
     if total == 2:
-        report("Screenshot source = steam_import", screenshots[0]["source"] == "steam_import")
-        report("Screenshot has steam_screenshot_id", screenshots[0]["steam_screenshot_id"] is not None)
-        report("Screenshot has sha256_hash", screenshots[0]["sha256_hash"] is not None)
-        report("Screenshot has thumbnails", screenshots[0]["thumbnail_path_sm"] is not None)
+        detail = await get_screenshot(screenshots[0]["id"])
+        report("Screenshot source = steam_import", detail["source"] == "steam_import")
+        report("Screenshot has steam_screenshot_id", detail["steam_screenshot_id"] is not None)
+        report("Screenshot has sha256_hash", detail["sha256_hash"] is not None)
+        report("Screenshot has thumbnails", detail["thumbnail_path_sm"] is not None)
 
     # Verify files on disk
     game_dir = settings.library_dir / "Counter-Strike 2"
@@ -340,7 +340,7 @@ async def test_reimport_skips_duplicates():
         mock_scraper = mock_enter.return_value
         mock_scraper.validate_profile = AsyncMock(return_value=mock_profile)
         mock_scraper.discover_games = AsyncMock(return_value=[mock_game])
-        mock_scraper.scrape_game_screenshots = AsyncMock(return_value=mock_screenshots)
+        mock_scraper.get_game_screenshots = AsyncMock(return_value=mock_screenshots)
         mock_scraper.get_screenshot_details = AsyncMock(side_effect=lambda s: s)
         mock_scraper.download_image = AsyncMock(return_value=test_image_data)
 
@@ -417,7 +417,7 @@ async def test_cancel_import():
         mock_scraper = mock_enter.return_value
         mock_scraper.validate_profile = AsyncMock(return_value=mock_profile)
         mock_scraper.discover_games = AsyncMock(return_value=mock_games)
-        mock_scraper.scrape_game_screenshots = AsyncMock(return_value=mock_screenshots)
+        mock_scraper.get_game_screenshots = AsyncMock(return_value=mock_screenshots)
         mock_scraper.get_screenshot_details = AsyncMock(side_effect=lambda s: s)
         mock_scraper.download_image = AsyncMock(return_value=test_image)
 
@@ -488,7 +488,7 @@ async def test_import_with_game_filter():
         mock_scraper = mock_enter.return_value
         mock_scraper.validate_profile = AsyncMock(return_value=mock_profile)
         mock_scraper.discover_games = AsyncMock(return_value=mock_games)
-        mock_scraper.scrape_game_screenshots = AsyncMock(return_value=mock_screenshots_tf2)
+        mock_scraper.get_game_screenshots = AsyncMock(return_value=mock_screenshots_tf2)
         mock_scraper.get_screenshot_details = AsyncMock(side_effect=lambda s: s)
         mock_scraper.download_image = AsyncMock(return_value=test_image)
 
