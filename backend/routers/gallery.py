@@ -19,6 +19,7 @@ from backend.models.game import PublicGame, PublicGameListResponse
 from backend.models.screenshot import PublicScreenshot, PublicScreenshotListResponse
 from backend.services import game_service, screenshot_service
 from backend.services.filesystem import safe_library_path, safe_media_path
+from backend.services.media_cache_service import media_response_headers, media_version
 
 router = APIRouter(prefix="/api/gallery", tags=["gallery"])
 
@@ -125,7 +126,7 @@ async def gallery_get_screenshot(screenshot_id: int):
 
 
 @router.get("/screenshots/{screenshot_id}/image")
-async def gallery_screenshot_image(screenshot_id: int):
+async def gallery_screenshot_image(screenshot_id: int, v: str | None = None):
     """Serve full-resolution image if its game is public."""
     screenshot = await _get_public_screenshot(screenshot_id)
 
@@ -137,16 +138,16 @@ async def gallery_screenshot_image(screenshot_id: int):
     return FileResponse(
         file_path,
         media_type=media_type,
-        headers={
-            "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "default-src 'none'",
-            "Cache-Control": "public, max-age=86400",
-        },
+        headers=media_response_headers(
+            public=True,
+            requested_version=v,
+            current_version=media_version(screenshot["updated_at"]),
+        ),
     )
 
 
 @router.get("/screenshots/{screenshot_id}/thumb/{size}")
-async def gallery_screenshot_thumb(screenshot_id: int, size: str):
+async def gallery_screenshot_thumb(screenshot_id: int, size: str, v: str | None = None):
     """Serve thumbnail if its game is public."""
     if size not in ("sm", "md"):
         raise HTTPException(status_code=400, detail="Size must be 'sm' or 'md'")
@@ -163,16 +164,16 @@ async def gallery_screenshot_thumb(screenshot_id: int, size: str):
     return FileResponse(
         full_path,
         media_type="image/jpeg",
-        headers={
-            "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "default-src 'none'",
-            "Cache-Control": "public, max-age=86400",
-        },
+        headers=media_response_headers(
+            public=True,
+            requested_version=v,
+            current_version=media_version(screenshot["updated_at"]),
+        ),
     )
 
 
 @router.get("/screenshots/{screenshot_id}/preview")
-async def gallery_screenshot_preview(screenshot_id: int):
+async def gallery_screenshot_preview(screenshot_id: int, v: str | None = None):
     """Serve a bounded public preview, falling back while backfill runs."""
     screenshot = await _get_public_screenshot(screenshot_id)
     rel_path = None
@@ -204,9 +205,9 @@ async def gallery_screenshot_preview(screenshot_id: int):
     return FileResponse(
         full_path,
         media_type=media_type,
-        headers={
-            "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "default-src 'none'",
-            "Cache-Control": "public, max-age=86400",
-        },
+        headers=media_response_headers(
+            public=True,
+            requested_version=v,
+            current_version=media_version(screenshot["updated_at"]),
+        ),
     )

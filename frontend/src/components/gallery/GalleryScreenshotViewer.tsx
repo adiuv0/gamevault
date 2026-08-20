@@ -25,6 +25,7 @@ function getVariants(
   return [{
     id: listItem.id,
     filename: listItem.filename,
+    media_version: listItem.media_version,
     file_size: null,
     width: null,
     height: null,
@@ -185,7 +186,7 @@ export function GalleryScreenshotViewer({
           </button>
 
           <a
-            href={galleryImageUrl(activeVariant.id)}
+            href={galleryImageUrl(activeVariant.id, activeVariant.media_version)}
             download={activeVariant.filename}
             className="p-2 rounded-md hover:bg-white/10 transition-colors"
             title="Download"
@@ -227,7 +228,7 @@ export function GalleryScreenshotViewer({
         <div className={`flex-1 flex items-center justify-center p-4 ${showInfo ? 'sm:mr-80' : ''}`}>
           <img
             key={activeVariant.id}
-            src={galleryPreviewUrl(activeVariant.id)}
+            src={galleryPreviewUrl(activeVariant.id, activeVariant.media_version)}
             alt={activeVariant.filename}
             className="max-w-full max-h-full object-contain select-none"
             draggable={false}

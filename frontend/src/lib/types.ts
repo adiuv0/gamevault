@@ -20,6 +20,7 @@ export interface Game {
 export interface ScreenshotVariant {
   id: number;
   filename: string;
+  media_version: string;
   file_size: number | null;
   width: number | null;
   height: number | null;
@@ -35,6 +36,7 @@ export interface ScreenshotListItem {
   id: number;
   game_id: number;
   filename: string;
+  media_version: string;
   taken_at: string | null;
   uploaded_at: string;
   is_favorite?: boolean;

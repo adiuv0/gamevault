@@ -60,6 +60,7 @@ async def test_media_lookup_returns_only_serve_fields(performance_db):
         "thumbnail_path_md",
         "preview_path",
         "format",
+        "media_version",
     }
 
 

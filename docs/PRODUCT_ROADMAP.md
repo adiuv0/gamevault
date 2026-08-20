@@ -46,14 +46,15 @@ Deliverables:
 - [x] Browser-friendly large previews so the viewer does not fetch 4K/HDR originals by
   default.
 - [x] Slim gallery payloads with full metadata fetched only when needed.
+- [x] Revisioned media URLs with immutable private caching for warm navigation.
 - Cursor pagination and gallery virtualization where measurements justify them.
 - Durable import jobs that resume cleanly after restart.
 
 Exit criteria:
 
-- Warm gallery navigation reuses cached media without database work.
-- Viewer bandwidth is bounded by preview size unless the original is requested.
-- Imports survive restart without duplicate rows or lost progress.
+- [x] Warm gallery navigation reuses cached media without database work.
+- [x] Viewer bandwidth is bounded by preview size unless the original is requested.
+- [ ] Imports survive restart without duplicate rows or lost progress.
 
 ## P1: Collections
 

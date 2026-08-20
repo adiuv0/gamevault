@@ -17,6 +17,7 @@ from backend.models.annotation import AnnotationCreate
 from backend.models.screenshot import ScreenshotResponse
 from backend.services import screenshot_service
 from backend.services.filesystem import safe_library_path, safe_media_path
+from backend.services.media_cache_service import media_response_headers
 
 
 class HashCheckRequest(BaseModel):
@@ -82,7 +83,7 @@ async def delete_screenshot(screenshot_id: int):
 
 
 @router.get("/{screenshot_id}/image")
-async def get_image(screenshot_id: int):
+async def get_image(screenshot_id: int, v: str | None = None):
     """Serve the full-resolution screenshot image."""
     screenshot = await screenshot_service.get_screenshot_media(screenshot_id)
     if not screenshot:
@@ -101,16 +102,16 @@ async def get_image(screenshot_id: int):
     return FileResponse(
         file_path,
         media_type=media_type,
-        headers={
-            "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "default-src 'none'",
-            "Cache-Control": "private, max-age=86400",
-        },
+        headers=media_response_headers(
+            public=False,
+            requested_version=v,
+            current_version=screenshot["media_version"],
+        ),
     )
 
 
 @router.get("/{screenshot_id}/thumb/{size}")
-async def get_thumbnail(screenshot_id: int, size: str):
+async def get_thumbnail(screenshot_id: int, size: str, v: str | None = None):
     """Serve a thumbnail. Size: sm (300px) or md (800px)."""
     if size not in ("sm", "md"):
         raise HTTPException(status_code=400, detail="Size must be 'sm' or 'md'")
@@ -132,16 +133,16 @@ async def get_thumbnail(screenshot_id: int, size: str):
     return FileResponse(
         full_path,
         media_type="image/jpeg",
-        headers={
-            "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "default-src 'none'",
-            "Cache-Control": "private, max-age=86400",
-        },
+        headers=media_response_headers(
+            public=False,
+            requested_version=v,
+            current_version=screenshot["media_version"],
+        ),
     )
 
 
 @router.get("/{screenshot_id}/preview")
-async def get_preview(screenshot_id: int):
+async def get_preview(screenshot_id: int, v: str | None = None):
     """Serve a bounded browser preview, falling back while backfill runs."""
     screenshot = await screenshot_service.get_screenshot_media(screenshot_id)
     if not screenshot:
@@ -176,11 +177,11 @@ async def get_preview(screenshot_id: int):
     return FileResponse(
         full_path,
         media_type=media_type,
-        headers={
-            "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "default-src 'none'",
-            "Cache-Control": "private, max-age=86400",
-        },
+        headers=media_response_headers(
+            public=False,
+            requested_version=v,
+            current_version=screenshot["media_version"],
+        ),
     )
 
 

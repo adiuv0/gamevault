@@ -157,7 +157,7 @@ every preserved physical file, and a `has_annotation` flag. Viewer clients fetch
 record on demand.
 
 Game screenshot-list endpoints paginate logical captures and return card-sized items:
-`id`, `game_id`, `filename`, `taken_at`, `uploaded_at`, `variant_count`, and the
+`id`, `game_id`, `filename`, `media_version`, `taken_at`, `uploaded_at`, `variant_count`, and the
 authenticated favorite/annotation flags. Variant metadata is intentionally omitted
 from list responses.
 
@@ -171,6 +171,11 @@ Different from game deletion which leaves files alone.
 Serves the full-resolution image. Content-Type is detected from extension
 — `.jxr` is served as `image/vnd.ms-photo` so browsers offer download
 rather than trying to render. CSP headers prevent inline script execution.
+
+Screenshot media endpoints accept the optional opaque `v` query parameter returned as
+`media_version` by list and detail responses. Authenticated requests whose revision matches
+the current record receive `Cache-Control: private, max-age=31536000, immutable`. Missing or
+stale revisions use the backward-compatible one-day private policy.
 
 ### `GET /api/screenshots/{id}/thumb/{sm|md}`
 
@@ -613,6 +618,7 @@ Get a public game by ID. 404 if private.
 ### `GET /api/gallery/games/{id}/screenshots?page=1&limit=50&sort=date_desc`
 
 Paginated card-sized logical captures for a public game.
+Cards include an opaque `media_version` for cache-busting derivative changes.
 
 ### `GET /api/gallery/games/{id}/cover`
 
@@ -636,6 +642,9 @@ Thumbnail — only if the game is public.
 
 Bounded viewer preview — only if the game is public. Falls back to the 800px thumbnail
 and then the original while preview backfill is incomplete.
+
+Public media also accepts `v`, but remains `public, max-age=86400` even when the revision
+matches so changing a game to private takes effect after a bounded cache lifetime.
 
 ---
 

@@ -7,6 +7,10 @@ import type { Game, PublicScreenshot, ScreenshotListItem } from '@/lib/types';
 
 const GALLERY_BASE = `${API_BASE}/gallery`;
 
+function versionQuery(mediaVersion?: string): string {
+  return mediaVersion ? `?v=${encodeURIComponent(mediaVersion)}` : '';
+}
+
 async function galleryGet<T>(path: string): Promise<T> {
   const res = await fetch(`${GALLERY_BASE}${path}`);
   if (!res.ok) {
@@ -43,14 +47,14 @@ export function galleryCoverUrl(gameId: number): string {
   return `${GALLERY_BASE}/games/${gameId}/cover`;
 }
 
-export function galleryImageUrl(screenshotId: number): string {
-  return `${GALLERY_BASE}/screenshots/${screenshotId}/image`;
+export function galleryImageUrl(screenshotId: number, mediaVersion?: string): string {
+  return `${GALLERY_BASE}/screenshots/${screenshotId}/image${versionQuery(mediaVersion)}`;
 }
 
-export function galleryPreviewUrl(screenshotId: number): string {
-  return `${GALLERY_BASE}/screenshots/${screenshotId}/preview`;
+export function galleryPreviewUrl(screenshotId: number, mediaVersion?: string): string {
+  return `${GALLERY_BASE}/screenshots/${screenshotId}/preview${versionQuery(mediaVersion)}`;
 }
 
-export function galleryThumbUrl(screenshotId: number, size: 'sm' | 'md'): string {
-  return `${GALLERY_BASE}/screenshots/${screenshotId}/thumb/${size}`;
+export function galleryThumbUrl(screenshotId: number, size: 'sm' | 'md', mediaVersion?: string): string {
+  return `${GALLERY_BASE}/screenshots/${screenshotId}/thumb/${size}${versionQuery(mediaVersion)}`;
 }

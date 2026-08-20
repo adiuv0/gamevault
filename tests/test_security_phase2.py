@@ -217,6 +217,7 @@ class TestPublicGalleryShapes:
             "id": 1,
             "game_id": 2,
             "filename": "shot.png",
+            "media_version": "0123456789abcdef",
             "taken_at": "2026-04-01T12:00:00",
             "uploaded_at": "2026-04-01T12:01:00",
             "variant_count": 2,
@@ -233,6 +234,7 @@ class TestPublicGalleryShapes:
             "id",
             "game_id",
             "filename",
+            "media_version",
             "taken_at",
             "uploaded_at",
             "variant_count",
@@ -245,6 +247,7 @@ class TestPublicGalleryShapes:
             "id": 1,
             "game_id": 2,
             "filename": "shot.png",
+            "media_version": "0123456789abcdef",
             "thumbnail_path_sm": "Game/thumbnails/300/shot.jpg",
             "thumbnail_path_md": "Game/thumbnails/800/shot.jpg",
             "width": 1920,
@@ -271,8 +274,8 @@ class TestPublicGalleryShapes:
 
         # Allowed fields present
         for k in ("id", "game_id", "filename", "thumbnail_path_sm",
-                  "thumbnail_path_md", "width", "height", "taken_at",
-                  "uploaded_at"):
+                   "thumbnail_path_md", "width", "height", "taken_at",
+                   "uploaded_at", "media_version"):
             assert k in slim
 
         # Sensitive fields dropped

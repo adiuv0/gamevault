@@ -18,10 +18,10 @@ result.
 
 | Logical captures | Physical assets | Page | Median | p95 | Maximum | 50-card payload |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1,000 | 1,100 | 1 | 1.378 ms | 1.542 ms | 1.592 ms | 9,601 B |
-| 1,000 | 1,100 | 20 | 1.563 ms | 1.652 ms | 1.725 ms | n/a |
-| 10,000 | 11,000 | 1 | 12.210 ms | 12.666 ms | 12.816 ms | 9,651 B |
-| 10,000 | 11,000 | 200 | 14.581 ms | 15.060 ms | 15.061 ms | n/a |
+| 1,000 | 1,100 | 1 | 1.369 ms | 1.470 ms | 1.487 ms | 11,351 B |
+| 1,000 | 1,100 | 20 | 1.549 ms | 1.663 ms | 1.703 ms | n/a |
+| 10,000 | 11,000 | 1 | 11.932 ms | 12.561 ms | 13.073 ms | 11,401 B |
+| 10,000 | 11,000 | 200 | 14.391 ms | 14.858 ms | 15.794 ms | n/a |
 
 These results were collected on the maintainer's local Windows development machine and
 are comparison data, not universal service-level targets.
@@ -34,7 +34,11 @@ are comparison data, not universal service-level targets.
   bounded 1920px previews while preserving originals for download.
 - List endpoints now return card-sized records and fetch physical-variant metadata only
   when a viewer opens. On the deterministic 1,000-capture fixture, the first 50 service
-  records fell from 65,581 bytes to 9,601 bytes, an 85.4% reduction.
+  records fell from 65,581 bytes to 11,351 bytes, an 82.7% reduction including the opaque
+  media revision used for browser cache invalidation.
+- Matching revisioned authenticated media URLs are privately cacheable and immutable for
+  one year. Warm navigation is therefore handled by the browser without another route or
+  database lookup; public media retains a one-day revocation window.
 - Cursor pagination and virtualization should follow payload/browser measurements rather
   than being introduced solely from the database timings above.
 

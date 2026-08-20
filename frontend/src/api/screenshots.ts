@@ -30,16 +30,16 @@ export async function deleteAnnotation(screenshotId: number): Promise<void> {
   return api.delete(`/screenshots/${screenshotId}/annotation`);
 }
 
-export function getScreenshotImageUrl(id: number): string {
-  return `/api/screenshots/${id}/image${tokenQs()}`;
+export function getScreenshotImageUrl(id: number, mediaVersion?: string): string {
+  return `/api/screenshots/${id}/image${tokenQs(mediaVersion)}`;
 }
 
-export function getScreenshotPreviewUrl(id: number): string {
-  return `/api/screenshots/${id}/preview${tokenQs()}`;
+export function getScreenshotPreviewUrl(id: number, mediaVersion?: string): string {
+  return `/api/screenshots/${id}/preview${tokenQs(mediaVersion)}`;
 }
 
-export function getThumbnailUrl(id: number, size: 'sm' | 'md'): string {
-  return `/api/screenshots/${id}/thumb/${size}${tokenQs()}`;
+export function getThumbnailUrl(id: number, size: 'sm' | 'md', mediaVersion?: string): string {
+  return `/api/screenshots/${id}/thumb/${size}${tokenQs(mediaVersion)}`;
 }
 
 // ── Share link management ─────────────────────────────────────────────

@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ScreenshotVariant(BaseModel):
     id: int
     filename: str
+    media_version: str
     file_size: int | None = None
     width: int | None = None
     height: int | None = None
@@ -25,6 +26,7 @@ class ScreenshotListItem(BaseModel):
     id: int
     game_id: int
     filename: str
+    media_version: str
     taken_at: str | None = None
     uploaded_at: str
     is_favorite: bool = False
@@ -36,6 +38,7 @@ class ScreenshotResponse(BaseModel):
     id: int
     game_id: int
     filename: str
+    media_version: str
     file_path: str
     thumbnail_path_sm: str | None = None
     thumbnail_path_md: str | None = None
@@ -85,6 +88,7 @@ class PublicScreenshotVariant(BaseModel):
 
     id: int
     filename: str
+    media_version: str
     file_size: int | None = None
     width: int | None = None
     height: int | None = None
@@ -101,6 +105,7 @@ class PublicScreenshotListItem(BaseModel):
     id: int
     game_id: int
     filename: str
+    media_version: str
     taken_at: str | None = None
     uploaded_at: str
     variant_count: int = 1
@@ -114,6 +119,7 @@ class PublicScreenshot(BaseModel):
     id: int
     game_id: int
     filename: str
+    media_version: str
     thumbnail_path_sm: str | None = None
     thumbnail_path_md: str | None = None
     width: int | None = None

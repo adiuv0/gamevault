@@ -196,11 +196,13 @@ async def test_logical_capture_lists_once_and_shares_metadata(duplicate_library)
     assert total == 1
     assert len(screenshots) == 1
     assert screenshots[0]["variant_count"] == 2
+    assert len(screenshots[0]["media_version"]) == 16
     assert "variants" not in screenshots[0]
 
     capture = await get_capture_details(right_id)
     assert capture["id"] == left_id
     assert capture["variant_count"] == 2
+    assert all(len(variant["media_version"]) == 16 for variant in capture["variants"])
     assert [variant["id"] for variant in capture["variants"]] == [
         left_id,
         right_id,

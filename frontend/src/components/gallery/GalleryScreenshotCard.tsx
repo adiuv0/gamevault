@@ -18,10 +18,13 @@ export function GalleryScreenshotCard({ screenshot, onClick }: GalleryScreenshot
       {/* Thumbnail */}
       <div className="relative aspect-video bg-bg-tertiary overflow-hidden">
         <img
-          src={galleryThumbUrl(screenshot.id, 'md')}
+          src={galleryThumbUrl(screenshot.id, 'sm', screenshot.media_version)}
+          srcSet={`${galleryThumbUrl(screenshot.id, 'sm', screenshot.media_version)} 300w, ${galleryThumbUrl(screenshot.id, 'md', screenshot.media_version)} 800w`}
+          sizes="(min-width: 1280px) 16vw, (min-width: 1024px) 20vw, (min-width: 768px) 25vw, (min-width: 640px) 33vw, 50vw"
           alt={screenshot.filename}
           className="w-full h-full object-cover group-hover:brightness-110 transition-all duration-200"
           loading="lazy"
+          decoding="async"
         />
 
         {(screenshot.variant_count ?? 1) > 1 && (

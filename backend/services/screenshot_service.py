@@ -3,6 +3,7 @@
 
 from backend.database import get_db
 from backend.services.game_service import update_screenshot_stats
+from backend.services.media_cache_service import media_version
 
 
 def _hash_distance(left: str, right: str) -> int:
@@ -102,6 +103,7 @@ async def list_screenshots(
     placeholders = ", ".join("?" for _ in group_ids)
     cursor = await db.execute(
         f"""SELECT s.id, s.game_id, s.filename, s.taken_at, s.uploaded_at,
+                   s.updated_at AS media_updated_at,
                    s.is_favorite,
                    EXISTS(
                        SELECT 1 FROM annotations a WHERE a.screenshot_id = s.id
@@ -118,6 +120,7 @@ async def list_screenshots(
     for row in await cursor.fetchall():
         variant = dict(zip(variant_columns, row))
         group_id = variant.pop("group_id")
+        variant["media_version"] = media_version(variant.pop("media_updated_at"))
         variants_by_group.setdefault(group_id, []).append(variant)
 
     screenshots = []
@@ -175,6 +178,9 @@ async def get_capture_details(screenshot_id: int) -> dict | None:
     if not variants:
         return None
 
+    for variant in variants:
+        variant["media_version"] = media_version(variant["updated_at"])
+
     capture = dict(variants[0])
     capture["variants"] = variants
     capture["variant_count"] = len(variants)
@@ -187,7 +193,8 @@ async def get_screenshot_media(screenshot_id: int) -> dict | None:
     """Get only fields required to serve screenshot media."""
     db = await get_db()
     cursor = await db.execute(
-        """SELECT id, file_path, thumbnail_path_sm, thumbnail_path_md, preview_path, format
+        """SELECT id, file_path, thumbnail_path_sm, thumbnail_path_md, preview_path, format,
+                  updated_at
            FROM screenshots WHERE id = ?""",
         (screenshot_id,),
     )
@@ -195,7 +202,9 @@ async def get_screenshot_media(screenshot_id: int) -> dict | None:
     row = await cursor.fetchone()
     if row is None:
         return None
-    return dict(zip(columns, row))
+    screenshot = dict(zip(columns, row))
+    screenshot["media_version"] = media_version(screenshot.pop("updated_at"))
+    return screenshot
 
 
 async def create_screenshot(

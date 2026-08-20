@@ -18,8 +18,8 @@ export function ScreenshotCard({ screenshot, onClick }: ScreenshotCardProps) {
       {/* Thumbnail */}
       <div className="relative aspect-video bg-bg-tertiary overflow-hidden">
         <img
-          src={getThumbnailUrl(screenshot.id, 'sm')}
-          srcSet={`${getThumbnailUrl(screenshot.id, 'sm')} 300w, ${getThumbnailUrl(screenshot.id, 'md')} 800w`}
+          src={getThumbnailUrl(screenshot.id, 'sm', screenshot.media_version)}
+          srcSet={`${getThumbnailUrl(screenshot.id, 'sm', screenshot.media_version)} 300w, ${getThumbnailUrl(screenshot.id, 'md', screenshot.media_version)} 800w`}
           sizes="(min-width: 1280px) 16vw, (min-width: 1024px) 20vw, (min-width: 768px) 25vw, (min-width: 640px) 33vw, 50vw"
           alt={screenshot.filename}
           className="w-full h-full object-cover group-hover:brightness-110 transition-all duration-200"

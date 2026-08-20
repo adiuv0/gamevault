@@ -7,6 +7,46 @@ from PIL import Image
 from pydantic import ValidationError
 
 
+def test_media_version_is_short_stable_and_changes_with_revision():
+    from backend.services.media_cache_service import media_version
+
+    first = media_version("2026-08-19 10:00:00")
+    assert first == media_version("2026-08-19 10:00:00")
+    assert len(first) == 16
+    assert first != media_version("2026-08-19 10:00:01")
+
+
+def test_private_media_is_immutable_only_for_matching_version():
+    from backend.services.media_cache_service import media_response_headers
+
+    versioned = media_response_headers(
+        public=False,
+        requested_version="current",
+        current_version="current",
+    )
+    stale = media_response_headers(
+        public=False,
+        requested_version="stale",
+        current_version="current",
+    )
+
+    assert versioned["Cache-Control"] == "private, max-age=31536000, immutable"
+    assert stale["Cache-Control"] == "private, max-age=86400"
+
+
+def test_public_media_remains_conservatively_cacheable():
+    from backend.services.media_cache_service import media_response_headers
+
+    headers = media_response_headers(
+        public=True,
+        requested_version="current",
+        current_version="current",
+    )
+
+    assert headers["Cache-Control"] == "public, max-age=86400"
+    assert "immutable" not in headers["Cache-Control"]
+
+
 def test_preview_width_rejects_values_below_medium_thumbnail():
     from backend.config import Settings
 
@@ -133,3 +173,18 @@ async def test_preview_endpoint_falls_back_to_medium_thumbnail(preview_library):
     response = await get_preview(screenshot["id"])
     assert Path(response.path) == medium
     assert response.media_type == "image/jpeg"
+    assert response.headers["cache-control"] == "private, max-age=86400"
+
+
+@pytest.mark.asyncio
+async def test_versioned_preview_receives_immutable_private_cache(preview_library):
+    from backend.routers.screenshots import get_preview
+    from backend.services.screenshot_service import get_screenshot_media
+
+    db, settings = preview_library
+    screenshot_id, _ = await _create_asset(db, settings)
+    media = await get_screenshot_media(screenshot_id)
+
+    response = await get_preview(screenshot_id, v=media["media_version"])
+
+    assert response.headers["cache-control"] == "private, max-age=31536000, immutable"

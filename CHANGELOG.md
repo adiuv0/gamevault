@@ -69,7 +69,11 @@ closing the entire 14-finding security audit
   serve untouched full-resolution originals.
 - Gallery list responses now contain only card fields; full logical-capture and variant
   metadata is fetched when a viewer opens, reducing the 50-card benchmark payload by
-  85%.
+  83% even after adding opaque media revisions.
+- Authenticated thumbnail, preview, and original URLs now carry opaque revisions. Matching
+  revisions receive private immutable browser caching, while stale and public URLs retain
+  conservative one-day policies so regenerated previews refresh and public access remains
+  revocable.
 - Imports decode each source once for both thumbnail sizes, perform image work
   outside the async request loop, and recalculate game statistics once per batch.
 - Added composite gallery indexes for game/date and game/filename ordering.

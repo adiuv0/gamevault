@@ -159,7 +159,11 @@ export const api = new ApiClient();
  * Return a query string with the auth token for use in URLs that can't
  * send Authorization headers (img src, EventSource, download links).
  */
-export function tokenQs(): string {
+export function tokenQs(mediaVersion?: string): string {
+  const params = new URLSearchParams();
   const token = localStorage.getItem('gamevault_token');
-  return token ? `?token=${encodeURIComponent(token)}` : '';
+  if (token) params.set('token', token);
+  if (mediaVersion) params.set('v', mediaVersion);
+  const query = params.toString();
+  return query ? `?${query}` : '';
 }
