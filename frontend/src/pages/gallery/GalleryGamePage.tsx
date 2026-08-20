@@ -7,14 +7,14 @@ import { GalleryScreenshotCard } from '@/components/gallery/GalleryScreenshotCar
 import { GalleryScreenshotViewer } from '@/components/gallery/GalleryScreenshotViewer';
 import { galleryGetGame, galleryListScreenshots, galleryCoverUrl } from '@/api/gallery';
 import { formatCount, formatDate } from '@/lib/formatters';
-import type { Game, Screenshot } from '@/lib/types';
+import type { Game, ScreenshotListItem } from '@/lib/types';
 
 export function GalleryGamePage() {
   const { id } = useParams<{ id: string }>();
   const gameId = Number(id);
 
   const [game, setGame] = useState<Game | null>(null);
-  const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
+  const [screenshots, setScreenshots] = useState<ScreenshotListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);

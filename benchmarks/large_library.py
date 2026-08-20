@@ -133,6 +133,10 @@ async def run_case(
                 )
                 deep_page_times.append(time.perf_counter() - started)
 
+            first_page_payload = json.dumps(
+                first_items, separators=(",", ":")
+            ).encode()
+
             return {
                 "logical_captures": capture_count,
                 "physical_assets": physical_count,
@@ -143,6 +147,10 @@ async def run_case(
                     **_summary(first_page_times),
                     "items": len(first_items),
                     "total": total,
+                    "payload_bytes": len(first_page_payload),
+                    "bytes_per_item": round(
+                        len(first_page_payload) / max(1, len(first_items)), 1
+                    ),
                 },
                 "deep_page": {
                     **_summary(deep_page_times),

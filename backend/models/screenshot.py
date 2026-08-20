@@ -17,6 +17,21 @@ class ScreenshotVariant(BaseModel):
     has_annotation: bool = False
 
 
+class ScreenshotListItem(BaseModel):
+    """Card-sized logical capture returned by authenticated list endpoints."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    game_id: int
+    filename: str
+    taken_at: str | None = None
+    uploaded_at: str
+    is_favorite: bool = False
+    has_annotation: bool = False
+    variant_count: int = 1
+
+
 class ScreenshotResponse(BaseModel):
     id: int
     game_id: int
@@ -46,7 +61,7 @@ class ScreenshotResponse(BaseModel):
 
 
 class ScreenshotListResponse(BaseModel):
-    screenshots: list[ScreenshotResponse]
+    screenshots: list[ScreenshotListItem]
     total: int
     page: int
     limit: int
@@ -78,6 +93,19 @@ class PublicScreenshotVariant(BaseModel):
     uploaded_at: str
 
 
+class PublicScreenshotListItem(BaseModel):
+    """Card-sized logical capture returned by the public gallery."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    game_id: int
+    filename: str
+    taken_at: str | None = None
+    uploaded_at: str
+    variant_count: int = 1
+
+
 class PublicScreenshot(BaseModel):
     """Slim screenshot view for unauthenticated /api/gallery responses."""
 
@@ -97,7 +125,7 @@ class PublicScreenshot(BaseModel):
 
 
 class PublicScreenshotListResponse(BaseModel):
-    screenshots: list[PublicScreenshot]
+    screenshots: list[PublicScreenshotListItem]
     total: int
     page: int
     limit: int

@@ -1,8 +1,8 @@
 import { ScreenshotCard } from './ScreenshotCard';
-import type { Screenshot } from '@/lib/types';
+import type { ScreenshotListItem } from '@/lib/types';
 
 interface ScreenshotGalleryProps {
-  screenshots: Screenshot[];
+  screenshots: ScreenshotListItem[];
   onSelect: (index: number) => void;
 }
 

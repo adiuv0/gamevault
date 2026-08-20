@@ -101,10 +101,12 @@ async def list_screenshots(
 
     placeholders = ", ".join("?" for _ in group_ids)
     cursor = await db.execute(
-        f"""SELECT s.*,
+        f"""SELECT s.id, s.game_id, s.filename, s.taken_at, s.uploaded_at,
+                   s.is_favorite,
                    EXISTS(
                        SELECT 1 FROM annotations a WHERE a.screenshot_id = s.id
-                   ) AS has_annotation
+                   ) AS has_annotation,
+                   COALESCE(s.capture_group_id, s.id) AS group_id
             FROM screenshots s
             WHERE s.game_id = ?
               AND COALESCE(s.capture_group_id, s.id) IN ({placeholders})
@@ -115,7 +117,7 @@ async def list_screenshots(
     variants_by_group: dict[int, list[dict]] = {group_id: [] for group_id in group_ids}
     for row in await cursor.fetchall():
         variant = dict(zip(variant_columns, row))
-        group_id = variant.get("capture_group_id") or variant["id"]
+        group_id = variant.pop("group_id")
         variants_by_group.setdefault(group_id, []).append(variant)
 
     screenshots = []
@@ -124,7 +126,6 @@ async def list_screenshots(
         if not variants:
             continue
         screenshot = dict(variants[0])
-        screenshot["variants"] = variants
         screenshot["variant_count"] = len(variants)
         screenshot["is_favorite"] = any(item.get("is_favorite") for item in variants)
         screenshot["has_annotation"] = any(item.get("has_annotation") for item in variants)
@@ -148,6 +149,38 @@ async def get_screenshot(screenshot_id: int) -> dict | None:
     if row is None:
         return None
     return dict(zip(columns, row))
+
+
+async def get_capture_details(screenshot_id: int) -> dict | None:
+    """Get one logical capture and all physical variants for the viewer."""
+    identity = await _get_capture_identity(screenshot_id)
+    if identity is None:
+        return None
+
+    game_id, group_id = identity
+    db = await get_db()
+    cursor = await db.execute(
+        f"""SELECT s.*,
+                   EXISTS(
+                       SELECT 1 FROM annotations a WHERE a.screenshot_id = s.id
+                   ) AS has_annotation
+            FROM screenshots s
+            WHERE s.game_id = ?
+              AND COALESCE(s.capture_group_id, s.id) = ?
+            ORDER BY {_VARIANT_PREFERENCE}""",
+        (game_id, group_id),
+    )
+    columns = [desc[0] for desc in cursor.description]
+    variants = [dict(zip(columns, row)) for row in await cursor.fetchall()]
+    if not variants:
+        return None
+
+    capture = dict(variants[0])
+    capture["variants"] = variants
+    capture["variant_count"] = len(variants)
+    capture["is_favorite"] = any(item.get("is_favorite") for item in variants)
+    capture["has_annotation"] = any(item.get("has_annotation") for item in variants)
+    return capture
 
 
 async def get_screenshot_media(screenshot_id: int) -> dict | None:

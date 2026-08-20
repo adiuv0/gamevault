@@ -1,12 +1,37 @@
 import { useEffect, useCallback, useMemo, useState } from 'react';
-import { X, ChevronLeft, ChevronRight, Info, Download, Repeat2 } from 'lucide-react';
-import { galleryImageUrl, galleryPreviewUrl } from '@/api/gallery';
+import {
+  X,
+  ChevronLeft,
+  ChevronRight,
+  Info,
+  Download,
+  Loader2,
+  Repeat2,
+} from 'lucide-react';
+import { galleryGetScreenshot, galleryImageUrl, galleryPreviewUrl } from '@/api/gallery';
 import { formatDateTime, formatFileSize } from '@/lib/formatters';
-import type { Screenshot, ScreenshotVariant } from '@/lib/types';
+import type {
+  PublicScreenshot,
+  ScreenshotListItem,
+  ScreenshotVariant,
+} from '@/lib/types';
 
-function getVariants(screenshot: Screenshot | undefined): ScreenshotVariant[] {
-  if (!screenshot) return [];
-  return screenshot.variants?.length ? screenshot.variants : [screenshot];
+function getVariants(
+  screenshot: PublicScreenshot | undefined,
+  listItem: ScreenshotListItem | undefined,
+): ScreenshotVariant[] {
+  if (screenshot) return screenshot.variants.length ? screenshot.variants : [screenshot];
+  if (!listItem) return [];
+  return [{
+    id: listItem.id,
+    filename: listItem.filename,
+    file_size: null,
+    width: null,
+    height: null,
+    format: null,
+    taken_at: listItem.taken_at,
+    uploaded_at: listItem.uploaded_at,
+  }];
 }
 
 function variantLabel(variant: ScreenshotVariant, index: number, variants: ScreenshotVariant[]): string {
@@ -16,7 +41,7 @@ function variantLabel(variant: ScreenshotVariant, index: number, variants: Scree
 }
 
 interface GalleryScreenshotViewerProps {
-  screenshots: Screenshot[];
+  screenshots: ScreenshotListItem[];
   currentIndex: number;
   onClose: () => void;
   onNavigate: (index: number) => void;
@@ -30,14 +55,39 @@ export function GalleryScreenshotViewer({
 }: GalleryScreenshotViewerProps) {
   const [showInfo, setShowInfo] = useState(false);
   const [activeVariantId, setActiveVariantId] = useState<number | null>(null);
+  const [detailsById, setDetailsById] = useState<Record<number, PublicScreenshot>>({});
+  const [detailErrorId, setDetailErrorId] = useState<number | null>(null);
 
-  const screenshot = screenshots[currentIndex];
+  const listItem = screenshots[currentIndex];
+  const screenshot = listItem ? detailsById[listItem.id] : undefined;
+  const detailError = detailErrorId === listItem?.id;
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < screenshots.length - 1;
-  const variants = useMemo(() => getVariants(screenshot), [screenshot]);
+  const variants = useMemo(
+    () => getVariants(screenshot, listItem),
+    [screenshot, listItem],
+  );
   const activeVariant = variants.find((variant) => variant.id === activeVariantId)
     || variants[0]
-    || screenshot;
+    || listItem;
+
+  useEffect(() => {
+    if (!listItem || detailsById[listItem.id]) return;
+    let cancelled = false;
+    galleryGetScreenshot(listItem.id)
+      .then((details) => {
+        if (!cancelled) {
+          setDetailsById((current) => ({ ...current, [listItem.id]: details }));
+          setDetailErrorId(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setDetailErrorId(listItem.id);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailsById, listItem]);
 
   const handleCycleVariant = useCallback(() => {
     if (variants.length < 2 || !activeVariant) return;
@@ -85,7 +135,7 @@ export function GalleryScreenshotViewer({
     };
   }, [handleKeyDown]);
 
-  if (!screenshot || !activeVariant) return null;
+  if (!listItem || !activeVariant) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
@@ -98,6 +148,9 @@ export function GalleryScreenshotViewer({
           <span className="text-sm text-text-muted truncate max-w-[10rem] sm:max-w-xs">
             {activeVariant.filename}
           </span>
+          {!screenshot && !detailError && (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-white/40" />
+          )}
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-2">
@@ -187,32 +240,32 @@ export function GalleryScreenshotViewer({
             <div className="p-4 space-y-4">
               <h3 className="text-sm font-medium text-text-primary">Details</h3>
 
-              <div className="space-y-3 text-sm">
-                <InfoRow label="Filename" value={activeVariant.filename} />
-                <InfoRow
-                  label="Date"
-                  value={formatDateTime(activeVariant.taken_at || activeVariant.uploaded_at)}
-                />
-                {activeVariant.width && activeVariant.height && (
+              {!screenshot ? (
+                <p className="text-sm text-text-muted">
+                  {detailError ? 'Details are temporarily unavailable.' : 'Loading details...'}
+                </p>
+              ) : (
+                <div className="space-y-3 text-sm">
+                  <InfoRow label="Filename" value={activeVariant.filename} />
                   <InfoRow
-                    label="Dimensions"
-                    value={`${activeVariant.width} x ${activeVariant.height}`}
+                    label="Date"
+                    value={formatDateTime(activeVariant.taken_at || activeVariant.uploaded_at)}
                   />
-                )}
-                <InfoRow
-                  label="Size"
-                  value={formatFileSize(activeVariant.file_size)}
-                />
-                {activeVariant.format && (
-                  <InfoRow label="Format" value={activeVariant.format.toUpperCase()} />
-                )}
-                {screenshot.steam_description && (
-                  <div>
-                    <p className="text-text-muted text-xs mb-1">Steam Description</p>
-                    <p className="text-text-secondary">{screenshot.steam_description}</p>
-                  </div>
-                )}
-              </div>
+                  {activeVariant.width && activeVariant.height && (
+                    <InfoRow
+                      label="Dimensions"
+                      value={`${activeVariant.width} x ${activeVariant.height}`}
+                    />
+                  )}
+                  <InfoRow
+                    label="Size"
+                    value={formatFileSize(activeVariant.file_size)}
+                  />
+                  {activeVariant.format && (
+                    <InfoRow label="Format" value={activeVariant.format.toUpperCase()} />
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}

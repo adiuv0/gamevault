@@ -5,8 +5,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from backend.auth import require_auth
-from backend.config import settings
-from backend.models.game import GameCreate, GameUpdate, GameResponse, GameListResponse
+from backend.models.game import GameCreate, GameListResponse, GameResponse, GameUpdate
+from backend.models.screenshot import ScreenshotListResponse
 from backend.services import game_service
 from backend.services.filesystem import safe_library_path
 from backend.services.screenshot_service import list_screenshots
@@ -201,7 +201,7 @@ async def get_cover(game_id: int):
     )
 
 
-@router.get("/{game_id}/screenshots")
+@router.get("/{game_id}/screenshots", response_model=ScreenshotListResponse)
 async def get_game_screenshots(
     game_id: int,
     page: int = Query(1, ge=1),

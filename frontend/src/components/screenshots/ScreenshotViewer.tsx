@@ -13,16 +13,38 @@ import {
   Trash2,
   Repeat2,
 } from 'lucide-react';
-import { getScreenshotImageUrl, getScreenshotPreviewUrl } from '@/api/screenshots';
+import {
+  getScreenshot,
+  getScreenshotImageUrl,
+  getScreenshotPreviewUrl,
+} from '@/api/screenshots';
 import { toggleFavorite, createShareLink, getShareLink, deleteShareLink } from '@/api/screenshots';
 import { AnnotationEditor } from './AnnotationEditor';
 import { formatDateTime, formatFileSize } from '@/lib/formatters';
-import type { Screenshot, ScreenshotVariant, ShareLink } from '@/lib/types';
+import type {
+  Screenshot,
+  ScreenshotListItem,
+  ScreenshotVariant,
+  ShareLink,
+} from '@/lib/types';
 
 
-function getVariants(screenshot: Screenshot | undefined): ScreenshotVariant[] {
-  if (!screenshot) return [];
-  return screenshot.variants?.length ? screenshot.variants : [screenshot];
+function getVariants(
+  screenshot: Screenshot | undefined,
+  listItem: ScreenshotListItem | undefined,
+): ScreenshotVariant[] {
+  if (screenshot) return screenshot.variants.length ? screenshot.variants : [screenshot];
+  if (!listItem) return [];
+  return [{
+    id: listItem.id,
+    filename: listItem.filename,
+    file_size: null,
+    width: null,
+    height: null,
+    format: null,
+    taken_at: listItem.taken_at,
+    uploaded_at: listItem.uploaded_at,
+  }];
 }
 
 function variantLabel(variant: ScreenshotVariant, index: number, variants: ScreenshotVariant[]): string {
@@ -32,7 +54,7 @@ function variantLabel(variant: ScreenshotVariant, index: number, variants: Scree
 }
 
 interface ScreenshotViewerProps {
-  screenshots: Screenshot[];
+  screenshots: ScreenshotListItem[];
   currentIndex: number;
   onClose: () => void;
   onNavigate: (index: number) => void;
@@ -51,6 +73,8 @@ export function ScreenshotViewer({
   const [showInfo, setShowInfo] = useState(false);
   const [togglingFav, setTogglingFav] = useState(false);
   const [activeVariantId, setActiveVariantId] = useState<number | null>(null);
+  const [detailsById, setDetailsById] = useState<Record<number, Screenshot>>({});
+  const [detailErrorId, setDetailErrorId] = useState<number | null>(null);
 
   // Share state
   const [showSharePanel, setShowSharePanel] = useState(false);
@@ -59,13 +83,36 @@ export function ScreenshotViewer({
   const [shareCopied, setShareCopied] = useState(false);
   const [shareDeleting, setShareDeleting] = useState(false);
 
-  const screenshot = screenshots[currentIndex];
+  const listItem = screenshots[currentIndex];
+  const screenshot = listItem ? detailsById[listItem.id] : undefined;
+  const detailError = detailErrorId === listItem?.id;
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < screenshots.length - 1;
-  const variants = useMemo(() => getVariants(screenshot), [screenshot]);
+  const variants = useMemo(
+    () => getVariants(screenshot, listItem),
+    [screenshot, listItem],
+  );
   const activeVariant = variants.find((variant) => variant.id === activeVariantId)
     || variants[0]
-    || screenshot;
+    || listItem;
+
+  useEffect(() => {
+    if (!listItem || detailsById[listItem.id]) return;
+    let cancelled = false;
+    getScreenshot(listItem.id)
+      .then((details) => {
+        if (!cancelled) {
+          setDetailsById((current) => ({ ...current, [listItem.id]: details }));
+          setDetailErrorId(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setDetailErrorId(listItem.id);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailsById, listItem]);
 
   const handleCycleVariant = useCallback(() => {
     if (variants.length < 2 || !activeVariant) return;
@@ -129,11 +176,11 @@ export function ScreenshotViewer({
   }, [handleKeyDown]);
 
   const handleFavoriteToggle = async () => {
-    if (togglingFav) return;
+    if (togglingFav || !listItem) return;
     try {
       setTogglingFav(true);
-      const result = await toggleFavorite(screenshot.id);
-      onFavoriteToggle?.(screenshot.id, result.is_favorite);
+      const result = await toggleFavorite(listItem.id);
+      onFavoriteToggle?.(listItem.id, result.is_favorite);
     } catch {
       // ignore
     } finally {
@@ -142,6 +189,7 @@ export function ScreenshotViewer({
   };
 
   const handleShareToggle = async () => {
+    if (!listItem) return;
     if (showSharePanel) {
       setShowSharePanel(false);
       return;
@@ -152,7 +200,7 @@ export function ScreenshotViewer({
 
     try {
       // Try to get existing share link first
-      const existing = await getShareLink(screenshot.id);
+      const existing = await getShareLink(listItem.id);
       if (existing) {
         setShareLink(existing);
       }
@@ -164,9 +212,10 @@ export function ScreenshotViewer({
   };
 
   const handleCreateShareLink = async () => {
+    if (!listItem) return;
     try {
       setShareLoading(true);
-      const link = await createShareLink(screenshot.id);
+      const link = await createShareLink(listItem.id);
       setShareLink(link);
     } catch {
       // ignore
@@ -195,9 +244,10 @@ export function ScreenshotViewer({
   };
 
   const handleDeleteShareLink = async () => {
+    if (!listItem) return;
     try {
       setShareDeleting(true);
-      await deleteShareLink(screenshot.id);
+      await deleteShareLink(listItem.id);
       setShareLink(null);
     } catch {
       // ignore
@@ -206,7 +256,7 @@ export function ScreenshotViewer({
     }
   };
 
-  if (!screenshot || !activeVariant) return null;
+  if (!listItem || !activeVariant) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
@@ -219,6 +269,9 @@ export function ScreenshotViewer({
           <span className="text-sm text-text-muted truncate max-w-[10rem] sm:max-w-xs">
             {activeVariant.filename}
           </span>
+          {!screenshot && !detailError && (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-white/40" />
+          )}
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-2">
@@ -249,7 +302,7 @@ export function ScreenshotViewer({
           >
             <Heart
               className={`h-5 w-5 ${
-                screenshot.is_favorite
+                listItem.is_favorite
                   ? 'text-red-400 fill-red-400'
                   : 'text-white/70'
               }`}
@@ -426,43 +479,49 @@ export function ScreenshotViewer({
             <div className="p-4 space-y-4">
               <h3 className="text-sm font-medium text-text-primary">Details</h3>
 
-              <div className="space-y-3 text-sm">
-                <InfoRow label="Filename" value={activeVariant.filename} />
-                <InfoRow
-                  label="Date"
-                  value={formatDateTime(activeVariant.taken_at || activeVariant.uploaded_at)}
-                />
-                {activeVariant.width && activeVariant.height && (
+              {!screenshot ? (
+                <p className="text-sm text-text-muted">
+                  {detailError ? 'Details are temporarily unavailable.' : 'Loading details...'}
+                </p>
+              ) : (
+                <div className="space-y-3 text-sm">
+                  <InfoRow label="Filename" value={activeVariant.filename} />
                   <InfoRow
-                    label="Dimensions"
-                    value={`${activeVariant.width} x ${activeVariant.height}`}
+                    label="Date"
+                    value={formatDateTime(activeVariant.taken_at || activeVariant.uploaded_at)}
                   />
-                )}
-                <InfoRow
-                  label="Size"
-                  value={formatFileSize(activeVariant.file_size)}
-                />
-                {activeVariant.format && (
-                  <InfoRow label="Format" value={activeVariant.format.toUpperCase()} />
-                )}
-                <InfoRow label="Source" value={
-                  activeVariant.source === 'steam_import' ? 'Steam Import'
-                  : activeVariant.source === 'steam_local' ? 'Steam Local'
-                  : 'Upload'
-                } />
-                {screenshot.steam_description && (
-                  <div>
-                    <p className="text-text-muted text-xs mb-1">Steam Description</p>
-                    <p className="text-text-secondary">{screenshot.steam_description}</p>
-                  </div>
-                )}
-              </div>
+                  {activeVariant.width && activeVariant.height && (
+                    <InfoRow
+                      label="Dimensions"
+                      value={`${activeVariant.width} x ${activeVariant.height}`}
+                    />
+                  )}
+                  <InfoRow
+                    label="Size"
+                    value={formatFileSize(activeVariant.file_size)}
+                  />
+                  {activeVariant.format && (
+                    <InfoRow label="Format" value={activeVariant.format.toUpperCase()} />
+                  )}
+                  <InfoRow label="Source" value={
+                    activeVariant.source === 'steam_import' ? 'Steam Import'
+                    : activeVariant.source === 'steam_local' ? 'Steam Local'
+                    : 'Upload'
+                  } />
+                  {screenshot.steam_description && (
+                    <div>
+                      <p className="text-text-muted text-xs mb-1">Steam Description</p>
+                      <p className="text-text-secondary">{screenshot.steam_description}</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="pt-3 border-t border-border">
                 <AnnotationEditor
-                  screenshotId={screenshot.id}
-                  hasAnnotation={!!screenshot.has_annotation}
-                  onAnnotationChanged={(has) => onAnnotationChanged?.(screenshot.id, has)}
+                  screenshotId={listItem.id}
+                  hasAnnotation={!!listItem.has_annotation}
+                  onAnnotationChanged={(has) => onAnnotationChanged?.(listItem.id, has)}
                 />
               </div>
             </div>

@@ -16,10 +16,9 @@ from fastapi.responses import FileResponse
 
 from backend.database import get_db
 from backend.models.game import PublicGame, PublicGameListResponse
-from backend.models.screenshot import PublicScreenshotListResponse
-from backend.services import game_service
+from backend.models.screenshot import PublicScreenshot, PublicScreenshotListResponse
+from backend.services import game_service, screenshot_service
 from backend.services.filesystem import safe_library_path, safe_media_path
-from backend.services.screenshot_service import list_screenshots
 
 router = APIRouter(prefix="/api/gallery", tags=["gallery"])
 
@@ -77,7 +76,9 @@ async def gallery_game_screenshots(
 ):
     """List screenshots for a public game with slim response shape."""
     await _get_public_game(game_id)
-    screenshots, total = await list_screenshots(game_id, page, limit, sort)
+    screenshots, total = await screenshot_service.list_screenshots(
+        game_id, page, limit, sort
+    )
     return {
         "screenshots": screenshots,
         "total": total,
@@ -111,6 +112,16 @@ async def gallery_cover(game_id: int):
 
 
 # ── Screenshot endpoints ────────────────────────────────────────────────────
+
+
+@router.get("/screenshots/{screenshot_id}", response_model=PublicScreenshot)
+async def gallery_get_screenshot(screenshot_id: int):
+    """Get public logical-capture details for the viewer."""
+    await _get_public_screenshot(screenshot_id)
+    screenshot = await screenshot_service.get_capture_details(screenshot_id)
+    if not screenshot:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    return screenshot
 
 
 @router.get("/screenshots/{screenshot_id}/image")

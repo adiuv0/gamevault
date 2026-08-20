@@ -14,6 +14,7 @@ _EXTRA_MIME_TYPES = {
 
 from backend.auth import require_auth
 from backend.models.annotation import AnnotationCreate
+from backend.models.screenshot import ScreenshotResponse
 from backend.services import screenshot_service
 from backend.services.filesystem import safe_library_path, safe_media_path
 
@@ -39,10 +40,10 @@ async def check_hashes(data: HashCheckRequest):
     return {"existing": list(existing), "new": list(all_set - existing)}
 
 
-@router.get("/{screenshot_id}")
+@router.get("/{screenshot_id}", response_model=ScreenshotResponse)
 async def get_screenshot(screenshot_id: int):
-    """Get screenshot details including annotation flag."""
-    screenshot = await screenshot_service.get_screenshot(screenshot_id)
+    """Get a logical capture and its physical variants for the viewer."""
+    screenshot = await screenshot_service.get_capture_details(screenshot_id)
     if not screenshot:
         raise HTTPException(status_code=404, detail="Screenshot not found")
     return screenshot

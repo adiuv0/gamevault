@@ -210,6 +210,34 @@ class TestScopedQueryToken:
 
 
 class TestPublicGalleryShapes:
+    def test_public_screenshot_list_item_is_card_sized(self):
+        from backend.models.screenshot import PublicScreenshotListItem
+
+        full = {
+            "id": 1,
+            "game_id": 2,
+            "filename": "shot.png",
+            "taken_at": "2026-04-01T12:00:00",
+            "uploaded_at": "2026-04-01T12:01:00",
+            "variant_count": 2,
+            "file_path": "Game/screenshots/shot.png",
+            "width": 1920,
+            "height": 1080,
+            "variants": [{"id": 1}],
+            "is_favorite": True,
+            "has_annotation": True,
+        }
+
+        card = PublicScreenshotListItem.model_validate(full).model_dump()
+        assert set(card) == {
+            "id",
+            "game_id",
+            "filename",
+            "taken_at",
+            "uploaded_at",
+            "variant_count",
+        }
+
     def test_public_screenshot_drops_sensitive_fields(self):
         from backend.models.screenshot import PublicScreenshot
 

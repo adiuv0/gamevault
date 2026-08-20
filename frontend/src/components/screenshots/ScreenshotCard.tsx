@@ -1,10 +1,10 @@
 import { Files, Heart, MessageSquare } from 'lucide-react';
 import { getThumbnailUrl } from '@/api/screenshots';
 import { formatDate } from '@/lib/formatters';
-import type { Screenshot } from '@/lib/types';
+import type { ScreenshotListItem } from '@/lib/types';
 
 interface ScreenshotCardProps {
-  screenshot: Screenshot;
+  screenshot: ScreenshotListItem;
   onClick: () => void;
 }
 

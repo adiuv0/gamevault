@@ -152,12 +152,14 @@ Deletes every game with zero screenshots. Returns `{ "deleted_count": N,
 
 ### `GET /api/screenshots/{id}`
 
-Returns full screenshot details + a `has_annotation` flag.
+Returns full logical-capture details, including `variant_count`, a `variants` array for
+every preserved physical file, and a `has_annotation` flag. Viewer clients fetch this
+record on demand.
 
-Game screenshot-list endpoints paginate logical captures. Each item contains
-`variant_count` and a `variants` array describing every preserved physical file.
-The public-gallery response exposes the same relationship with internal paths and
-hashes removed.
+Game screenshot-list endpoints paginate logical captures and return card-sized items:
+`id`, `game_id`, `filename`, `taken_at`, `uploaded_at`, `variant_count`, and the
+authenticated favorite/annotation flags. Variant metadata is intentionally omitted
+from list responses.
 
 ### `DELETE /api/screenshots/{id}`
 
@@ -610,7 +612,7 @@ Get a public game by ID. 404 if private.
 
 ### `GET /api/gallery/games/{id}/screenshots?page=1&limit=50&sort=date_desc`
 
-Paginated screenshots for a public game.
+Paginated card-sized logical captures for a public game.
 
 ### `GET /api/gallery/games/{id}/cover`
 
@@ -620,6 +622,11 @@ cache it.
 ### `GET /api/gallery/screenshots/{id}/image`
 
 Full image — only if the game is public. Same caching headers as cover.
+
+### `GET /api/gallery/screenshots/{id}`
+
+Public logical-capture details for an opened viewer, including physical variants but
+excluding internal paths, hashes, EXIF, source details, and private curation state.
 
 ### `GET /api/gallery/screenshots/{id}/thumb/{sm|md}`
 

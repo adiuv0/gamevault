@@ -9,7 +9,7 @@ import { getGame, deleteGame, updateGame, getCoverUrl, listGames, mergeGameInto 
 import { listScreenshots } from '@/api/screenshots';
 import { fetchGameMetadata } from '@/api/metadata';
 import { formatCount, formatDate } from '@/lib/formatters';
-import type { Game, Screenshot } from '@/lib/types';
+import type { Game, ScreenshotListItem } from '@/lib/types';
 
 export function GamePage() {
   const { id } = useParams<{ id: string }>();
@@ -17,7 +17,7 @@ export function GamePage() {
   const gameId = Number(id);
 
   const [game, setGame] = useState<Game | null>(null);
-  const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
+  const [screenshots, setScreenshots] = useState<ScreenshotListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);

@@ -179,6 +179,7 @@ async def test_logical_capture_lists_once_and_shares_metadata(duplicate_library)
     from backend.services.screenshot_service import (
         delete_annotation,
         get_annotation,
+        get_capture_details,
         list_screenshots,
         save_annotation,
         toggle_favorite,
@@ -195,7 +196,12 @@ async def test_logical_capture_lists_once_and_shares_metadata(duplicate_library)
     assert total == 1
     assert len(screenshots) == 1
     assert screenshots[0]["variant_count"] == 2
-    assert [variant["id"] for variant in screenshots[0]["variants"]] == [
+    assert "variants" not in screenshots[0]
+
+    capture = await get_capture_details(right_id)
+    assert capture["id"] == left_id
+    assert capture["variant_count"] == 2
+    assert [variant["id"] for variant in capture["variants"]] == [
         left_id,
         right_id,
     ]

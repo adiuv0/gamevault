@@ -1,5 +1,5 @@
 import { API_BASE } from '@/lib/constants';
-import type { Game, Screenshot } from '@/lib/types';
+import type { Game, PublicScreenshot, ScreenshotListItem } from '@/lib/types';
 
 /**
  * Public gallery API client — no auth headers needed.
@@ -31,8 +31,12 @@ export async function galleryListScreenshots(
   page = 1,
   limit = 50,
   sort = 'date_desc',
-): Promise<{ screenshots: Screenshot[]; total: number; page: number; limit: number; has_more: boolean }> {
+): Promise<{ screenshots: ScreenshotListItem[]; total: number; page: number; limit: number; has_more: boolean }> {
   return galleryGet(`/games/${gameId}/screenshots?page=${page}&limit=${limit}&sort=${sort}`);
+}
+
+export async function galleryGetScreenshot(screenshotId: number): Promise<PublicScreenshot> {
+  return galleryGet(`/screenshots/${screenshotId}`);
 }
 
 export function galleryCoverUrl(gameId: number): string {

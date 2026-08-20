@@ -67,6 +67,9 @@ closing the entire 14-finding security audit
   caching headers, and media requests use narrow database lookups.
 - Admin and public viewers load bounded previews by default; download links continue to
   serve untouched full-resolution originals.
+- Gallery list responses now contain only card fields; full logical-capture and variant
+  metadata is fetched when a viewer opens, reducing the 50-card benchmark payload by
+  85%.
 - Imports decode each source once for both thumbnail sizes, perform image work
   outside the async request loop, and recalculate game statistics once per batch.
 - Added composite gallery indexes for game/date and game/filename ordering.

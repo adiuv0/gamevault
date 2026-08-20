@@ -31,8 +31,24 @@ export interface ScreenshotVariant {
   has_annotation?: boolean;
 }
 
-export interface Screenshot extends ScreenshotVariant {
+export interface ScreenshotListItem {
+  id: number;
   game_id: number;
+  filename: string;
+  taken_at: string | null;
+  uploaded_at: string;
+  is_favorite?: boolean;
+  has_annotation?: boolean;
+  variant_count: number;
+}
+
+export interface PublicScreenshot extends ScreenshotVariant {
+  game_id: number;
+  variant_count: number;
+  variants: ScreenshotVariant[];
+}
+
+export interface Screenshot extends PublicScreenshot {
   file_path: string;
   thumbnail_path_sm: string | null;
   thumbnail_path_md: string | null;
@@ -44,8 +60,6 @@ export interface Screenshot extends ScreenshotVariant {
   exif_data: string | null;
   has_annotation: boolean;
   capture_group_id?: number | null;
-  variant_count?: number;
-  variants?: ScreenshotVariant[];
   created_at: string;
   updated_at: string;
 }

@@ -1,10 +1,10 @@
 import { Files } from 'lucide-react';
 import { galleryThumbUrl } from '@/api/gallery';
 import { formatDate } from '@/lib/formatters';
-import type { Screenshot } from '@/lib/types';
+import type { ScreenshotListItem } from '@/lib/types';
 
 interface GalleryScreenshotCardProps {
-  screenshot: Screenshot;
+  screenshot: ScreenshotListItem;
   onClick: () => void;
 }
 

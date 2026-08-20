@@ -45,7 +45,7 @@ Deliverables:
 - Structured timings for list queries, media responses, imports, and image processing.
 - [x] Browser-friendly large previews so the viewer does not fetch 4K/HDR originals by
   default.
-- Slim gallery payloads with full metadata fetched only when needed.
+- [x] Slim gallery payloads with full metadata fetched only when needed.
 - Cursor pagination and gallery virtualization where measurements justify them.
 - Durable import jobs that resume cleanly after restart.
 

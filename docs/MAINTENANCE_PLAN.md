@@ -60,7 +60,7 @@ implemented.
 
 - [x] Add a browser-compatible large preview so the viewer does not fetch 4K originals by default.
 - Virtualize long galleries and replace deep offset pagination with cursor pagination.
-- Return slim list payloads and fetch full metadata only when requested.
+- [x] Return slim list payloads and fetch full metadata only when requested.
 - Replace in-process import queues with a durable SQLite-backed job worker.
 - [x] Add a reproducible gallery service benchmark at 1,000 and 10,000 captures.
 - Add structured runtime timings and diagnostics for media, database, and import stages.
