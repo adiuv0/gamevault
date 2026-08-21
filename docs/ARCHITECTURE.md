@@ -106,6 +106,7 @@ Cross-cutting helpers:
 - [`services/image_processor.py`](../backend/services/image_processor.py) — Pillow-based hash, EXIF, dimensions, and display-derivative generation. Routes HDR sources through `hdr_processor`.
 - [`services/hdr_processor.py`](../backend/services/hdr_processor.py) — JXR magic detection + decode (lazy `imagecodecs`), 16-bit PNG decode, Reinhard/ACES/clip tone-map, sRGB OETF.
 - [`services/preview_service.py`](../backend/services/preview_service.py) — durable, resumable preview-cache audits and backfill.
+- [`services/performance_diagnostics.py`](../backend/services/performance_diagnostics.py) — bounded runtime timing aggregates and media-stream instrumentation.
 
 ### Authentication flow
 
@@ -154,6 +155,19 @@ with BM25 ranking.
 maintains an `_migrations` table that tracks which files have been
 applied. Each migration is a Python module with an `async upgrade(db)`
 function. Migrations run sequentially during `init_db`.
+
+### Performance diagnostics
+
+Runtime diagnostics are deliberately process-local and bounded. Named decorators time
+gallery queries, thumbnail/preview generation, and import operations. A pure ASGI
+middleware measures media delivery through the final streamed response body and records
+bytes sent. Each operation keeps lifetime counts, averages, maxima, slow/error totals,
+and a 256-sample window for p50/p95 calculations.
+
+Only fixed stage and operation names are recorded. Request paths, image paths, filenames,
+query strings, tokens, and bodies are excluded. Slow operations emit rate-limited,
+structured container-log warnings. The authenticated Settings endpoint exposes the same
+aggregates; resetting it has no effect on durable data.
 
 ### Image pipeline
 

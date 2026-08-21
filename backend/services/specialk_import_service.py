@@ -46,6 +46,7 @@ from backend.services.image_processor import (
     validate_image,
 )
 from backend.services.metadata_service import fetch_and_apply_metadata
+from backend.services.performance_diagnostics import measure_async
 from backend.services.screenshot_service import (
     check_duplicate_hash,
     create_screenshot,
@@ -462,6 +463,7 @@ async def _import_game(
     return completed, skipped, failed
 
 
+@measure_async("import", "specialk_file", threshold_ms=5000)
 async def _import_single_file(
     session_id: int,
     src_path: Path,

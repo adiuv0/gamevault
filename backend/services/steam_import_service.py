@@ -19,6 +19,7 @@ from backend.services.image_processor import (
     get_image_format,
 )
 from backend.services.metadata_service import fetch_and_apply_metadata
+from backend.services.performance_diagnostics import measure_async
 from backend.services.screenshot_service import (
     check_duplicate_hash,
     check_duplicate_steam_id,
@@ -412,6 +413,7 @@ async def _import_game(
     return completed, skipped, failed
 
 
+@measure_async("import", "steam_file", threshold_ms=5000)
 async def _import_single_screenshot(
     session_id: int,
     scraper: SteamScraper,

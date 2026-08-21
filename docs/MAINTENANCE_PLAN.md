@@ -67,7 +67,8 @@ filesystem imports are implemented.
 - [x] Replace Steam and Special K request-bound tasks with a durable SQLite-backed job
   worker. Browser upload-body staging remains separate work.
 - [x] Add a reproducible gallery service benchmark at 1,000 and 10,000 captures.
-- Add structured runtime timings and diagnostics for media, database, and import stages.
+- [x] Add bounded structured runtime timings for media delivery, gallery queries,
+  image processing, and each import source, with threshold logs and a Settings view.
 
 Acceptance criteria:
 

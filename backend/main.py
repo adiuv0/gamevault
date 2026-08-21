@@ -23,6 +23,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from backend.config import settings
 from backend.database import close_db, init_db
 from backend.services.import_job_service import start_import_worker, stop_import_worker
+from backend.services.performance_diagnostics import MediaTimingMiddleware
 
 # ── Per-context Content-Security-Policy strings ──────────────────────────────
 #
@@ -190,6 +191,7 @@ app.add_middleware(
 # *outside* the CORS middleware, so headers we add are not consumed by
 # CORS preflight handling.
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(MediaTimingMiddleware)
 
 # API routers
 app.include_router(auth.router)

@@ -73,6 +73,38 @@ export async function startPreviewBackfill(): Promise<PreviewBackfillJob> {
   return api.post('/settings/preview-cache/backfill');
 }
 
+export interface PerformanceMetric {
+  stage: 'database' | 'image' | 'import' | 'media';
+  operation: string;
+  count: number;
+  average_ms: number;
+  p50_ms: number;
+  p95_ms: number;
+  max_ms: number;
+  threshold_ms: number;
+  slow_count: number;
+  error_count: number;
+  recent_error_count: number;
+  total_bytes: number;
+  last_seen_at: string;
+}
+
+export interface PerformanceSnapshot {
+  started_at: string;
+  generated_at: string;
+  sample_limit: number;
+  total_measurements: number;
+  metrics: PerformanceMetric[];
+}
+
+export async function getPerformanceDiagnostics(): Promise<PerformanceSnapshot> {
+  return api.get('/settings/performance');
+}
+
+export async function resetPerformanceDiagnostics(): Promise<PerformanceSnapshot> {
+  return api.delete('/settings/performance');
+}
+
 export async function changePassword(
   currentPassword: string,
   newPassword: string,

@@ -16,6 +16,7 @@ from PIL import ExifTags, Image
 
 from backend.config import settings
 from backend.services import hdr_processor
+from backend.services.performance_diagnostics import measure_sync
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +313,7 @@ def generate_thumbnails(
     return sm, md
 
 
+@measure_sync("image", "thumbnail_bundle", threshold_ms=2000)
 def generate_thumbnails_with_hash(
     source_path: Path,
     game_folder: str,
@@ -355,6 +357,7 @@ def generate_thumbnails_with_hash(
     return sm_rel, md_rel, preview_rel, perceptual_hash
 
 
+@measure_sync("image", "preview", threshold_ms=2000)
 def generate_preview(
     source_path: Path,
     game_folder: str,

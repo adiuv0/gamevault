@@ -6,9 +6,8 @@ import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from uuid import uuid4
-
-logger = logging.getLogger(__name__)
 
 from backend.services.filesystem import get_screenshots_dir, sanitize_filename
 from backend.services.game_service import get_game, update_screenshot_stats
@@ -21,10 +20,13 @@ from backend.services.image_processor import (
     get_image_format,
     validate_image,
 )
+from backend.services.performance_diagnostics import recorder
 from backend.services.screenshot_service import (
     check_duplicate_hash,
     create_screenshot,
 )
+
+logger = logging.getLogger(__name__)
 
 # Whitelist of allowed image formats (Pillow format name → safe extension).
 # Files whose detected format is not in this map are rejected.
@@ -142,6 +144,8 @@ async def process_upload(
     })
 
     for i, (original_name, temp_path) in enumerate(temp_files):
+        file_started = perf_counter()
+        file_failed = False
         try:
             await emit_progress(task_id, {
                 "type": "file_start",
@@ -265,6 +269,7 @@ async def process_upload(
             })
 
         except Exception as e:
+            file_failed = True
             logger.exception("process_upload: EXCEPTION for %s", original_name)
             await emit_progress(task_id, {
                 "type": "file_error",
@@ -273,6 +278,13 @@ async def process_upload(
                 "error": str(e),
             })
         finally:
+            recorder.record(
+                "import",
+                "browser_file",
+                (perf_counter() - file_started) * 1000,
+                threshold_ms=5000,
+                error=file_failed,
+            )
             # Clean up temp file
             try:
                 temp_path.unlink(missing_ok=True)

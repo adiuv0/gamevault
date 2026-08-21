@@ -583,6 +583,20 @@ Starts a new preview-cache audit or resumes an interrupted one. Existing valid p
 are checked and skipped; missing previews are rebuilt in the background. Returns the
 durable job record immediately.
 
+### `GET /api/settings/performance`
+
+Returns process-local aggregate timings for gallery queries, media responses, image
+processing, and imports. Each metric includes its operation, count, average, p50, p95,
+maximum, lifetime and recent error counts, slow count, threshold, byte total, and
+last-seen timestamp. Percentiles and recent errors use at most the 256 most recent
+samples; totals cover the current collection period. Paths, filenames, query strings,
+and request bodies are never retained.
+
+### `DELETE /api/settings/performance`
+
+Clears collected timings and starts a new collection period. This changes no database,
+library, cache, or import state.
+
 ---
 
 ## Sharing

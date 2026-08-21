@@ -29,6 +29,10 @@ closing the entire 14-finding security audit
 - Disposable 1920px viewer previews generated alongside thumbnails from the same image
   decode, plus a durable Settings backfill for existing or cache-wiped libraries.
 - Reproducible metadata-only benchmarks for 1,000 and 10,000 logical captures.
+- Bounded runtime performance diagnostics for gallery queries, streamed media, image
+  processing, and imports, with rate-limited slow-operation container warnings and an
+  authenticated Settings summary/reset view. Diagnostics retain no paths, filenames, or
+  request data.
 - Restart-safe Steam and Special K imports backed by an encrypted SQLite job queue.
   Interrupted jobs resume on startup, terminal progress remains available after restart,
   and completed or cancelled jobs discard their encrypted payloads.

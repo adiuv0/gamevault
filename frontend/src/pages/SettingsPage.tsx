@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Settings,
   Key,
@@ -19,6 +19,9 @@ import {
   Copy,
   Check,
   Monitor,
+  Activity,
+  RefreshCw,
+  RotateCcw,
 } from 'lucide-react';
 import {
   getSettings,
@@ -29,8 +32,16 @@ import {
   migrateThumbnailCache,
   getPreviewBackfill,
   startPreviewBackfill,
+  getPerformanceDiagnostics,
+  resetPerformanceDiagnostics,
 } from '@/api/settings';
-import type { AppSettings, PreviewBackfillJob, ToneMapAlgorithm } from '@/api/settings';
+import type {
+  AppSettings,
+  PerformanceMetric,
+  PerformanceSnapshot,
+  PreviewBackfillJob,
+  ToneMapAlgorithm,
+} from '@/api/settings';
 import { Save, Trash2, Sparkles } from 'lucide-react';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 
@@ -220,6 +231,8 @@ export function SettingsPage() {
             )}
           </div>
         </section>
+
+        <PerformanceSection />
 
         {/* Configuration */}
         <section className="bg-bg-secondary border border-border rounded-lg p-6">
@@ -448,6 +461,156 @@ function StatCard({
         {typeof value === 'number' ? value.toLocaleString() : value}
       </p>
     </div>
+  );
+}
+
+const PERFORMANCE_LABELS: Record<string, string> = {
+  gallery_cursor: 'Gallery loading',
+  gallery_offset: 'Legacy gallery loading',
+  game_list_private: 'Library game list',
+  game_list_public: 'Public game list',
+  thumbnail_bundle: 'Thumbnail creation',
+  preview: 'Preview creation',
+  steam_file: 'Steam import file',
+  specialk_file: 'Special K import file',
+  browser_file: 'Browser upload file',
+  'private.thumbnail': 'Private thumbnails',
+  'private.preview': 'Private previews',
+  'private.original': 'Private originals',
+  'private.cover': 'Private covers',
+  'public.thumbnail': 'Public thumbnails',
+  'public.preview': 'Public previews',
+  'public.original': 'Public originals',
+  'public.cover': 'Public covers',
+};
+
+function formatDuration(milliseconds: number): string {
+  if (milliseconds < 1) return '<1 ms';
+  if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
+  return `${(milliseconds / 1000).toFixed(1)} s`;
+}
+
+function PerformanceSection() {
+  const [snapshot, setSnapshot] = useState<PerformanceSnapshot | null>(null);
+  const [refreshing, setRefreshing] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setRefreshing(true);
+      setSnapshot(await getPerformanceDiagnostics());
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Performance data unavailable');
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(refresh, 10_000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  const reset = async () => {
+    try {
+      setRefreshing(true);
+      setSnapshot(await resetPerformanceDiagnostics());
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reset performance data');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const metrics = [...(snapshot?.metrics ?? [])].sort((left, right) => {
+    const leftConcern = Number(left.p95_ms >= left.threshold_ms || left.recent_error_count > 0);
+    const rightConcern = Number(right.p95_ms >= right.threshold_ms || right.recent_error_count > 0);
+    return rightConcern - leftConcern || left.stage.localeCompare(right.stage)
+      || left.operation.localeCompare(right.operation);
+  });
+  const needsAttention = metrics.some(
+    (metric) => metric.p95_ms >= metric.threshold_ms || metric.recent_error_count > 0,
+  );
+
+  return (
+    <section className="bg-bg-secondary border border-border rounded-lg p-6">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-2 min-w-0">
+          <Activity className="h-5 w-5 shrink-0 text-accent-primary" />
+          <h2 className="text-lg font-medium text-text-primary">Performance</h2>
+          {snapshot && snapshot.total_measurements > 0 && (
+            <span className={needsAttention ? 'text-xs text-accent-warning' : 'text-xs text-accent-success'}>
+              {needsAttention ? 'Needs attention' : 'Healthy'}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            disabled={refreshing}
+            title="Refresh performance data"
+            aria-label="Refresh performance data"
+            className="p-2 text-text-muted hover:text-text-primary disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
+          <button
+            type="button"
+            onClick={() => void reset()}
+            disabled={refreshing || !snapshot?.total_measurements}
+            title="Reset performance data"
+            aria-label="Reset performance data"
+            className="p-2 text-text-muted hover:text-text-primary disabled:opacity-50"
+          >
+            <RotateCcw className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      {error && <p className="text-sm text-accent-danger">{error}</p>}
+      {!error && metrics.length === 0 && (
+        <p className="text-sm text-text-muted">Waiting for activity</p>
+      )}
+      {metrics.length > 0 && (
+        <div>
+          <div className="grid grid-cols-[minmax(0,1fr)_52px_64px] sm:grid-cols-[minmax(0,1fr)_64px_78px_78px] gap-2 sm:gap-3 pb-2 text-xs text-text-muted border-b border-border">
+            <span>Activity</span>
+            <span className="text-right">Samples</span>
+            <span className="text-right">Typical</span>
+            <span className="hidden sm:block text-right">Slowest</span>
+          </div>
+          {metrics.map((metric: PerformanceMetric) => {
+            const concern = metric.p95_ms >= metric.threshold_ms || metric.recent_error_count > 0;
+            return (
+              <div
+                key={`${metric.stage}:${metric.operation}`}
+                className="grid grid-cols-[minmax(0,1fr)_52px_64px] sm:grid-cols-[minmax(0,1fr)_64px_78px_78px] gap-2 sm:gap-3 py-2.5 border-b border-border/50 last:border-0 text-sm"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-text-primary">
+                    {PERFORMANCE_LABELS[metric.operation] ?? metric.operation}
+                  </p>
+                  <p className="text-xs text-text-muted capitalize">{metric.stage}</p>
+                </div>
+                <span className="self-center text-right tabular-nums text-text-secondary">
+                  {metric.count.toLocaleString()}
+                </span>
+                <span className={`self-center text-right tabular-nums ${concern ? 'text-accent-warning' : 'text-text-secondary'}`}>
+                  {formatDuration(metric.p95_ms)}
+                </span>
+                <span className="hidden sm:block self-center text-right tabular-nums text-text-secondary">
+                  {formatDuration(metric.max_ms)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 

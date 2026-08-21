@@ -12,6 +12,7 @@ from backend.services.filesystem import (
     get_library_size_bytes,
     get_thumbnail_cache_size_bytes,
 )
+from backend.services.performance_diagnostics import get_snapshot, reset_snapshot
 from backend.services.thumbnail_cache_service import migrate_legacy_thumbnails
 
 router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_auth)])
@@ -229,6 +230,18 @@ async def save_preferences(body: PreferenceUpdate):
 async def health_check():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+@router.get("/performance")
+async def get_performance_diagnostics():
+    """Return bounded runtime timings collected by this application process."""
+    return get_snapshot()
+
+
+@router.delete("/performance")
+async def reset_performance_diagnostics():
+    """Clear runtime timings without changing library or application data."""
+    return reset_snapshot()
 
 
 @router.post("/thumbnail-cache/migrate")

@@ -380,6 +380,13 @@ existing library or clearing the disposable thumbnail cache. Progress survives a
 restart, and missing originals are reported as errors without stopping the rest of
 the library.
 
+### Performance
+
+Shows recent gallery, media, image-processing, and import timings from the running
+GameVault process. **Typical** is the 95th-percentile duration; highlighted rows have
+crossed their expected threshold or recorded an error. Refresh reloads the current
+snapshot, while reset clears timings only and does not modify screenshots or settings.
+
 ### Configuration (read-only)
 
 Surfaces the current values of environment variables — base URL, library

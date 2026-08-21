@@ -16,6 +16,7 @@ from backend.services.filesystem import (
     safe_media_path,
     sanitize_folder_name,
 )
+from backend.services.performance_diagnostics import measure_async
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ GAME_SORT_CLAUSES: dict[str, str] = {
 GAME_DEFAULT_SORT = "g.name ASC"
 
 
+@measure_async("database", "game_list_private", threshold_ms=250)
 async def list_games(sort: str = "name") -> list[dict]:
     """List all games with sorting."""
     db = await get_db()
@@ -233,6 +235,7 @@ async def get_or_create_game(
     return await create_game(name, steam_app_id, **extra_fields)
 
 
+@measure_async("database", "game_list_public", threshold_ms=250)
 async def list_public_games(sort: str = "name") -> list[dict]:
     """List all public games with sorting."""
     db = await get_db()

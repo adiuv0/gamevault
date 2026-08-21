@@ -7,6 +7,7 @@ import json
 from backend.database import get_db
 from backend.services.game_service import update_screenshot_stats
 from backend.services.media_cache_service import media_version
+from backend.services.performance_diagnostics import measure_async
 
 
 def _hash_distance(left: str, right: str) -> int:
@@ -156,6 +157,7 @@ async def _materialize_capture_groups(game_id: int, group_ids: list[int]) -> lis
     return screenshots
 
 
+@measure_async("database", "gallery_offset", threshold_ms=250)
 async def list_screenshots(
     game_id: int,
     page: int = 1,
@@ -189,6 +191,7 @@ async def list_screenshots(
     return await _materialize_capture_groups(game_id, group_ids), total
 
 
+@measure_async("database", "gallery_cursor", threshold_ms=250)
 async def list_screenshots_cursor(
     game_id: int,
     cursor: str | None = None,

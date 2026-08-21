@@ -1,6 +1,6 @@
 # GameVault Large-Library Baseline
 
-Measured: 2026-08-19
+Measured: 2026-08-21
 
 Command:
 
@@ -18,10 +18,12 @@ result.
 
 | Logical captures | Physical assets | Page | Median | p95 | Maximum | 50-card payload |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1,000 | 1,100 | 1 | 1.369 ms | 1.470 ms | 1.487 ms | 11,351 B |
-| 1,000 | 1,100 | 20 | 1.549 ms | 1.663 ms | 1.703 ms | n/a |
-| 10,000 | 11,000 | 1 | 11.932 ms | 12.561 ms | 13.073 ms | 11,401 B |
-| 10,000 | 11,000 | 200 | 14.391 ms | 14.858 ms | 15.794 ms | n/a |
+| 1,000 | 1,100 | 1 | 1.493 ms | 1.631 ms | 1.724 ms | 11,351 B |
+| 1,000 | 1,100 | 20 offset | 1.656 ms | 1.893 ms | 2.032 ms | n/a |
+| 1,000 | 1,100 | 20 cursor | 1.267 ms | 1.377 ms | 1.492 ms | n/a |
+| 10,000 | 11,000 | 1 | 12.308 ms | 12.712 ms | 13.382 ms | 11,401 B |
+| 10,000 | 11,000 | 200 offset | 14.850 ms | 15.360 ms | 15.994 ms | n/a |
+| 10,000 | 11,000 | 200 cursor | 9.758 ms | 10.501 ms | 10.622 ms | n/a |
 
 These results were collected on the maintainer's local Windows development machine and
 are comparison data, not universal service-level targets.
@@ -29,7 +31,8 @@ are comparison data, not universal service-level targets.
 ## Interpretation
 
 - SQLite list and grouping latency remains modest at 10,000 captures.
-- Deep offset pagination adds measurable but currently small cost at this scale.
+- Cursor traversal avoids the growing deep-page offset cost while numbered-page callers
+  remain compatible.
 - Full-resolution viewer media was the higher-leverage bottleneck, so GameVault now uses
   bounded 1920px previews while preserving originals for download.
 - List endpoints now return card-sized records and fetch physical-variant metadata only
@@ -39,8 +42,8 @@ are comparison data, not universal service-level targets.
 - Matching revisioned authenticated media URLs are privately cacheable and immutable for
   one year. Warm navigation is therefore handled by the browser without another route or
   database lookup; public media retains a one-day revocation window.
-- Cursor pagination and virtualization should follow payload/browser measurements rather
-  than being introduced solely from the database timings above.
+- Runtime diagnostic recording is active during this benchmark. Its bounded aggregate
+  bookkeeping leaves the 10,000-capture cursor median below 10 ms on this machine.
 
 ## Reproducing Changes
 

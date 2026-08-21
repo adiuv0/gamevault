@@ -108,6 +108,19 @@ The `get_effective_key(name)` helper reads the DB first, then falls back
 to the matching env var on the `Settings` Pydantic object. Used wherever
 metadata or scraping code needs an API key.
 
+### Runtime Performance Data
+
+The Settings page displays process-local timing aggregates for gallery queries, media
+delivery, image processing, and imports. Collection is always bounded to 256 recent
+samples per named operation for percentiles and resets when the process restarts or the
+Settings reset control is used. It is not stored in SQLite and contains no image paths,
+filenames, query strings, tokens, or request bodies.
+
+The **Typical** column is p95: 95 percent of recent samples completed at or below that
+duration. A row is highlighted when p95 exceeds the operation's threshold or a recent
+sample recorded an error. Slow operations also appear in container logs as rate-limited,
+structured `slow_operation` warnings.
+
 ### Auth-managed
 
 - `auth_password_hash` — bcrypt hash of the user's password. Set by
