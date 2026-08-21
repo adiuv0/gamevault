@@ -1,6 +1,6 @@
 # GameVault Product Roadmap
 
-Updated: 2026-08-07
+Updated: 2026-08-21
 
 This document owns product direction and feature priority. The technical delivery
 sequence lives in [MAINTENANCE_PLAN.md](MAINTENANCE_PLAN.md).
@@ -39,6 +39,8 @@ requirement for that surface.
 This is the current priority because performance degradation directly undermines every
 later curation feature.
 
+Status: Complete.
+
 Deliverables:
 
 - [x] Reproducible benchmarks at 1,000 and 10,000 logical captures.
@@ -50,14 +52,14 @@ Deliverables:
 - [x] Cursor pagination and window-scrolling virtualization for admin and public
   game galleries.
 - [x] Durable Steam and Special K import jobs that resume cleanly after restart.
-- Durable browser-upload staging and replay.
+- [x] Durable browser-upload staging and replay, with reconnectable progress.
 
 Exit criteria:
 
 - [x] Warm gallery navigation reuses cached media without database work.
 - [x] Viewer bandwidth is bounded by preview size unless the original is requested.
-- [ ] All imports survive restart without duplicate rows or lost progress. Filesystem and
-  Steam imports are covered; browser uploads still require durable body staging.
+- [x] All background imports survive restart without duplicate rows or lost progress.
+  Synchronous Sync CLI uploads remain caller-retryable and content-hash idempotent.
 
 ## P1: Collections
 

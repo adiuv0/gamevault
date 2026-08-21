@@ -163,6 +163,7 @@ After tone-mapping, the linear-ish output is encoded with the sRGB OETF
 ├── gamevault.db-wal                                 # WAL log
 ├── gamevault.db-shm                                 # WAL shared memory
 ├── .secret_key                                      # auto-generated JWT key
+├── upload-staging/                                  # active browser-upload jobs
 ├── library/                                         # GAMEVAULT_LIBRARY_DIR
 │   ├── Cyberpunk 2077/
 │   │   ├── screenshots/
@@ -186,6 +187,9 @@ The `screenshots/` directory holds the **original** files at their native
 format and resolution. `GAMEVAULT_THUMBNAIL_DIR` holds disposable SDR JPEG
 derivatives shown in the UI. HDR JXR/PNG screenshots are downloaded from
 the gallery as the original file via `GET /api/screenshots/{id}/image`.
+`upload-staging/` contains only active browser uploads; completed and failed
+jobs clean their staging directories automatically. Keep it with the database
+when moving or restoring an installation that may have pending uploads.
 
 ---
 
@@ -227,6 +231,7 @@ Current migrations:
 - `m008_duplicate_review` — adds duplicate review and maintenance jobs
 - `m009_preview_cache` — tracks generated large-preview state
 - `m010_durable_import_jobs` — adds the encrypted Steam and Special K job queue
+- `m011_durable_upload_jobs` — adds browser-upload jobs and per-file replay state
 
 To add a new migration: create `mNNN_<name>.py` with an
 `async upgrade(db)` function and append it to `MIGRATIONS` in

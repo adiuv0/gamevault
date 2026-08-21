@@ -22,6 +22,7 @@ _POLL_SECONDS = 1.0
 
 _worker_task: asyncio.Task | None = None
 _worker_wakeup: asyncio.Event | None = None
+_prefer_upload = True
 
 
 def _payload_key() -> bytes:
@@ -92,9 +93,14 @@ async def _create_session_job(
         await db.rollback()
         raise
 
+    wake_import_worker()
+    return session_id
+
+
+def wake_import_worker() -> None:
+    """Wake the shared durable-work loop after any job type is queued."""
     if _worker_wakeup is not None:
         _worker_wakeup.set()
-    return session_id
 
 
 async def recover_interrupted_jobs() -> int:
@@ -299,13 +305,33 @@ def terminal_progress_event(session: dict[str, Any]) -> tuple[str, dict[str, Any
 async def _worker_loop() -> None:
     assert _worker_wakeup is not None
     while True:
-        if await run_next_import_job():
+        if await _run_next_durable_job():
             continue
         _worker_wakeup.clear()
         try:
             await asyncio.wait_for(_worker_wakeup.wait(), timeout=_POLL_SECONDS)
         except TimeoutError:
             pass
+
+
+async def _run_next_durable_job() -> bool:
+    """Alternate job types so a long import queue cannot starve browser uploads."""
+    global _prefer_upload
+    from backend.services.upload_job_service import run_next_upload_job
+
+    if _prefer_upload:
+        if await run_next_upload_job():
+            _prefer_upload = False
+            return True
+        if await run_next_import_job():
+            return True
+    else:
+        if await run_next_import_job():
+            _prefer_upload = True
+            return True
+        if await run_next_upload_job():
+            return True
+    return False
 
 
 async def start_import_worker() -> asyncio.Task:
@@ -315,6 +341,9 @@ async def start_import_worker() -> asyncio.Task:
         return _worker_task
     _worker_wakeup = asyncio.Event()
     await recover_interrupted_jobs()
+    from backend.services.upload_job_service import recover_interrupted_upload_jobs
+
+    await recover_interrupted_upload_jobs()
     _worker_task = asyncio.create_task(_worker_loop(), name="gamevault-import-worker")
     return _worker_task
 

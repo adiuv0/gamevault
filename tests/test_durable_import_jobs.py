@@ -231,7 +231,8 @@ async def test_durable_import_migration_is_registered(durable_import_db):
     from backend.migrations.runner import MIGRATIONS
 
     db, _ = durable_import_db
-    assert MIGRATIONS[-1] == "backend.migrations.m010_durable_import_jobs"
+    assert "backend.migrations.m010_durable_import_jobs" in MIGRATIONS
+    assert MIGRATIONS[-1] == "backend.migrations.m011_durable_upload_jobs"
     cursor = await db.execute("PRAGMA table_info(import_jobs)")
     columns = {row[1] for row in await cursor.fetchall()}
     assert {"kind", "session_id", "payload_encrypted", "status", "attempts"} <= columns

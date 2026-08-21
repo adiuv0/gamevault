@@ -550,6 +550,18 @@ async def get_annotation(screenshot_id: int) -> dict | None:
     return dict(zip(columns, row))
 
 
+async def get_screenshot_by_source_key(game_id: int, source_key: str) -> dict | None:
+    """Find an idempotent import result by its stable source identity."""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT id FROM screenshots
+           WHERE game_id = ? AND source_key = ? ORDER BY id LIMIT 1""",
+        (game_id, source_key),
+    )
+    row = await cursor.fetchone()
+    return await get_screenshot(row[0]) if row else None
+
+
 async def save_annotation(screenshot_id: int, content: str, content_html: str | None = None) -> dict:
     """Create or update the annotation for a logical capture."""
     db = await get_db()

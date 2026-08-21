@@ -107,6 +107,11 @@ The Upload page (`/upload`) accepts drag-and-drop or click-to-browse.
 Select a destination game, drop in files, and progress streams back over
 Server-Sent Events.
 
+After the upload request returns, the files are staged under GameVault's data
+directory and processing survives a container or application restart. The page
+reconnects to a database-backed progress snapshot automatically. An interrupted
+request that never returned a task ID may need to be submitted again.
+
 **Allowed formats:** JPEG, PNG, WebP, BMP, TIFF, GIF, JXR.
 
 **Per-file limit:** 50 MB by default (configurable via

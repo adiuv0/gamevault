@@ -8,6 +8,7 @@ import type { UploadFileStatus } from '@/components/upload/UploadItem';
 
 interface SSEEvent {
   type: string;
+  status?: string;
   filename?: string;
   file_index?: number;
   current?: number;
@@ -15,6 +16,11 @@ interface SSEEvent {
   total_files?: number;
   error?: string;
   reason?: string;
+  files?: Array<{
+    file_index: number;
+    status: 'pending' | 'processing' | 'completed' | 'skipped' | 'failed';
+    error_message?: string | null;
+  }>;
 }
 
 export function UploadPage() {
@@ -74,51 +80,64 @@ export function UploadPage() {
       const es = connectUploadProgress(result.task_id, (data) => {
         const event = data as SSEEvent;
 
-        if (event.type === 'file_start' && event.file_index !== undefined) {
+        const updateItem = (
+          items: UploadFileStatus[],
+          fileIndex: number,
+          status: UploadFileStatus['status'],
+          error?: string,
+        ) => {
+          const batchItem = pendingItems[fileIndex];
+          const targetIndex = batchItem
+            ? items.findIndex((item) => item.file === batchItem.file)
+            : -1;
+          if (targetIndex >= 0) {
+            items[targetIndex] = {
+              ...items[targetIndex],
+              status,
+              progress: status === 'uploading' ? items[targetIndex].progress : 100,
+              error,
+            };
+          }
+        };
+
+        if (event.type === 'snapshot' && event.files) {
           setUploadItems((prev) => {
             const items = [...prev];
-            const pendingIndices = items.reduce<number[]>((acc, item, idx) => {
-              if (item.status === 'uploading' || item.status === 'processing') acc.push(idx);
-              return acc;
-            }, []);
-            const targetIdx = pendingIndices[event.file_index!];
-            if (targetIdx !== undefined) {
-              items[targetIdx] = { ...items[targetIdx], status: 'processing' as const, progress: 100 };
+            for (const file of event.files!) {
+              const status = file.status === 'completed' || file.status === 'skipped'
+                ? 'complete'
+                : file.status === 'failed'
+                  ? 'error'
+                  : 'processing';
+              updateItem(items, file.file_index, status, file.error_message ?? undefined);
             }
+            return items;
+          });
+          if (['completed', 'failed', 'cancelled'].includes(event.status ?? '')) {
+            setIsUploading(false);
+          }
+        } else if (event.type === 'file_start' && event.file_index !== undefined) {
+          setUploadItems((prev) => {
+            const items = [...prev];
+            updateItem(items, event.file_index!, 'processing');
             return items;
           });
         } else if (event.type === 'file_complete' && event.file_index !== undefined) {
           setUploadItems((prev) => {
             const items = [...prev];
-            // Find the item that is 'processing' or 'uploading' at this logical index
-            const matchable = items.filter((i) => i.status === 'processing' || i.status === 'uploading');
-            const target = matchable[0]; // Process in order
-            if (target) {
-              const realIdx = items.indexOf(target);
-              items[realIdx] = { ...items[realIdx], status: 'complete' as const };
-            }
+            updateItem(items, event.file_index!, 'complete');
             return items;
           });
-        } else if (event.type === 'file_error') {
+        } else if (event.type === 'file_error' && event.file_index !== undefined) {
           setUploadItems((prev) => {
             const items = [...prev];
-            const matchable = items.filter((i) => i.status === 'processing' || i.status === 'uploading');
-            const target = matchable[0];
-            if (target) {
-              const realIdx = items.indexOf(target);
-              items[realIdx] = { ...items[realIdx], status: 'error' as const, error: event.error };
-            }
+            updateItem(items, event.file_index!, 'error', event.error);
             return items;
           });
-        } else if (event.type === 'file_skipped') {
+        } else if (event.type === 'file_skipped' && event.file_index !== undefined) {
           setUploadItems((prev) => {
             const items = [...prev];
-            const matchable = items.filter((i) => i.status === 'processing' || i.status === 'uploading');
-            const target = matchable[0];
-            if (target) {
-              const realIdx = items.indexOf(target);
-              items[realIdx] = { ...items[realIdx], status: 'complete' as const };
-            }
+            updateItem(items, event.file_index!, 'complete');
             return items;
           });
         } else if (event.type === 'complete') {
@@ -133,8 +152,6 @@ export function UploadPage() {
           setIsUploading(false);
           es.close();
         }
-      }, () => {
-        setIsUploading(false);
       });
     } catch {
       setUploadItems((prev) =>

@@ -24,6 +24,7 @@ from backend.services.performance_diagnostics import recorder
 from backend.services.screenshot_service import (
     check_duplicate_hash,
     create_screenshot,
+    get_screenshot_by_source_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,8 +112,11 @@ def _ensure_unique_filename(directory: Path, filename: str) -> str:
 async def process_upload(
     task_id: str,
     game_id: int,
-    temp_files: list[tuple[str, Path]],  # [(original_filename, temp_path), ...]
+    temp_files: list[tuple[int, str, Path]],
     taken_at_override: str | None = None,
+    *,
+    durable: bool = False,
+    emit_complete: bool = True,
 ) -> list[dict]:
     """Process uploaded files: validate, extract metadata, save, create DB records.
 
@@ -120,6 +124,8 @@ async def process_upload(
     """
     game = await get_game(game_id)
     if not game:
+        if durable:
+            raise ValueError(f"Game ID {game_id} not found")
         logger.error("process_upload: game_id=%d not found", game_id)
         await emit_progress(task_id, {
             "type": "error",
@@ -137,19 +143,27 @@ async def process_upload(
     logger.info("process_upload: game=%s (%d), %d files, dir=%s",
                 game["name"], game_id, total, screenshots_dir)
 
-    await emit_progress(task_id, {
+    async def report(event: dict) -> None:
+        if durable:
+            from backend.services.upload_job_service import record_upload_event
+
+            await record_upload_event(task_id, event)
+        await emit_progress(task_id, event)
+
+    await report({
         "type": "start",
         "total_files": total,
         "game_name": game["name"],
     })
 
-    for i, (original_name, temp_path) in enumerate(temp_files):
+    for position, (file_index, original_name, temp_path) in enumerate(temp_files):
         file_started = perf_counter()
         file_failed = False
+        file_terminal = False
         try:
-            await emit_progress(task_id, {
+            await report({
                 "type": "file_start",
-                "file_index": i,
+                "file_index": file_index,
                 "filename": original_name,
                 "total_files": total,
             })
@@ -158,24 +172,26 @@ async def process_upload(
             if not await asyncio.to_thread(validate_image, temp_path):
                 logger.warning("process_upload: INVALID IMAGE %s (size=%d)",
                                original_name, temp_path.stat().st_size if temp_path.exists() else -1)
-                await emit_progress(task_id, {
+                await report({
                     "type": "file_error",
-                    "file_index": i,
+                    "file_index": file_index,
                     "filename": original_name,
                     "error": "Not a valid image file",
                 })
+                file_terminal = True
                 continue
 
             # Determine real format from magic bytes and enforce whitelist.
             # This prevents Stored XSS via malicious extensions (e.g. .html).
             detected_format = (await asyncio.to_thread(get_image_format, temp_path) or "").lower()
             if detected_format not in ALLOWED_IMAGE_FORMATS:
-                await emit_progress(task_id, {
+                await report({
                     "type": "file_error",
-                    "file_index": i,
+                    "file_index": file_index,
                     "filename": original_name,
                     "error": f"Unsupported image format: {detected_format or 'unknown'}",
                 })
+                file_terminal = True
                 continue
             ext = ALLOWED_IMAGE_FORMATS[detected_format]
 
@@ -196,17 +212,34 @@ async def process_upload(
                 "taken_at": date_taken_exif.isoformat() if date_taken_exif else None,
             }
 
+            source_key = f"upload:{task_id}:{file_index}"
+            if durable:
+                existing_source = await get_screenshot_by_source_key(game_id, source_key)
+                if existing_source:
+                    results.append(existing_source)
+                    await report({
+                        "type": "file_complete",
+                        "file_index": file_index,
+                        "filename": existing_source["filename"],
+                        "screenshot_id": existing_source["id"],
+                        "total_files": total,
+                        "completed": position + 1,
+                    })
+                    file_terminal = True
+                    continue
+
             # Check for duplicates by hash BEFORE generating thumbnails
             dup = await check_duplicate_hash(img_data["sha256_hash"])
             if dup:
                 logger.info("process_upload: DUPLICATE %s (hash=%s, dup_of=%s)",
                             original_name, img_data["sha256_hash"][:12], dup['filename'])
-                await emit_progress(task_id, {
+                await report({
                     "type": "file_skipped",
-                    "file_index": i,
+                    "file_index": file_index,
                     "filename": original_name,
                     "reason": f"Duplicate of {dup['filename']}",
                 })
+                file_terminal = True
                 continue
 
             # Determine taken_at
@@ -221,10 +254,28 @@ async def process_upload(
 
             # Generate final filename and save
             filename = _generate_filename(game["name"], taken_at, ext)
-            filename = _ensure_unique_filename(screenshots_dir, filename)
+            if durable:
+                from backend.services.upload_job_service import (
+                    get_reserved_target,
+                    reserve_target,
+                )
+
+                reserved = await get_reserved_target(task_id, file_index)
+                if reserved is None:
+                    filename = _ensure_unique_filename(screenshots_dir, filename)
+                    filename = await reserve_target(task_id, file_index, filename)
+                else:
+                    filename = reserved
+            else:
+                filename = _ensure_unique_filename(screenshots_dir, filename)
             final_path = screenshots_dir / filename
 
-            await asyncio.to_thread(shutil.copy2, str(temp_path), str(final_path))
+            if final_path.exists():
+                existing_hash = await asyncio.to_thread(compute_sha256, final_path)
+                if not durable or existing_hash != sha256:
+                    raise FileExistsError(f"Upload destination already exists: {filename}")
+            else:
+                await asyncio.to_thread(shutil.copy2, str(temp_path), str(final_path))
             logger.info("process_upload: SAVED %s -> %s (%d bytes)",
                         original_name, final_path, final_path.stat().st_size)
 
@@ -254,29 +305,31 @@ async def process_upload(
                 sha256_hash=img_data.get("sha256_hash"),
                 exif_data=img_data.get("exif_data"),
                 perceptual_hash=perceptual_hash,
-                source_key=f"upload:{task_id}:{Path(original_name).stem.casefold()}",
+                source_key=source_key,
             )
 
             results.append(screenshot)
 
-            await emit_progress(task_id, {
+            await report({
                 "type": "file_complete",
-                "file_index": i,
+                "file_index": file_index,
                 "filename": filename,
                 "screenshot_id": screenshot["id"],
                 "total_files": total,
-                "completed": i + 1,
+                "completed": position + 1,
             })
+            file_terminal = True
 
         except Exception as e:
             file_failed = True
             logger.exception("process_upload: EXCEPTION for %s", original_name)
-            await emit_progress(task_id, {
+            await report({
                 "type": "file_error",
-                "file_index": i,
+                "file_index": file_index,
                 "filename": original_name,
                 "error": str(e),
             })
+            file_terminal = True
         finally:
             recorder.record(
                 "import",
@@ -285,19 +338,20 @@ async def process_upload(
                 threshold_ms=5000,
                 error=file_failed,
             )
-            # Clean up temp file
-            try:
-                temp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
+            if not durable or file_terminal:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     if results:
         await update_screenshot_stats(game_id)
 
-    await emit_progress(task_id, {
-        "type": "complete",
-        "total_processed": len(results),
-        "total_files": total,
-    })
+    if emit_complete:
+        await report({
+            "type": "complete",
+            "total_processed": len(results),
+            "total_files": total,
+        })
 
     return results

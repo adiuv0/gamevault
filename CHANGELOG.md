@@ -36,6 +36,9 @@ closing the entire 14-finding security audit
 - Restart-safe Steam and Special K imports backed by an encrypted SQLite job queue.
   Interrupted jobs resume on startup, terminal progress remains available after restart,
   and completed or cancelled jobs discard their encrypted payloads.
+- Restart-safe browser uploads with persistent request-body staging, per-file replay
+  state, idempotent recovery across both file-copy/database commit windows, and
+  reconnectable progress snapshots.
 - GitHub Actions CI for backend tests, frontend lint/build, and the Docker image.
 - **Game merge.** Game admin page now has a "Merge" button that opens a
   modal listing every other game, lets you pick a target, and moves all

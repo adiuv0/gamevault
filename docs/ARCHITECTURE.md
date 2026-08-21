@@ -251,11 +251,16 @@ detail-page HTML when not available via API.
 
 Three import/upload flows stream progress to the client. Steam and Special K
 first create a session and encrypted job payload in one SQLite transaction.
-[`import_job_service.py`](../backend/services/import_job_service.py) runs those
-jobs through one in-process worker and returns interrupted work to `pending` on
-startup. Import logic is idempotent by source ID or content hash, and Special K
-also adopts an identical destination file left behind by a crash before the
-database row was committed.
+Browser uploads stream request bodies into `/data/upload-staging`, atomically
+activate the staging directory, then commit the job and per-file state before
+returning a task ID. [`import_job_service.py`](../backend/services/import_job_service.py)
+runs both job types through one fair in-process worker and returns interrupted
+work to `pending` on startup.
+
+Import logic is idempotent by source ID or content hash. Special K and browser
+uploads also reserve their destination filename before copying and adopt an
+identical destination or screenshot row left behind by a crash in either commit
+window.
 
 Live progress uses a shared pattern:
 
@@ -267,11 +272,11 @@ Live progress uses a shared pattern:
 4. Cancellation is a separate `dict[int, bool]` flag the service polls
    between batches
 
-The event queues and cancellation flags remain process-local. Session counters
-and job state are durable, so reconnecting to a terminal session after restart
-returns a synthesized terminal event followed by `done`. Browser uploads are
-still request-bound because their temporary request bodies are not durably
-staged.
+The event queues and cancellation flags remain process-local. Session counters,
+upload file state, and job state are durable. Reconnecting after restart first
+receives a database-backed snapshot, followed by live events or the terminal
+event. Upload staging is removed only after every file reaches a terminal state;
+incomplete request bodies that never returned a task ID are cleaned on startup.
 
 This is intentionally simple — no Redis, no broker. The single worker matches
 the single-instance, single-user deployment model. A multi-instance deployment

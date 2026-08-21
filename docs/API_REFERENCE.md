@@ -273,6 +273,12 @@ Multipart form upload. Fields:
 Returns `{ "task_id": "<uuid>", "file_count": N }`. Use the task_id with
 `/api/upload/progress/<task_id>` to stream per-file progress over SSE.
 
+The response is returned only after the request bodies are durably staged and the
+job is committed. Once a task ID has been returned, processing resumes after an
+application restart without duplicating committed screenshots. Staging lives under
+`GAMEVAULT_DATA_DIR/upload-staging` and is removed when the job reaches a terminal
+state.
+
 Rejects files larger than `GAMEVAULT_MAX_UPLOAD_SIZE_MB` with HTTP 413.
 
 **Format whitelist** (matched against magic bytes, not extension): JPEG,
@@ -283,11 +289,19 @@ PNG, WebP, BMP, TIFF, GIF, JXR.
 Same shape as `POST /api/upload` but processes inline and returns the
 final result synchronously: `{ "uploaded": N, "screenshots": [...] }`.
 Used by the Sync CLI which needs to know each upload's outcome
-immediately. No SSE.
+immediately. No SSE. This endpoint is request-bound; callers can safely retry
+after a connection failure because duplicate content hashes are skipped.
+
+### `GET /api/upload/jobs/{task_id}`
+
+Returns the durable job snapshot, including aggregate counts and per-file status.
+Storage paths and reserved destination filenames are not exposed.
 
 ### `GET /api/upload/progress/{task_id}` — *SSE*
 
-Stream of `{type, ...}` JSON events. Event types: `start`, `file_start`,
+Stream of `{type, ...}` JSON events. The first event is a `snapshot` rebuilt from
+durable state, so reconnecting after a restart does not lose progress. Other event
+types are `start`, `file_start`,
 `file_complete`, `file_skipped`, `file_error`, `complete`, `keepalive`.
 
 ---
@@ -701,4 +715,5 @@ new EventSource(url);
 ```
 
 When you receive the `done` event (Steam/Special K) or a `complete` event
-(upload), close the EventSource.
+(upload), close the EventSource. Upload clients should also apply the initial
+`snapshot` before listening for incremental file events.

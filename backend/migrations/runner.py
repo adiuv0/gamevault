@@ -20,6 +20,7 @@ MIGRATIONS = [
     "backend.migrations.m008_duplicate_review",
     "backend.migrations.m009_preview_cache",
     "backend.migrations.m010_durable_import_jobs",
+    "backend.migrations.m011_durable_upload_jobs",
 ]
 
 
