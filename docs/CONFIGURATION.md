@@ -195,7 +195,38 @@ when moving or restoring an installation that may have pending uploads.
 
 ## Backups
 
-Everything that matters lives under `GAMEVAULT_DATA_DIR`. To back up:
+### Live state snapshot
+
+GameVault can safely snapshot its database while the container is running:
+
+```bash
+docker exec gamevault python -m backend.backup create /data/backups
+docker exec gamevault python -m backend.backup verify /data/backups/<bundle-name>
+```
+
+The command uses SQLite's online backup API, so all committed transactions in an
+active WAL are included in one standalone `gamevault.db`. It verifies SQLite
+integrity, foreign keys, migration metadata, and SHA-256 checksums before atomically
+publishing the bundle. The effective secret key is included so pending encrypted
+imports and authentication state remain recoverable.
+
+State bundles are sensitive: the database can contain password hashes, API keys,
+share links, annotations, and encrypted pending-import payloads, and the bundle also
+contains the signing/encryption key. Store them with the same care as the live data.
+
+A state bundle deliberately excludes:
+
+- Original screenshots and covers under `GAMEVAULT_LIBRARY_DIR`
+- Generated previews under `GAMEVAULT_THUMBNAIL_DIR`
+- Browser-upload bodies under `upload-staging/`
+
+Creation is refused when the database snapshot contains an unfinished browser
+upload. Wait for the upload to finish and retry.
+
+### Complete backup
+
+For a point-in-time copy that includes irreplaceable originals, stop GameVault and
+copy the entire data and separately mounted library paths:
 
 ```bash
 docker stop gamevault
@@ -203,12 +234,11 @@ cp -r /mnt/user/appdata/gamevault /mnt/user/backups/gamevault-$(date +%Y%m%d)
 docker start gamevault
 ```
 
-WAL mode means hot copies are usually safe, but stopping is safer. The
-database file (`gamevault.db` plus `-wal` and `-shm` siblings during
-operation), all images, and the secret key are all in `DATA_DIR`.
+If `GAMEVAULT_LIBRARY_DIR` points outside `GAMEVAULT_DATA_DIR`, back up that path too.
+Do not copy only `gamevault.db` while the container is running: committed data may
+still reside in `gamevault.db-wal`.
 
-To restore: stop GameVault, copy the backup tree to `GAMEVAULT_DATA_DIR`,
-start GameVault. No migrations or extra steps.
+Restore and rollback procedures are in [MIGRATIONS.md](MIGRATIONS.md).
 
 ---
 

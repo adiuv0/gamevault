@@ -106,6 +106,7 @@ Cross-cutting helpers:
 - [`services/image_processor.py`](../backend/services/image_processor.py) — Pillow-based hash, EXIF, dimensions, and display-derivative generation. Routes HDR sources through `hdr_processor`.
 - [`services/hdr_processor.py`](../backend/services/hdr_processor.py) — JXR magic detection + decode (lazy `imagecodecs`), 16-bit PNG decode, Reinhard/ACES/clip tone-map, sRGB OETF.
 - [`services/preview_service.py`](../backend/services/preview_service.py) — durable, resumable preview-cache audits and backfill.
+- [`services/backup_service.py`](../backend/services/backup_service.py) — verified SQLite online backups that include committed WAL state without modifying originals.
 - [`services/performance_diagnostics.py`](../backend/services/performance_diagnostics.py) — bounded runtime timing aggregates and media-stream instrumentation.
 
 ### Authentication flow

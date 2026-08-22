@@ -152,16 +152,31 @@ The importer handles:
 
 ## Data & Backups
 
-Everything is in the `/data` volume. To back up:
+Original screenshots and application state normally live in the `/data` volume.
+
+For a verified live snapshot of the database and effective secret key:
 
 ```bash
-# Stop the container first for a consistent backup
+docker exec gamevault python -m backend.backup create /data/backups
+docker exec gamevault python -m backend.backup verify /data/backups/<bundle-name>
+```
+
+This uses SQLite's online backup API, includes committed WAL data, and does not
+modify the source database. It intentionally excludes original images, generated
+previews, and upload staging. The command refuses to publish a snapshot while a
+browser upload is unfinished.
+
+For a complete backup including irreplaceable originals, stop the container and
+copy the whole data volume:
+
+```bash
 docker stop gamevault
 cp -r ./data ./data-backup-$(date +%Y%m%d)
 docker start gamevault
 ```
 
-The SQLite database uses WAL mode, so it's safe to copy while running if you need hot backups — but stopping first is safer.
+Do not copy `gamevault.db` by itself while the app is running. See
+[Migration and Recovery Notes](docs/MIGRATIONS.md) for restoration and rollback.
 
 ## Building from Source
 

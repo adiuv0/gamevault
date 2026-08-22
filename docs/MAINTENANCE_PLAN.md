@@ -80,11 +80,14 @@ Acceptance criteria:
 
 ## Phase 4: Release And Recovery
 
-- Add migration tests for upgrades from every supported release.
-- Exercise backup and restore against databases with active WAL files.
+Status: In progress. Verified online state backups, active-WAL restoration, the supported
+`0.1.0` migration fixture, version guards, and rollback notes are implemented.
+
+- [x] Add migration tests for upgrades from every supported release.
+- [x] Exercise backup and restore against databases with active WAL files.
 - Add dependency and container vulnerability checks to CI.
-- Synchronize application, API, package, and documentation versions.
-- Publish migration notes and rollback instructions with each schema release.
+- [x] Synchronize application, API, package, and documentation versions.
+- [x] Publish migration notes and rollback instructions with each schema release.
 
 ## Maintainer Rules
 

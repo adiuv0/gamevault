@@ -39,6 +39,11 @@ closing the entire 14-finding security audit
 - Restart-safe browser uploads with persistent request-body staging, per-file replay
   state, idempotent recovery across both file-copy/database commit windows, and
   reconnectable progress snapshots.
+- Verified live state-backup CLI (`python -m backend.backup`) using SQLite's online
+  backup API. Bundles include committed WAL state and the effective secret key, reject
+  active browser uploads, verify checksums/integrity/foreign keys, and publish atomically.
+- Release-recovery coverage for `0.1.0` database upgrades, active-WAL restore, tamper
+  detection, and synchronized application/package/UI/API versions.
 - GitHub Actions CI for backend tests, frontend lint/build, and the Docker image.
 - **Game merge.** Game admin page now has a "Merge" button that opens a
   modal listing every other game, lets you pick a target, and moves all
@@ -189,6 +194,7 @@ Run automatically on container startup:
 | `m008_duplicate_review` | Adds durable maintenance jobs and duplicate review candidates |
 | `m009_preview_cache` | Tracks disposable browser-friendly large previews |
 | `m010_durable_import_jobs` | Adds the encrypted, restart-safe Steam and Special K job queue |
+| `m011_durable_upload_jobs` | Adds restart-safe browser-upload staging and replay state |
 
 ## [0.1.0] - 2026-02-11
 

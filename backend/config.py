@@ -5,12 +5,14 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+DEFAULT_SECRET_SENTINEL = "change-me-to-a-random-string"
+
 
 class Settings(BaseSettings):
     """GameVault application settings loaded from environment variables."""
 
     # Required
-    secret_key: str = "change-me-to-a-random-string"
+    secret_key: str = DEFAULT_SECRET_SENTINEL
 
     # Public URL for share links
     base_url: str = "http://localhost:8080"

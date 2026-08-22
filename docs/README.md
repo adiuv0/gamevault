@@ -42,6 +42,10 @@ known constraints. Read this before forking or contributing.
 version bump, git tag, Docker build, Docker Hub push (single-arch and
 multi-arch with buildx), and rollback procedure.
 
+[**MIGRATIONS.md**](MIGRATIONS.md) — supported database upgrade paths,
+verified live state backups, full-original backup boundaries, restoration,
+and conservative release rollback.
+
 ## For Special K users specifically
 
 The relevant sections across the docs:

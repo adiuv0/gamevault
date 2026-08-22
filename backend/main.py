@@ -20,10 +20,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from backend.config import settings
+from backend.config import DEFAULT_SECRET_SENTINEL, settings
 from backend.database import close_db, init_db
 from backend.services.import_job_service import start_import_worker, stop_import_worker
 from backend.services.performance_diagnostics import MediaTimingMiddleware
+from backend.version import APP_VERSION
 
 # ── Per-context Content-Security-Policy strings ──────────────────────────────
 #
@@ -101,9 +102,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SECRET_SENTINEL = "change-me-to-a-random-string"
-
-
 def _ensure_secret_key() -> None:
     """Auto-generate a persistent secret key if the user hasn't set one."""
     if settings.secret_key != DEFAULT_SECRET_SENTINEL:
@@ -171,7 +169,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GameVault",
     description="Self-hosted game screenshot manager",
-    version="0.1.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -212,7 +210,7 @@ app.include_router(duplicates.router)
 # Health check (public, no auth)
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "ok", "version": APP_VERSION}
 
 
 # Serve frontend static files (production build)
