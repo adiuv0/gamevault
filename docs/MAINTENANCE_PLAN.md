@@ -81,8 +81,8 @@ Acceptance criteria:
 ## Phase 4: Release And Recovery
 
 Status: Complete. Verified online state backups, active-WAL restoration, the supported
-`0.1.0` migration fixture, version guards, rollback notes, and scheduled vulnerability
-checks are implemented.
+`0.1.0` through Docker `0.3.1` migration fixtures, version guards, rollback notes,
+and scheduled vulnerability checks are implemented.
 
 - [x] Add migration tests for upgrades from every supported release.
 - [x] Exercise backup and restore against databases with active WAL files.

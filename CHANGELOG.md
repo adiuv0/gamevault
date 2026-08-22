@@ -7,10 +7,15 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
-Targeted as `0.2.0`. The big themes are HDR / Special K support and
-closing the entire 14-finding security audit
-(`docs/SECURITY_AUDIT_2026-04-27.md`). Existing installs upgrade in place
-— migrations run automatically on container start.
+## [1.0.0] - 2026-08-22
+
+GameVault 1.0 is the first Git-tagged release. Docker `0.2.0`, `0.3.0`, and
+`0.3.1` were published without matching Git tags or changelog cuts, so this section
+preserves the cumulative development record from `0.1.0`. Compared with Docker
+`0.3.1`, the major additions are logical duplicate handling, large-library scaling,
+restart-safe imports and uploads, verified recovery backups, and continuous security
+scanning. Existing installs upgrade in place; migrations run automatically on startup
+and never delete original screenshot files.
 
 ### Added
 
@@ -42,8 +47,8 @@ closing the entire 14-finding security audit
 - Verified live state-backup CLI (`python -m backend.backup`) using SQLite's online
   backup API. Bundles include committed WAL state and the effective secret key, reject
   active browser uploads, verify checksums/integrity/foreign keys, and publish atomically.
-- Release-recovery coverage for `0.1.0` database upgrades, active-WAL restore, tamper
-  detection, and synchronized application/package/UI/API versions.
+- Release-recovery coverage for every published schema from `0.1.0` through Docker
+  `0.3.1`, active-WAL restore, tamper detection, and synchronized versions.
 - GitHub Actions CI for backend tests, frontend lint/build, and the Docker image, plus
   Python/npm dependency audits and a fixable high/critical container vulnerability gate.
   The full workflow also runs weekly so newly published advisories are detected.
@@ -117,6 +122,8 @@ closing the entire 14-finding security audit
 - Vulnerable Python and npm dependencies were upgraded to fixed releases. JWT handling
   moved from `python-jose` to compatible HS256 tokens from PyJWT, removing an affected
   transitive ECDSA package that had no patched release.
+- Production image builds apply available Debian base-image security updates before
+  installing runtime dependencies; the release image must pass the container gate.
 - SQL `ORDER BY` fragments lifted from inline dict literals to
   module-level allowlist constants (`GAME_SORT_CLAUSES`,
   `SCREENSHOT_SORT_CLAUSES`, `SEARCH_SORT_CLAUSES`,
@@ -200,6 +207,20 @@ Run automatically on container startup:
 | `m009_preview_cache` | Tracks disposable browser-friendly large previews |
 | `m010_durable_import_jobs` | Adds the encrypted, restart-safe Steam and Special K job queue |
 | `m011_durable_upload_jobs` | Adds restart-safe browser-upload staging and replay state |
+
+## [0.3.1] - 2026-05-01
+
+Docker-only release. Added game merge and the HDR/SDR gallery variant toggle.
+
+## [0.3.0] - 2026-04-30
+
+Docker-only release. Closed the 14-finding security audit, cached HDR tone-map
+settings, and removed the unused placeholder tag tables.
+
+## [0.2.0] - 2026-04-27
+
+Docker-only release. Added HDR/JXR processing, Special K imports, the dual-source
+sync CLI, and the initial documentation set.
 
 ## [0.1.0] - 2026-02-11
 

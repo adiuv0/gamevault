@@ -19,6 +19,9 @@ from backend.migrations.runner import MIGRATIONS, run_migrations
 
 SUPPORTED_RELEASE_SCHEMAS = {
     "0.1.0": MIGRATIONS[:2],
+    "0.2.0": MIGRATIONS[:3],
+    "0.3.0": MIGRATIONS[:5],
+    "0.3.1": MIGRATIONS[:5],
 }
 
 
@@ -269,10 +272,15 @@ async def test_supported_release_database_upgrades_to_current_without_data_loss(
             ),
         )
         screenshot_id = cursor.lastrowid
+        annotation_html = (
+            "<p>kept</p>"
+            if "backend.migrations.m004_resanitize_annotations" in release_migrations
+            else "<script>alert(1)</script>"
+        )
         await db.execute(
             """INSERT INTO annotations (screenshot_id, content, content_html)
                VALUES (?, ?, ?)""",
-            (screenshot_id, "<script>alert(1)</script>kept", "<script>alert(1)</script>"),
+            (screenshot_id, "<script>alert(1)</script>kept", annotation_html),
         )
         await db.execute(
             "INSERT INTO app_settings (key, value) VALUES (?, ?)",
@@ -331,6 +339,12 @@ async def test_release_version_surfaces_stay_synchronized():
 
     root = Path(__file__).parents[1]
     package = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    frontend_package = json.loads(
+        (root / "frontend/package.json").read_text(encoding="utf-8")
+    )
+    frontend_lock = json.loads(
+        (root / "frontend/package-lock.json").read_text(encoding="utf-8")
+    )
     sidebar = (root / "frontend/src/components/layout/Sidebar.tsx").read_text(
         encoding="utf-8"
     )
@@ -339,7 +353,10 @@ async def test_release_version_surfaces_stay_synchronized():
     stable_releases = set(re.findall(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE))
 
     assert package["project"]["version"] == APP_VERSION
-    assert set(SUPPORTED_RELEASE_SCHEMAS) == stable_releases
+    assert frontend_package["version"] == APP_VERSION
+    assert frontend_lock["version"] == APP_VERSION
+    assert frontend_lock["packages"][""]["version"] == APP_VERSION
+    assert set(SUPPORTED_RELEASE_SCHEMAS) == stable_releases - {APP_VERSION}
     assert app.version == APP_VERSION
     assert await health() == {"status": "ok", "version": APP_VERSION}
     assert f"GameVault v{APP_VERSION}" in sidebar

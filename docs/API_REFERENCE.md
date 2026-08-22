@@ -76,7 +76,7 @@ must be at least 6 chars.
 
 ### `GET /api/health` — *public*
 
-Returns `{ "status": "ok", "version": "0.1.0" }`. Used by Docker
+Returns `{ "status": "ok", "version": "1.0.0" }`. Used by Docker
 HEALTHCHECK.
 
 ### `GET /api/settings/health` — *auth required*

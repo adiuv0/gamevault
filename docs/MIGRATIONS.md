@@ -7,25 +7,28 @@ rollback procedures. Migrations run automatically when GameVault starts.
 
 | From | To | Database work | Verification |
 |---|---|---|---|
-| `0.1.0` | `0.2.0` (unreleased) | Applies `m003` through `m011` | Automated fixture preserves games, screenshots, annotations, settings, visibility, and foreign keys |
+| `0.1.0` | `1.0.0` | Applies `m003` through `m011` | Automated fixture preserves games, screenshots, annotations, settings, visibility, and foreign keys |
+| Docker `0.2.0` | `1.0.0` | Applies `m004` through `m011` | Automated fixture preserves the same state from the shipped schema |
+| Docker `0.3.0` / `0.3.1` | `1.0.0` | Applies `m006` through `m011` | Automated fixtures cover both published image tags |
 
-The `0.2.0` migrations add Special K sessions, sanitized annotations, gallery indexes,
-logical capture groups, duplicate review, viewer previews, and durable import/upload
-jobs. They do not rewrite or delete original screenshot files. `m005` removes only the
-unused placeholder tag tables that had no application feature attached to them.
+The `1.0.0` migrations add gallery indexes, logical capture groups, duplicate review,
+viewer previews, and durable import/upload jobs to Docker `0.3.1`. They do not rewrite
+or delete original screenshot files. Older upgrade paths also apply the prior Special K,
+annotation-sanitization, and unused-placeholder-table migrations as needed.
 
 ## Before Upgrading
 
 1. Let browser uploads finish.
-2. Create and verify a live state bundle:
+2. When upgrading from Docker `0.3.1` or earlier, stop the old container and take an
+   Unraid snapshot or cold copy of its appdata plus any separately mounted library path.
+   Those images do not contain the backup command introduced in `1.0.0`.
+3. For later releases, create and verify a live state bundle before upgrading:
 
 ```bash
 docker exec gamevault python -m backend.backup create /data/backups
 docker exec gamevault python -m backend.backup verify /data/backups/<bundle-name>
 ```
 
-3. For a fully point-in-time recovery set, stop the container and copy
-   `GAMEVAULT_DATA_DIR` plus any separately mounted `GAMEVAULT_LIBRARY_DIR`.
 4. Keep that pre-upgrade backup until the upgraded container has opened the library and
    completed its migrations successfully.
 

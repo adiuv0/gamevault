@@ -10,8 +10,8 @@ RUN npm run build
 FROM python:3.12-slim
 WORKDIR /app
 
-# System dependencies for Pillow image processing + lxml + gosu for privilege drop
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Apply base-image security updates, then install Pillow/lxml build deps and gosu.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libjpeg62-turbo-dev \
     libpng-dev \
     libwebp-dev \
