@@ -22,7 +22,7 @@ Self-hosted game screenshot manager. Import your Steam screenshots, upload manua
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS v4, Zustand |
 | Image Processing | Pillow, piexif |
 | Steam Scraping | httpx, BeautifulSoup4, lxml |
-| Auth | bcrypt, python-jose (JWT) |
+| Auth | bcrypt, PyJWT |
 | Container | Multi-stage Docker (Node alpine + Python slim) |
 
 ## Quick Start

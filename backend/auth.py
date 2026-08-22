@@ -5,8 +5,9 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
+import jwt
 from fastapi import HTTPException, Request
-from jose import JWTError, jwt
+from jwt import InvalidTokenError
 
 from backend.config import settings
 from backend.database import get_db
@@ -68,7 +69,7 @@ def create_access_token(expires_days: int | None = None) -> str:
 
 
 def decode_token(token: str) -> dict:
-    """Decode and validate a JWT token. Raises JWTError on failure."""
+    """Decode and validate a JWT token. Raises InvalidTokenError on failure."""
     return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
 
 
@@ -163,5 +164,5 @@ async def require_auth(request: Request) -> dict | None:
     try:
         payload = decode_token(token)
         return payload
-    except JWTError:
+    except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")

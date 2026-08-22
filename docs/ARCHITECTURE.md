@@ -16,7 +16,7 @@ configuration, see [CONFIGURATION.md](CONFIGURATION.md).
 | Image processing | Pillow (SDR), imagecodecs + numpy (HDR JXR) |
 | HTTP client | httpx (async) |
 | HTML parsing | BeautifulSoup + lxml |
-| Auth | bcrypt + python-jose (JWT) |
+| Auth | bcrypt + PyJWT |
 | Frontend | React 18 + TypeScript + Vite |
 | Styling | Tailwind CSS v4 |
 | State | Zustand stores + TanStack Query |

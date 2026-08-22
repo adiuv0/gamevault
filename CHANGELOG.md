@@ -44,7 +44,9 @@ closing the entire 14-finding security audit
   active browser uploads, verify checksums/integrity/foreign keys, and publish atomically.
 - Release-recovery coverage for `0.1.0` database upgrades, active-WAL restore, tamper
   detection, and synchronized application/package/UI/API versions.
-- GitHub Actions CI for backend tests, frontend lint/build, and the Docker image.
+- GitHub Actions CI for backend tests, frontend lint/build, and the Docker image, plus
+  Python/npm dependency audits and a fixable high/critical container vulnerability gate.
+  The full workflow also runs weekly so newly published advisories are detected.
 - **Game merge.** Game admin page now has a "Merge" button that opens a
   modal listing every other game, lets you pick a target, and moves all
   screenshots (DB rows + files + thumbnails) into it. Annotations and
@@ -112,6 +114,9 @@ closing the entire 14-finding security audit
 - `requirements.txt` pinned to exact versions for reproducible Docker
   builds. `pyproject.toml` keeps `>=` lower bounds for source/dev
   installs.
+- Vulnerable Python and npm dependencies were upgraded to fixed releases. JWT handling
+  moved from `python-jose` to compatible HS256 tokens from PyJWT, removing an affected
+  transitive ECDSA package that had no patched release.
 - SQL `ORDER BY` fragments lifted from inline dict literals to
   module-level allowlist constants (`GAME_SORT_CLAUSES`,
   `SCREENSHOT_SORT_CLAUSES`, `SEARCH_SORT_CLAUSES`,

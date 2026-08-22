@@ -80,12 +80,13 @@ Acceptance criteria:
 
 ## Phase 4: Release And Recovery
 
-Status: In progress. Verified online state backups, active-WAL restoration, the supported
-`0.1.0` migration fixture, version guards, and rollback notes are implemented.
+Status: Complete. Verified online state backups, active-WAL restoration, the supported
+`0.1.0` migration fixture, version guards, rollback notes, and scheduled vulnerability
+checks are implemented.
 
 - [x] Add migration tests for upgrades from every supported release.
 - [x] Exercise backup and restore against databases with active WAL files.
-- Add dependency and container vulnerability checks to CI.
+- [x] Add dependency and container vulnerability checks to CI.
 - [x] Synchronize application, API, package, and documentation versions.
 - [x] Publish migration notes and rollback instructions with each schema release.
 

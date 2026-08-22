@@ -8,22 +8,24 @@
 # For full hash-checked reproducibility, generate a lockfile with
 # pip-compile and pass `--require-hashes` to pip. See docs/RELEASING.md.
 
-fastapi==0.128.7
+fastapi==0.141.1
+starlette==1.6.0
 uvicorn[standard]==0.40.0
-python-multipart==0.0.22
+python-multipart==0.0.32
 aiosqlite==0.22.1
 httpx==0.28.1
 beautifulsoup4==4.14.3
-lxml==6.0.2
-Pillow==12.1.0
+lxml==6.1.2
+Pillow==12.3.0
 dhash==1.4
 piexif==1.1.3
 imagecodecs==2024.6.1
 numpy==1.26.4
-python-jose[cryptography]==3.5.0
+PyJWT==2.13.0
+cryptography==50.0.0
 bcrypt==5.0.0
 pydantic==2.12.5
-pydantic-settings==2.12.0
+pydantic-settings==2.15.0
 markdown-it-py==4.0.0
 nh3==0.3.5
 Jinja2==3.1.6

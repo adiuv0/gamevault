@@ -88,17 +88,18 @@ class TestAuth:
 
     def test_invalid_token_raises(self):
         from backend.auth import decode_token
-        from jose import JWTError
-        with pytest.raises(JWTError):
+        from jwt import InvalidTokenError
+        with pytest.raises(InvalidTokenError):
             decode_token("not.a.valid.token")
 
     def test_different_secrets_fail(self):
         """Token from one secret should fail with another."""
         from backend.auth import create_access_token
-        from jose import jwt, JWTError
+        import jwt
+        from jwt import InvalidTokenError
         token = create_access_token(expires_days=1)
-        with pytest.raises(JWTError):
-            jwt.decode(token, "wrong-secret", algorithms=["HS256"])
+        with pytest.raises(InvalidTokenError):
+            jwt.decode(token, "wrong-secret-key-at-least-32-bytes", algorithms=["HS256"])
 
 
 # ── Filesystem Tests ─────────────────────────────────────────────────────────
@@ -155,7 +156,7 @@ class TestFilesystem:
 class TestConfig:
     def test_settings_loaded(self):
         from backend.config import settings
-        assert settings.secret_key == "pytest-secret-key"
+        assert settings.secret_key == "pytest-secret-key-at-least-32-bytes"
 
     def test_max_upload_size_bytes(self):
         from backend.config import settings
