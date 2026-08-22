@@ -58,6 +58,7 @@ export function GalleryScreenshotViewer({
   const [activeVariantId, setActiveVariantId] = useState<number | null>(null);
   const [detailsById, setDetailsById] = useState<Record<number, PublicScreenshot>>({});
   const [detailErrorId, setDetailErrorId] = useState<number | null>(null);
+  const [originalFailures, setOriginalFailures] = useState<Record<number, boolean>>({});
 
   const listItem = screenshots[currentIndex];
   const screenshot = listItem ? detailsById[listItem.id] : undefined;
@@ -71,6 +72,10 @@ export function GalleryScreenshotViewer({
   const activeVariant = variants.find((variant) => variant.id === activeVariantId)
     || variants[0]
     || listItem;
+  const requiresPreview = ['jxr', 'wdp', 'tif', 'tiff'].includes(
+    activeVariant?.format?.toLowerCase() || '',
+  );
+  const usePreview = !!activeVariant && (requiresPreview || !!originalFailures[activeVariant.id]);
 
   useEffect(() => {
     if (!listItem || detailsById[listItem.id]) return;
@@ -227,11 +232,21 @@ export function GalleryScreenshotViewer({
         {/* Image */}
         <div className={`flex-1 flex items-center justify-center p-4 ${showInfo ? 'sm:mr-80' : ''}`}>
           <img
-            key={activeVariant.id}
-            src={galleryPreviewUrl(activeVariant.id, activeVariant.media_version)}
+            key={`${activeVariant.id}-${usePreview ? 'preview' : 'original'}`}
+            src={usePreview
+              ? galleryPreviewUrl(activeVariant.id, activeVariant.media_version)
+              : galleryImageUrl(activeVariant.id, activeVariant.media_version)}
             alt={activeVariant.filename}
             className="max-w-full max-h-full object-contain select-none"
             draggable={false}
+            onError={() => {
+              if (!usePreview) {
+                setOriginalFailures((current) => ({
+                  ...current,
+                  [activeVariant.id]: true,
+                }));
+              }
+            }}
           />
         </div>
 

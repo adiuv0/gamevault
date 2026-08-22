@@ -7,14 +7,16 @@ rollback procedures. Migrations run automatically when GameVault starts.
 
 | From | To | Database work | Verification |
 |---|---|---|---|
-| `0.1.0` | `1.0.0` | Applies `m003` through `m011` | Automated fixture preserves games, screenshots, annotations, settings, visibility, and foreign keys |
-| Docker `0.2.0` | `1.0.0` | Applies `m004` through `m011` | Automated fixture preserves the same state from the shipped schema |
-| Docker `0.3.0` / `0.3.1` | `1.0.0` | Applies `m006` through `m011` | Automated fixtures cover both published image tags |
+| `0.1.0` | `1.0.1` | Applies `m003` through `m011` | Automated fixture preserves games, screenshots, annotations, settings, visibility, and foreign keys |
+| Docker `0.2.0` | `1.0.1` | Applies `m004` through `m011` | Automated fixture preserves the same state from the shipped schema |
+| Docker `0.3.0` / `0.3.1` | `1.0.1` | Applies `m006` through `m011` | Automated fixtures cover both published image tags |
+| `1.0.0` | `1.0.1` | None | Automated fixture confirms the current schema remains unchanged |
 
 The `1.0.0` migrations add gallery indexes, logical capture groups, duplicate review,
 viewer previews, and durable import/upload jobs to Docker `0.3.1`. They do not rewrite
 or delete original screenshot files. Older upgrade paths also apply the prior Special K,
 annotation-sanitization, and unused-placeholder-table migrations as needed.
+Version `1.0.1` adds no migrations and does not alter the database or image library.
 
 ## Before Upgrading
 

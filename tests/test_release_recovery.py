@@ -22,6 +22,7 @@ SUPPORTED_RELEASE_SCHEMAS = {
     "0.2.0": MIGRATIONS[:3],
     "0.3.0": MIGRATIONS[:5],
     "0.3.1": MIGRATIONS[:5],
+    "1.0.0": MIGRATIONS,
 }
 
 
@@ -272,6 +273,15 @@ async def test_supported_release_database_upgrades_to_current_without_data_loss(
             ),
         )
         screenshot_id = cursor.lastrowid
+        if "backend.migrations.m007_capture_groups" in release_migrations:
+            await db.execute(
+                "UPDATE screenshots SET capture_group_id = ? WHERE id = ?",
+                (screenshot_id, screenshot_id),
+            )
+            await db.execute(
+                "UPDATE games SET screenshot_count = 1 WHERE id = ?",
+                (game_id,),
+            )
         annotation_html = (
             "<p>kept</p>"
             if "backend.migrations.m004_resanitize_annotations" in release_migrations

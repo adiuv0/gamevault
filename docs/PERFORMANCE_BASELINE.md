@@ -33,8 +33,8 @@ are comparison data, not universal service-level targets.
 - SQLite list and grouping latency remains modest at 10,000 captures.
 - Cursor traversal avoids the growing deep-page offset cost while numbered-page callers
   remain compatible.
-- Full-resolution viewer media was the higher-leverage bottleneck, so GameVault now uses
-  bounded 1920px previews while preserving originals for download.
+- Gallery cards use bounded thumbnails. Opening a card requests its full-resolution
+  original, while browser-incompatible formats use a bounded 1920px fallback preview.
 - List endpoints now return card-sized records and fetch physical-variant metadata only
   when a viewer opens. On the deterministic 1,000-capture fixture, the first 50 service
   records fell from 65,581 bytes to 11,351 bytes, an 82.7% reduction including the opaque

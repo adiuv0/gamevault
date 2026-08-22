@@ -55,11 +55,11 @@ Acceptance criteria:
 
 ## Phase 3: Large-Library Scaling
 
-Status: Complete. Repeatable 1k/10k benchmarks, bounded viewer previews, slim payloads,
+Status: Complete. Repeatable 1k/10k benchmarks, browser fallback previews, slim payloads,
 revisioned browser caching, cursor pagination, virtualized galleries, and durable
 filesystem and browser imports are implemented.
 
-- [x] Add a browser-compatible large preview so the viewer does not fetch 4K originals by default.
+- [x] Add a browser-compatible large preview for formats that cannot render natively.
 - [x] Virtualize long admin/public galleries and replace their deep offset pagination
   with opaque cursor pagination. Numbered pages remain compatible for older clients.
 - [x] Return slim list payloads and fetch full metadata only when requested.

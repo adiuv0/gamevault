@@ -173,7 +173,7 @@ export function GalleryGamePage() {
           <VirtualizedScreenshotGrid
             screenshots={screenshots}
             onSelect={setViewerIndex}
-            onEndReached={nextCursor ? () => void loadMore() : undefined}
+            onEndReached={nextCursor ? loadMore : undefined}
             renderItem={(screenshot, onClick) => (
               <GalleryScreenshotCard
                 screenshot={screenshot}
@@ -196,6 +196,16 @@ export function GalleryGamePage() {
               >
                 <RefreshCw className="h-4 w-4" />
                 Retry
+              </button>
+            </div>
+          )}
+          {nextCursor && !loadingMore && !loadMoreError && (
+            <div className="flex justify-center mt-6">
+              <button
+                onClick={() => void loadMore()}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-bg-secondary border border-border rounded-md text-sm text-text-primary hover:bg-bg-tertiary transition-colors"
+              >
+                Load more
               </button>
             </div>
           )}

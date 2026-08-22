@@ -7,6 +7,17 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-22
+
+### Fixed
+
+- Opening a screenshot in either the private or public gallery now loads the
+  full-resolution original. Browser-incompatible originals still fall back to
+  their generated preview.
+- Private and public galleries now use a bottom-of-list observer plus a visible
+  load-more fallback so virtualized browsing cannot silently stall after the
+  first batch.
+
 ## [1.0.0] - 2026-08-22
 
 GameVault 1.0 is the first Git-tagged release. Docker `0.2.0`, `0.3.0`, and

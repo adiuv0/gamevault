@@ -45,8 +45,8 @@ Deliverables:
 
 - [x] Reproducible benchmarks at 1,000 and 10,000 logical captures.
 - [x] Structured timings for list queries, media responses, imports, and image processing.
-- [x] Browser-friendly large previews so the viewer does not fetch 4K/HDR originals by
-  default.
+- [x] Browser-friendly large previews for formats such as JXR that cannot render
+  natively.
 - [x] Slim gallery payloads with full metadata fetched only when needed.
 - [x] Revisioned media URLs with immutable private caching for warm navigation.
 - [x] Cursor pagination and window-scrolling virtualization for admin and public
@@ -57,7 +57,8 @@ Deliverables:
 Exit criteria:
 
 - [x] Warm gallery navigation reuses cached media without database work.
-- [x] Viewer bandwidth is bounded by preview size unless the original is requested.
+- [x] Grid bandwidth stays bounded by thumbnail size; the viewer requests one original
+  only after its card is opened and falls back to a preview for incompatible formats.
 - [x] All background imports survive restart without duplicate rows or lost progress.
   Synchronous Sync CLI uploads remain caller-retryable and content-hash idempotent.
 

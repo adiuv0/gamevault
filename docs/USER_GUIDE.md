@@ -127,9 +127,11 @@ are generated, so duplicates cost almost nothing.
 accessible EXIF, so the file's mtime is used.
 
 **Display images.** Three JPEG derivatives are generated per upload: 300px and
-800px thumbnails for grids, plus a bounded 1920px preview for the full-screen
-viewer. HDR sources (JXR and 16-bit PNG) are tone-mapped to SDR before these are
-generated. The original file is preserved untouched and remains the download source.
+800px thumbnails for grids, plus a bounded 1920px browser-compatibility preview.
+Opening a browser-compatible screenshot loads the untouched full-resolution original.
+Formats browsers cannot display, including JXR and TIFF, use the generated preview in
+the viewer. HDR sources are tone-mapped to SDR before their derivatives are generated,
+and every original remains available for download.
 
 ---
 
