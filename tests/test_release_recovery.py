@@ -23,6 +23,7 @@ SUPPORTED_RELEASE_SCHEMAS = {
     "0.3.0": MIGRATIONS[:5],
     "0.3.1": MIGRATIONS[:5],
     "1.0.0": MIGRATIONS,
+    "1.0.1": MIGRATIONS,
 }
 
 

@@ -7,6 +7,16 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-08-22
+
+### Fixed
+
+- Virtualized screenshot grids now use the signed-in application's actual
+  scrollable content panel. Returning toward the top after loading a large
+  gallery no longer leaves a blank spacer where screenshots should be.
+- Public galleries continue to virtualize against the browser window, while
+  pagination observes the same scroll surface used by each gallery.
+
 ## [1.0.1] - 2026-08-22
 
 ### Fixed

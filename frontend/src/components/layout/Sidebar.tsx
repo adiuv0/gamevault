@@ -76,7 +76,7 @@ export function Sidebar({ mobileOpen = false, onClose }: { mobileOpen?: boolean;
 
       {/* Footer */}
       <div className="p-4 border-t border-border">
-        <p className="text-xs text-text-muted">GameVault v1.0.1</p>
+        <p className="text-xs text-text-muted">GameVault v1.0.2</p>
       </div>
       </aside>
     </>
