@@ -76,7 +76,7 @@ must be at least 6 chars.
 
 ### `GET /api/health` — *public*
 
-Returns `{ "status": "ok", "version": "1.0.2" }`. Used by Docker
+Returns `{ "status": "ok", "version": "1.0.3" }`. Used by Docker
 HEALTHCHECK.
 
 ### `GET /api/settings/health` — *auth required*
@@ -229,9 +229,10 @@ See [Sharing](#sharing).
 ## Duplicate Review
 
 All duplicate-review endpoints require admin authentication. Candidate matching is
-conservative: assets must belong to the same game, have identical dimensions, be
-close in capture or upload time, and have a perceptual-hash distance of eight bits
-or less. A match is never deleted automatically.
+conservative: assets must belong to the same game, represent complementary HDR and
+SDR variants, have identical dimensions, share a filename stem or near-identical
+capture time, and have a perceptual-hash distance of eight bits or less. A match is
+never deleted automatically.
 
 ### `GET /api/duplicates/scan`
 

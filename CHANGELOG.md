@@ -7,6 +7,22 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-08-22
+
+### Added
+
+- Private and public game galleries can sort screenshots by capture date with
+  newest-first and oldest-first controls that preserve cursor pagination.
+
+### Fixed
+
+- Duplicate review now proposes only complementary HDR/SDR assets with matching
+  dimensions and strong filename or capture-time evidence. Visually similar
+  same-format screenshots no longer flood the pending review queue.
+- Automatic perceptual grouping now requires an HDR/SDR relationship, preventing
+  nearby same-scene screenshots from being silently counted as one capture.
+- HDR classification now covers JXR/WDP and detected 16-bit HDR PNG sources.
+
 ## [1.0.2] - 2026-08-22
 
 ### Fixed

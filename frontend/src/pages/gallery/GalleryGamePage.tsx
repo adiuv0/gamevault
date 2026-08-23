@@ -7,6 +7,10 @@ import { GalleryScreenshotCard } from '@/components/gallery/GalleryScreenshotCar
 import { GalleryScreenshotViewer } from '@/components/gallery/GalleryScreenshotViewer';
 import { VirtualizedScreenshotGrid } from '@/components/screenshots/VirtualizedScreenshotGrid';
 import {
+  ScreenshotSortControl,
+  type ScreenshotSort,
+} from '@/components/screenshots/ScreenshotSortControl';
+import {
   galleryCoverUrl,
   galleryGetGame,
   galleryListScreenshotsCursor,
@@ -27,36 +31,50 @@ export function GalleryGamePage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState(false);
   const loadingMoreRef = useRef(false);
+  const requestVersionRef = useRef(0);
+  const [screenshotSort, setScreenshotSort] = useState<ScreenshotSort>('date_desc');
 
   useEffect(() => {
+    const requestVersion = ++requestVersionRef.current;
+    loadingMoreRef.current = false;
     const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
         const [gameData, screenshotData] = await Promise.all([
           galleryGetGame(gameId),
-          galleryListScreenshotsCursor(gameId),
+          galleryListScreenshotsCursor(gameId, null, 50, screenshotSort),
         ]);
+        if (requestVersion !== requestVersionRef.current) return;
         setGame(gameData);
         setScreenshots(screenshotData.screenshots);
         setNextCursor(screenshotData.next_cursor);
         setLoadMoreError(false);
+        setViewerIndex(null);
       } catch (err) {
+        if (requestVersion !== requestVersionRef.current) return;
         setError(err instanceof Error ? err.message : 'Failed to load game');
       } finally {
-        setLoading(false);
+        if (requestVersion === requestVersionRef.current) setLoading(false);
       }
     };
     fetchData();
-  }, [gameId]);
+  }, [gameId, screenshotSort]);
 
   const loadMore = useCallback(async () => {
     if (loadingMoreRef.current || !nextCursor) return;
+    const requestVersion = requestVersionRef.current;
     loadingMoreRef.current = true;
     try {
       setLoadingMore(true);
       setLoadMoreError(false);
-      const data = await galleryListScreenshotsCursor(gameId, nextCursor);
+      const data = await galleryListScreenshotsCursor(
+        gameId,
+        nextCursor,
+        50,
+        screenshotSort,
+      );
+      if (requestVersion !== requestVersionRef.current) return;
       loadingMoreRef.current = false;
       setLoadingMore(false);
       setScreenshots((current) => {
@@ -65,12 +83,14 @@ export function GalleryGamePage() {
       });
       setNextCursor(data.next_cursor);
     } catch {
-      setLoadMoreError(true);
+      if (requestVersion === requestVersionRef.current) setLoadMoreError(true);
     } finally {
-      loadingMoreRef.current = false;
-      setLoadingMore(false);
+      if (requestVersion === requestVersionRef.current) {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
     }
-  }, [gameId, nextCursor]);
+  }, [gameId, nextCursor, screenshotSort]);
 
   if (loading) {
     return (
@@ -162,6 +182,9 @@ export function GalleryGamePage() {
       )}
 
       {/* Screenshots */}
+      {screenshots.length > 0 && (
+        <ScreenshotSortControl value={screenshotSort} onChange={setScreenshotSort} />
+      )}
       {screenshots.length === 0 ? (
         <EmptyState
           icon={<Image className="h-12 w-12" />}

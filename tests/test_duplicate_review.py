@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import aiosqlite
 import pytest
 from PIL import Image
 
@@ -22,7 +23,9 @@ async def duplicate_library(monkeypatch, tmp_path: Path):
         await close_db()
 
 
-async def _create_similar_pair(db, library_dir: Path) -> tuple[int, int, int]:
+async def _create_similar_pair(
+    db, library_dir: Path, *, right_is_hdr: bool = True
+) -> tuple[int, int, int]:
     from backend.services.screenshot_service import create_screenshot
 
     cursor = await db.execute(
@@ -34,10 +37,15 @@ async def _create_similar_pair(db, library_dir: Path) -> tuple[int, int, int]:
     screenshots_dir = library_dir / "Review Test" / "screenshots"
     screenshots_dir.mkdir(parents=True)
     png_path = screenshots_dir / "capture.png"
-    jpg_path = screenshots_dir / "capture-copy.jpg"
+    right_path = screenshots_dir / (
+        "capture.jxr" if right_is_hdr else "capture-copy.jpg"
+    )
     image = Image.new("RGB", (640, 360), (30, 90, 160))
     image.save(png_path)
-    image.save(jpg_path, quality=92)
+    if right_is_hdr:
+        image.save(right_path, format="PNG")
+    else:
+        image.save(right_path, quality=92)
 
     common = {
         "game_id": game_id,
@@ -53,12 +61,40 @@ async def _create_similar_pair(db, library_dir: Path) -> tuple[int, int, int]:
         **common,
     )
     right = await create_screenshot(
-        filename=jpg_path.name,
-        file_path="Review Test/screenshots/capture-copy.jpg",
-        format="jpeg",
+        filename=right_path.name,
+        file_path=f"Review Test/screenshots/{right_path.name}",
+        format="jxr" if right_is_hdr else "jpeg",
         **common,
     )
     return game_id, left["id"], right["id"]
+
+
+@pytest.mark.asyncio
+async def test_hdr_classification_migration_backfills_known_formats(tmp_path: Path):
+    from backend.migrations.m012_hdr_classification import upgrade
+
+    db = await aiosqlite.connect(tmp_path / "hdr-classification.db")
+    try:
+        await db.execute(
+            """CREATE TABLE screenshots (
+                   id INTEGER PRIMARY KEY,
+                   filename TEXT NOT NULL,
+                   format TEXT
+               )"""
+        )
+        await db.executemany(
+            "INSERT INTO screenshots (id, filename, format) VALUES (?, ?, ?)",
+            [
+                (1, "ordinary.png", "png"),
+                (2, "capture.jxr", "jxr"),
+                (3, "capture.wdp", None),
+            ],
+        )
+        await upgrade(db)
+        cursor = await db.execute("SELECT id, is_hdr FROM screenshots ORDER BY id")
+        assert await cursor.fetchall() == [(1, None), (2, 1), (3, 1)]
+    finally:
+        await db.close()
 
 
 @pytest.mark.asyncio
@@ -77,17 +113,100 @@ async def test_scan_fingerprints_and_creates_review_candidate(duplicate_library)
     assert finished["errors"] == 0
 
     cursor = await db.execute(
-        "SELECT id, perceptual_hash FROM screenshots ORDER BY id"
+        "SELECT id, perceptual_hash, is_hdr FROM screenshots ORDER BY id"
     )
     fingerprints = await cursor.fetchall()
     assert [row[0] for row in fingerprints] == [left_id, right_id]
     assert all(row[1] and len(row[1]) == 32 for row in fingerprints)
+    assert [row[2] for row in fingerprints] == [0, 1]
 
     candidates, total = await duplicate_service.list_candidates()
     assert total == 1
     assert candidates[0]["left_screenshot_id"] == left_id
     assert candidates[0]["right_screenshot_id"] == right_id
     assert candidates[0]["confidence"] == "likely"
+    assert candidates[0]["reason"] == "hdr_sdr_same_name"
+
+
+@pytest.mark.asyncio
+async def test_scan_rejects_visually_identical_sdr_pair(duplicate_library):
+    from backend.services import duplicate_service
+
+    db, library_dir = duplicate_library
+    _, left_id, right_id = await _create_similar_pair(
+        db, library_dir, right_is_hdr=False
+    )
+
+    job = await duplicate_service.start_scan_job()
+    await duplicate_service.run_scan_job(job["id"])
+
+    candidates, total = await duplicate_service.list_candidates()
+    assert candidates == []
+    assert total == 0
+
+    await db.execute(
+        """INSERT INTO duplicate_candidates
+           (game_id, left_screenshot_id, right_screenshot_id,
+            hash_distance, confidence, reason)
+           SELECT game_id, ?, ?, 0, 'likely', 'legacy_visual_similarity'
+           FROM screenshots WHERE id = ?""",
+        (left_id, right_id, left_id),
+    )
+    await db.commit()
+    candidates, total = await duplicate_service.list_candidates()
+    assert candidates == []
+    assert total == 0
+
+
+@pytest.mark.asyncio
+async def test_automatic_grouping_requires_hdr_sdr_pair(duplicate_library):
+    from backend.services.screenshot_service import create_screenshot
+
+    db, _ = duplicate_library
+    cursor = await db.execute(
+        "INSERT INTO games (name, folder_name) VALUES ('Auto Match', 'Auto Match')"
+    )
+    game_id = cursor.lastrowid
+    await db.commit()
+    common = {
+        "game_id": game_id,
+        "width": 640,
+        "height": 360,
+        "taken_at": "2026-01-02T03:04:05",
+        "perceptual_hash": "0" * 32,
+        "recalculate_stats": False,
+    }
+    first = await create_screenshot(
+        filename="first.png",
+        file_path="Auto Match/first.png",
+        format="png",
+        is_hdr=False,
+        **common,
+    )
+    second = await create_screenshot(
+        filename="second.jpg",
+        file_path="Auto Match/second.jpg",
+        format="jpeg",
+        is_hdr=False,
+        **common,
+    )
+    hdr = await create_screenshot(
+        filename="third.jxr",
+        file_path="Auto Match/third.jxr",
+        format="jxr",
+        is_hdr=True,
+        **common,
+    )
+
+    cursor = await db.execute(
+        "SELECT id, capture_group_id FROM screenshots WHERE game_id = ? ORDER BY id",
+        (game_id,),
+    )
+    assert await cursor.fetchall() == [
+        (first["id"], first["id"]),
+        (second["id"], second["id"]),
+        (hdr["id"], second["id"]),
+    ]
 
 
 @pytest.mark.asyncio
@@ -138,7 +257,7 @@ async def test_grouping_resolves_candidates_already_in_same_group(duplicate_libr
     job = await duplicate_service.start_scan_job()
     await duplicate_service.run_scan_job(job["id"])
     candidates, total = await duplicate_service.list_candidates()
-    assert total == 3
+    assert total == 2
     by_pair = {
         frozenset((item["left_screenshot_id"], item["right_screenshot_id"])): item
         for item in candidates
@@ -151,7 +270,7 @@ async def test_grouping_resolves_candidates_already_in_same_group(duplicate_libr
     assert pending == []
     assert pending_total == 0
     _, grouped_total = await duplicate_service.list_candidates("grouped")
-    assert grouped_total == 3
+    assert grouped_total == 2
 
 
 @pytest.mark.asyncio

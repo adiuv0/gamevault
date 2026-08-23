@@ -9,6 +9,7 @@ from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 
+from backend.services import hdr_processor
 from backend.services.filesystem import get_screenshots_dir, sanitize_filename
 from backend.services.game_service import get_game, update_screenshot_stats
 from backend.services.image_processor import (
@@ -210,6 +211,7 @@ async def process_upload(
                 "sha256_hash": sha256,
                 "exif_data": _json.dumps(exif) if exif else None,
                 "taken_at": date_taken_exif.isoformat() if date_taken_exif else None,
+                "is_hdr": await asyncio.to_thread(hdr_processor.is_hdr_source, temp_path),
             }
 
             source_key = f"upload:{task_id}:{file_index}"
@@ -306,6 +308,7 @@ async def process_upload(
                 exif_data=img_data.get("exif_data"),
                 perceptual_hash=perceptual_hash,
                 source_key=source_key,
+                is_hdr=img_data["is_hdr"],
             )
 
             results.append(screenshot)

@@ -31,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 from backend.database import get_db
+from backend.services import hdr_processor
 from backend.services.filesystem import get_screenshots_dir
 from backend.services.game_service import (
     get_or_create_game,
@@ -555,6 +556,7 @@ async def _import_single_file(
         preview_path=preview,
         perceptual_hash=perceptual_hash,
         source_key=f"specialk:{src_path.stem.casefold()}",
+        is_hdr=await asyncio.to_thread(hdr_processor.is_hdr_source, dest_path),
     )
 
     await emit_progress(session_id, "screenshot_complete", {

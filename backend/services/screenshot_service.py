@@ -5,6 +5,10 @@ import binascii
 import json
 
 from backend.database import get_db
+from backend.services.capture_matching import (
+    is_complementary_variant_pair,
+    is_known_hdr_variant,
+)
 from backend.services.game_service import update_screenshot_stats
 from backend.services.media_cache_service import media_version
 from backend.services.performance_diagnostics import measure_async
@@ -36,8 +40,17 @@ async def _find_capture_group(fields: dict) -> int | None:
     if not perceptual_hash or not width or not height or not taken_at:
         return None
 
+    is_hdr = fields.get("is_hdr")
+    if is_hdr is None and is_known_hdr_variant(
+        fields.get("filename", ""), fields.get("format")
+    ):
+        is_hdr = True
+    if is_hdr is None:
+        return None
+
     cursor = await db.execute(
-        """SELECT COALESCE(capture_group_id, id), perceptual_hash
+        """SELECT COALESCE(capture_group_id, id), perceptual_hash,
+                  filename, format, is_hdr
            FROM screenshots
            WHERE game_id = ? AND width = ? AND height = ?
              AND perceptual_hash IS NOT NULL
@@ -45,7 +58,21 @@ async def _find_capture_group(fields: dict) -> int | None:
            ORDER BY id DESC LIMIT 50""",
         (game_id, width, height, taken_at),
     )
-    for capture_group_id, candidate_hash in await cursor.fetchall():
+    for (
+        capture_group_id,
+        candidate_hash,
+        candidate_filename,
+        candidate_format,
+        candidate_is_hdr,
+    ) in await cursor.fetchall():
+        if candidate_is_hdr is None and is_known_hdr_variant(
+            candidate_filename, candidate_format
+        ):
+            candidate_is_hdr = True
+        if candidate_is_hdr is None or not is_complementary_variant_pair(
+            bool(is_hdr), bool(candidate_is_hdr)
+        ):
+            continue
         if _hash_distance(perceptual_hash, candidate_hash) <= 4:
             return capture_group_id
     return None
@@ -61,7 +88,10 @@ SCREENSHOT_SORT_CLAUSES: dict[str, str] = {
 SCREENSHOT_DEFAULT_SORT = SCREENSHOT_SORT_CLAUSES["date_desc"]
 
 _VARIANT_PREFERENCE = """CASE
-    WHEN lower(COALESCE(s.format, '')) IN ('jxr', 'wdp') THEN 1
+    WHEN COALESCE(
+        s.is_hdr,
+        lower(COALESCE(s.format, '')) IN ('jxr', 'wdp')
+    ) = 1 THEN 1
     ELSE 0
 END, s.id"""
 

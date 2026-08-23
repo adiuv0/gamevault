@@ -7,18 +7,21 @@ rollback procedures. Migrations run automatically when GameVault starts.
 
 | From | To | Database work | Verification |
 |---|---|---|---|
-| `0.1.0` | `1.0.2` | Applies `m003` through `m011` | Automated fixture preserves games, screenshots, annotations, settings, visibility, and foreign keys |
-| Docker `0.2.0` | `1.0.2` | Applies `m004` through `m011` | Automated fixture preserves the same state from the shipped schema |
-| Docker `0.3.0` / `0.3.1` | `1.0.2` | Applies `m006` through `m011` | Automated fixtures cover both published image tags |
-| `1.0.0` | `1.0.2` | None | Automated fixture confirms the current schema remains unchanged |
-| `1.0.1` | `1.0.2` | None | Automated fixture confirms the current schema remains unchanged |
+| `0.1.0` | `1.0.3` | Applies `m003` through `m012` | Automated fixture preserves games, screenshots, annotations, settings, visibility, and foreign keys |
+| Docker `0.2.0` | `1.0.3` | Applies `m004` through `m012` | Automated fixture preserves the same state from the shipped schema |
+| Docker `0.3.0` / `0.3.1` | `1.0.3` | Applies `m006` through `m012` | Automated fixtures cover both published image tags |
+| `1.0.0` | `1.0.3` | Applies `m012` | Automated fixture confirms the existing capture schema remains intact |
+| `1.0.1` | `1.0.3` | Applies `m012` | Automated fixture confirms the existing capture schema remains intact |
+| `1.0.2` | `1.0.3` | Applies `m012` | Automated fixture confirms the existing capture schema remains intact |
 
 The `1.0.0` migrations add gallery indexes, logical capture groups, duplicate review,
 viewer previews, and durable import/upload jobs to Docker `0.3.1`. They do not rewrite
 or delete original screenshot files. Older upgrade paths also apply the prior Special K,
 annotation-sanitization, and unused-placeholder-table migrations as needed.
-Versions `1.0.1` and `1.0.2` add no migrations and do not alter the database or image
-library.
+Versions `1.0.1` and `1.0.2` add no migrations. Version `1.0.3` adds nullable HDR
+classification metadata used by duplicate review. It does not alter capture groups or
+read, rewrite, move, or delete original image files during migration; a subsequent
+duplicate scan classifies older PNG assets from their headers.
 
 ## Before Upgrading
 

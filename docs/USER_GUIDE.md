@@ -137,10 +137,10 @@ and every original remains available for download.
 
 ## Duplicate Review
 
-The Duplicates page (`/duplicates`) finds visually similar files that may be
-variants of one captured moment, such as a PNG and JPEG or HDR export. Click
-**Scan library** to fingerprint existing screenshots. Progress is saved in the
-database, so an interrupted scan can resume instead of starting over.
+The Duplicates page (`/duplicates`) finds complementary HDR and SDR files that may
+be variants of one captured moment. Click **Scan library** to fingerprint existing
+screenshots and classify their source range. Progress is saved in the database, so
+an interrupted scan can resume instead of starting over.
 
 Candidates are never merged or deleted automatically. Review the two previews:
 
@@ -150,9 +150,10 @@ Candidates are never merged or deleted automatically. Review the two previews:
 - **Not a match** dismisses the suggestion without changing either screenshot.
 - Use the Pending, Grouped, and Dismissed tabs to review decision history.
 
-Matching is intentionally limited to screenshots from the same game with equal
-dimensions and nearby capture or upload times. Similar-looking loading screens or
-burst captures may still appear, which is why the final decision remains manual.
+Matching is intentionally limited to an HDR asset paired with an SDR asset from the
+same game, with equal dimensions, strong filename or capture-time evidence, and a
+close visual fingerprint. Ordinary same-format burst captures are excluded before
+they enter the review queue. The final grouping decision remains manual.
 
 ---
 

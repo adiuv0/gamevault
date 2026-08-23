@@ -1,9 +1,15 @@
 """Resumable perceptual-hash backfill and duplicate candidate review."""
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 
 from backend.database import get_db
+from backend.services import hdr_processor
+from backend.services.capture_matching import (
+    is_complementary_variant_pair,
+    is_known_hdr_variant,
+)
 from backend.services.filesystem import safe_library_path
 from backend.services.game_service import update_screenshot_stats
 from backend.services.image_processor import compute_perceptual_hash
@@ -18,6 +24,20 @@ _scan_lock = asyncio.Lock()
 
 def _hash_distance(left: str, right: str) -> int:
     return (int(left, 16) ^ int(right, 16)).bit_count()
+
+
+def _capture_times_match(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return False
+    if not any(separator in left for separator in ("T", " ")):
+        return False
+    if not any(separator in right for separator in ("T", " ")):
+        return False
+    try:
+        difference = datetime.fromisoformat(left) - datetime.fromisoformat(right)
+        return abs(difference.total_seconds()) <= 1
+    except (TypeError, ValueError):
+        return False
 
 
 async def get_latest_scan_job() -> dict | None:
@@ -90,8 +110,8 @@ async def run_scan_job(job_id: int) -> None:
             while True:
                 job = await _get_job(job_id)
                 cursor = await db.execute(
-                    """SELECT id, game_id, file_path, filename, width, height, taken_at,
-                              uploaded_at, capture_group_id, perceptual_hash
+                    """SELECT id, game_id, file_path, filename, width, height, format,
+                              taken_at, uploaded_at, capture_group_id, perceptual_hash, is_hdr
                        FROM screenshots WHERE id > ? ORDER BY id LIMIT ?""",
                     (job["cursor_id"], SCAN_BATCH_SIZE),
                 )
@@ -133,6 +153,7 @@ async def run_scan_job(job_id: int) -> None:
 
 async def _index_asset(asset: dict) -> None:
     db = await get_db()
+    file_path = None
     perceptual_hash = asset.get("perceptual_hash")
     if not perceptual_hash:
         file_path = safe_library_path(asset.get("file_path"))
@@ -146,14 +167,30 @@ async def _index_asset(asset: dict) -> None:
             (perceptual_hash, asset["id"]),
         )
 
+    is_hdr = asset.get("is_hdr")
+    if is_hdr is None:
+        if is_known_hdr_variant(asset["filename"], asset.get("format")):
+            is_hdr = True
+        else:
+            file_path = file_path or safe_library_path(asset.get("file_path"))
+            if not file_path.exists():
+                raise FileNotFoundError(file_path)
+            is_hdr = await asyncio.to_thread(hdr_processor.is_hdr_source, file_path)
+        await db.execute(
+            "UPDATE screenshots SET is_hdr = ? WHERE id = ?",
+            (int(is_hdr), asset["id"]),
+        )
+
     if not asset.get("width") or not asset.get("height"):
         return
 
     cursor = await db.execute(
-        """SELECT id, capture_group_id, filename, perceptual_hash, taken_at, uploaded_at
+        """SELECT id, capture_group_id, filename, perceptual_hash, taken_at,
+                  uploaded_at, is_hdr
            FROM screenshots
            WHERE game_id = ? AND id < ? AND width = ? AND height = ?
              AND perceptual_hash IS NOT NULL
+             AND is_hdr IS NOT NULL AND is_hdr != ?
              AND COALESCE(capture_group_id, id) != ?
              AND (
                  (? IS NOT NULL AND taken_at IS NOT NULL
@@ -166,19 +203,34 @@ async def _index_asset(asset: dict) -> None:
             asset["id"],
             asset["width"],
             asset["height"],
+            int(is_hdr),
             asset.get("capture_group_id") or asset["id"],
             asset.get("taken_at"),
             asset.get("taken_at"),
             asset["uploaded_at"],
         ),
     )
-    for candidate_id, _, candidate_filename, candidate_hash, _, _ in await cursor.fetchall():
+    for (
+        candidate_id,
+        _,
+        candidate_filename,
+        candidate_hash,
+        candidate_taken_at,
+        _,
+        candidate_is_hdr,
+    ) in await cursor.fetchall():
         distance = _hash_distance(perceptual_hash, candidate_hash)
         if distance > MAX_HASH_DISTANCE:
             continue
         same_stem = Path(candidate_filename).stem.casefold() == Path(asset["filename"]).stem.casefold()
+        if not is_complementary_variant_pair(bool(is_hdr), bool(candidate_is_hdr)):
+            continue
+        if not same_stem and not _capture_times_match(
+            asset.get("taken_at"), candidate_taken_at
+        ):
+            continue
         confidence = "likely" if distance <= LIKELY_HASH_DISTANCE else "possible"
-        reason = "same_name_and_visual" if same_stem else "visual_similarity"
+        reason = "hdr_sdr_same_name" if same_stem else "hdr_sdr_capture_time"
         await db.execute(
             """INSERT OR IGNORE INTO duplicate_candidates
                (game_id, left_screenshot_id, right_screenshot_id,
@@ -194,12 +246,32 @@ async def list_candidates(
     if status not in {"pending", "grouped", "dismissed"}:
         status = "pending"
     db = await get_db()
+    pending_filter = ""
+    if status == "pending":
+        pending_filter = """AND COALESCE(
+                l.is_hdr,
+                CASE WHEN lower(COALESCE(l.format, '')) IN ('jxr', 'wdp')
+                           OR lower(l.filename) LIKE '%.jxr'
+                           OR lower(l.filename) LIKE '%.wdp'
+                     THEN 1 ELSE 0 END
+            ) != COALESCE(
+                r.is_hdr,
+                CASE WHEN lower(COALESCE(r.format, '')) IN ('jxr', 'wdp')
+                           OR lower(r.filename) LIKE '%.jxr'
+                           OR lower(r.filename) LIKE '%.wdp'
+                     THEN 1 ELSE 0 END
+            )"""
     cursor = await db.execute(
-        "SELECT COUNT(*) FROM duplicate_candidates WHERE status = ?", (status,)
+        f"""SELECT COUNT(*)
+            FROM duplicate_candidates dc
+            JOIN screenshots l ON l.id = dc.left_screenshot_id
+            JOIN screenshots r ON r.id = dc.right_screenshot_id
+            WHERE dc.status = ? {pending_filter}""",
+        (status,),
     )
     total = (await cursor.fetchone())[0]
     cursor = await db.execute(
-        """SELECT dc.*, g.name AS game_name,
+        f"""SELECT dc.*, g.name AS game_name,
                   l.filename AS left_filename, l.format AS left_format,
                   l.width AS left_width, l.height AS left_height,
                   l.taken_at AS left_taken_at,
@@ -210,7 +282,8 @@ async def list_candidates(
            JOIN games g ON g.id = dc.game_id
            JOIN screenshots l ON l.id = dc.left_screenshot_id
            JOIN screenshots r ON r.id = dc.right_screenshot_id
-           WHERE dc.status = ? ORDER BY dc.id DESC LIMIT ? OFFSET ?""",
+           WHERE dc.status = ? {pending_filter}
+           ORDER BY dc.id DESC LIMIT ? OFFSET ?""",
         (status, limit, (page - 1) * limit),
     )
     columns = [d[0] for d in cursor.description]

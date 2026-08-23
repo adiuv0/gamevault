@@ -22,8 +22,9 @@ SUPPORTED_RELEASE_SCHEMAS = {
     "0.2.0": MIGRATIONS[:3],
     "0.3.0": MIGRATIONS[:5],
     "0.3.1": MIGRATIONS[:5],
-    "1.0.0": MIGRATIONS,
-    "1.0.1": MIGRATIONS,
+    "1.0.0": MIGRATIONS[:-1],
+    "1.0.1": MIGRATIONS[:-1],
+    "1.0.2": MIGRATIONS[:-1],
 }
 
 
@@ -304,7 +305,7 @@ async def test_supported_release_database_upgrades_to_current_without_data_loss(
         cursor = await db.execute("SELECT name FROM _migrations ORDER BY id")
         assert [row[0] for row in await cursor.fetchall()] == MIGRATIONS
         cursor = await db.execute(
-            """SELECT filename, sha256_hash, capture_group_id, preview_path
+            """SELECT filename, sha256_hash, capture_group_id, preview_path, is_hdr
                FROM screenshots WHERE id = ?""",
             (screenshot_id,),
         )
@@ -312,6 +313,7 @@ async def test_supported_release_database_upgrades_to_current_without_data_loss(
             "legacy.png",
             "legacy-hash",
             screenshot_id,
+            None,
             None,
         )
         assert await (

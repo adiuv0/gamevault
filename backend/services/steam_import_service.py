@@ -540,6 +540,7 @@ async def _import_single_screenshot(
         thumbnail_path_md=thumb_md,
         preview_path=preview,
         perceptual_hash=perceptual_hash,
+        is_hdr=False,
         source_key=f"steam:{steam_id}",
     )
 
