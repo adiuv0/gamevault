@@ -2,9 +2,9 @@
 
 Browsers can't decode JPEG XR or TIFF, so the viewer used to stop at the
 bounded preview (``preview_max_width``, 1920px by default) for those
-captures. This service renders such originals once, at full size, into the
-thumbnail cache and serves the cached JPEG after that. Renders are made on
-first view rather than at import so imports and grids stay fast.
+captures. Imports and the preview-cache repair job write a full-size JPEG
+render into the thumbnail cache; this service serves it, rendering on demand
+when one is missing.
 """
 
 import asyncio

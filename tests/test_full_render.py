@@ -37,6 +37,10 @@ def _write_jxr(path: Path) -> None:
     path.write_bytes(imagecodecs.jpegxr_encode(pixels.astype(np.float16), level=80))
 
 
+def _render_path(settings, screenshot: dict) -> Path:
+    return settings.thumbnail_dir / "HDR Game" / "full" / Path(screenshot["preview_path"]).name
+
+
 async def _create_jxr(db, settings, *, public: bool = False) -> dict:
     from backend.services.image_processor import generate_thumbnails_with_hash
     from backend.services.screenshot_service import create_screenshot
@@ -76,9 +80,61 @@ async def test_jxr_full_view_is_a_full_resolution_jpeg(library):
     response = await get_full(screenshot["id"])
     assert response.media_type == "image/jpeg"
     render = Path(response.path)
-    assert render == settings.thumbnail_dir / "HDR Game" / "full" / Path(screenshot["preview_path"]).name
+    assert render == _render_path(settings, screenshot)
     with Image.open(render) as image:
         assert image.format == "JPEG"
+        assert image.size == (WIDTH, HEIGHT)
+
+
+@pytest.mark.asyncio
+async def test_import_renders_jxr_ahead_of_first_view(library, monkeypatch):
+    from backend.routers.screenshots import get_full
+    from backend.services import full_render_service
+
+    db, settings = library
+    screenshot = await _create_jxr(db, settings)
+    render = _render_path(settings, screenshot)
+    assert render.exists()
+    with Image.open(render) as image:
+        assert image.size == (WIDTH, HEIGHT)
+
+    def fail(*_):
+        raise AssertionError("render should already exist")
+
+    monkeypatch.setattr(full_render_service, "generate_full_render", fail)
+    assert Path((await get_full(screenshot["id"])).path) == render
+
+
+@pytest.mark.asyncio
+async def test_sdr_import_makes_no_full_render(library):
+    from backend.services.image_processor import generate_thumbnails_with_hash
+
+    _, settings = library
+    source = settings.library_dir / "SDR" / "screenshots" / "shot.png"
+    source.parent.mkdir(parents=True)
+    Image.new("RGB", (WIDTH, HEIGHT), "teal").save(source)
+
+    generate_thumbnails_with_hash(source, "SDR", "shot")
+
+    assert not (settings.thumbnail_dir / "SDR" / "full").exists()
+
+
+@pytest.mark.asyncio
+async def test_cache_repair_renders_existing_jxr_captures(library):
+    from backend.services import preview_service
+
+    db, settings = library
+    screenshot = await _create_jxr(db, settings)
+    render = _render_path(settings, screenshot)
+    render.unlink()  # a capture imported before renders were made at import
+
+    job = await preview_service.start_backfill_job()
+    await preview_service.run_backfill_job(job["id"])
+    finished = await preview_service.get_latest_backfill_job()
+
+    assert finished["status"] == "completed"
+    assert finished["errors"] == 0
+    with Image.open(render) as image:
         assert image.size == (WIDTH, HEIGHT)
 
 
@@ -89,6 +145,7 @@ async def test_full_render_is_cached_after_first_view(library, monkeypatch):
 
     db, settings = library
     screenshot = await _create_jxr(db, settings)
+    _render_path(settings, screenshot).unlink()  # exercise the on-demand path
     calls = []
     real = full_render_service.generate_full_render
 
@@ -113,6 +170,7 @@ async def test_concurrent_first_views_render_once(library, monkeypatch):
 
     db, settings = library
     screenshot = await _create_jxr(db, settings)
+    _render_path(settings, screenshot).unlink()  # exercise the on-demand path
     calls = []
     real = full_render_service.generate_full_render
 
@@ -160,6 +218,7 @@ async def test_undecodable_jxr_falls_back_to_the_preview(library):
     screenshot = await _create_jxr(db, settings)
     source = settings.library_dir / "HDR Game" / "screenshots" / "capture.jxr"
     source.write_bytes(b"\x49\x49\xbc" + b"\x00" * 64)  # JXR magic, no image
+    _render_path(settings, screenshot).unlink()
 
     response = await get_full(screenshot["id"])
 

@@ -236,8 +236,8 @@ cache entry is missing, it falls back to the 800px thumbnail and then the origin
 Serves the full-resolution image in a format browsers can display; the viewer uses it
 for JPEG XR and TIFF captures. Browser-native originals are served exactly like
 `/image`. JPEG XR and TIFF originals are tone-mapped (with the HDR settings) to a
-full-size JPEG, rendered on first request and cached under
-`thumbnail_dir/<game>/full/`. If the original can't be decoded, the preview is served.
+full-size JPEG cached under `thumbnail_dir/<game>/full/`, made at import (and by
+the preview-cache repair job for older captures) or on first request if missing. If the original can't be decoded, the preview is served.
 
 ### `POST /api/screenshots/{id}/favorite`
 

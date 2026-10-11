@@ -11,8 +11,11 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 - JPEG XR (HDR) and TIFF screenshots now open at full resolution. Browsers can't
   show those formats, so the viewer used to stop at the 1920px preview. It now
-  shows the preview at once and swaps in a full-size tone-mapped JPEG, rendered
-  on first view and cached (`GET /api/screenshots/{id}/full`). Public galleries
+  shows the preview at once and swaps in a full-size tone-mapped JPEG
+  (`GET /api/screenshots/{id}/full`). New imports make that render alongside the
+  thumbnails from the same decode, so it costs only a JPEG encode and ~0.5-1 MB
+  of cache per 4K capture. **Settings > Repair image cache** renders existing
+  captures; until then they are rendered on first view. Public galleries
   and share links get the same render; share links used to serve the raw `.jxr`,
   which browsers and link previews couldn't display. Download still gives the
   original file.

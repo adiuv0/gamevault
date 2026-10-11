@@ -407,7 +407,7 @@ def generate_thumbnails_with_hash(
     filename_stem: str,
 ) -> tuple[str | None, str | None, str | None, str | None]:
     """Generate thumbnails, a large preview, and perceptual dHash in one decode."""
-    from backend.services.filesystem import get_thumbnails_dir
+    from backend.services.filesystem import FULL_RENDER_DIR, get_thumbnails_dir
 
     thumb_filename = derivative_filename(source_path)
 
@@ -426,6 +426,14 @@ def generate_thumbnails_with_hash(
         sm_ok = _save_thumbnail(image, sm_path, 300, quality)
         md_ok = _save_thumbnail(image, md_path, 800, quality)
         preview_ok = _save_thumbnail(image, preview_path, preview_width, quality)
+        if needs_browser_render(source_path):
+            # The source is already decoded, so the full-size render the viewer
+            # shows for JXR/TIFF costs only a JPEG encode here.
+            full_path = get_thumbnails_dir(game_folder, FULL_RENDER_DIR) / thumb_filename
+            if not _save_thumbnail(
+                image, full_path, image.width, FULL_RENDER_QUALITY, subsampling=0
+            ):
+                logger.warning("Full-size render failed for %s", source_path)
     except Exception as e:
         logger.warning("Thumbnail generation failed for %s: %s", source_path, e)
         sm_ok = md_ok = preview_ok = False
@@ -462,6 +470,17 @@ def generate_preview(
     if not generate_thumbnail(source_path, preview_path, preview_width):
         return None
     return f"{game_folder}/thumbnails/{preview_width}/{thumb_filename}"
+
+
+BROWSER_INCOMPATIBLE_SUFFIXES = {".jxr", ".wdp", ".tif", ".tiff"}
+
+
+def needs_browser_render(source_path: Path) -> bool:
+    """True for originals browsers can't display (JPEG XR, TIFF)."""
+    return (
+        Path(source_path).suffix.lower() in BROWSER_INCOMPATIBLE_SUFFIXES
+        or hdr_processor.is_jxr(source_path)
+    )
 
 
 # Full-size renders replace the original in the viewer, so they get more
