@@ -22,6 +22,12 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ### Changed
 
+- A JXR and a PNG/JPEG with the same file name, resolution and image, captured
+  within five minutes of each other, are now paired as one capture on import
+  instead of waiting on the Duplicates page, so the viewer's JXR/PNG toggle
+  appears on its own. **Scan library** on the Duplicates page pairs existing
+  ones. Differently named matches still go to review, and dismissed pairs stay
+  apart.
 - HDR tone-mapping encodes sRGB through a lookup table, which cuts that step from
   about 1.3 s to 0.16 s on a 4K capture. Thumbnails and previews of JPEG XR
   imports are made correspondingly faster; output differs by at most one 8-bit

@@ -5,9 +5,9 @@ import logging
 from pathlib import Path
 
 from backend.database import get_db
-from backend.services.hdr_processor import is_hdr_source
 from backend.services.filesystem import safe_library_path, thumbnail_cache_path
 from backend.services.full_render_service import full_render_rel_path, needs_full_render
+from backend.services.hdr_processor import is_hdr_source
 from backend.services.image_processor import generate_full_render, generate_thumbnails_with_hash
 
 JOB_KIND = "preview_backfill"

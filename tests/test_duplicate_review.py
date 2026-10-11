@@ -40,8 +40,10 @@ async def _create_similar_pair(
     screenshots_dir = library_dir / "Review Test" / "screenshots"
     screenshots_dir.mkdir(parents=True)
     png_path = screenshots_dir / "capture.png"
+    # Different names keep the pair in review; same-name pairs are paired on
+    # sight (see test_same_name_hdr_sdr_pair_*).
     right_path = screenshots_dir / (
-        "capture.jxr" if right_is_hdr else "capture-copy.jpg"
+        "capture-hdr.jxr" if right_is_hdr else "capture-copy.jpg"
     )
     image = Image.new("RGB", (640, 360), (30, 90, 160))
     image.save(png_path)
@@ -128,7 +130,7 @@ async def test_scan_fingerprints_and_creates_review_candidate(duplicate_library)
     assert candidates[0]["left_screenshot_id"] == left_id
     assert candidates[0]["right_screenshot_id"] == right_id
     assert candidates[0]["confidence"] == "likely"
-    assert candidates[0]["reason"] == "hdr_sdr_same_name"
+    assert candidates[0]["reason"] == "hdr_sdr_capture_time"
 
 
 @pytest.mark.asyncio
@@ -380,3 +382,105 @@ async def test_scan_records_missing_file_and_continues(duplicate_library):
     assert finished["status"] == "completed"
     assert finished["processed"] == 1
     assert finished["errors"] == 1
+
+
+async def _create_named_pair(db, *, hdr_name: str, sdr_name: str = "shot.png",
+                             hdr_hash: str = "0" * 32, hdr_taken_at: str = "2026-01-02T03:04:05",
+                             hdr_width: int = 640) -> tuple[dict, dict]:
+    from backend.services.screenshot_service import create_screenshot
+
+    cursor = await db.execute(
+        "INSERT INTO games (name, folder_name) VALUES ('Pairs', 'Pairs')"
+    )
+    game_id = cursor.lastrowid
+    await db.commit()
+    sdr = await create_screenshot(
+        game_id=game_id, filename=sdr_name, file_path=f"Pairs/{sdr_name}",
+        format="png", is_hdr=False, width=640, height=360,
+        taken_at="2026-01-02T03:04:05", perceptual_hash="0" * 32,
+        recalculate_stats=False,
+    )
+    hdr = await create_screenshot(
+        game_id=game_id, filename=hdr_name, file_path=f"Pairs/{hdr_name}",
+        format="jxr", is_hdr=True, width=hdr_width, height=360,
+        taken_at=hdr_taken_at, perceptual_hash=hdr_hash,
+        recalculate_stats=False,
+    )
+    return sdr, hdr
+
+
+@pytest.mark.asyncio
+async def test_same_name_hdr_sdr_pair_is_paired_on_import(duplicate_library):
+    from backend.services.screenshot_service import get_capture_details
+
+    db, _ = duplicate_library
+    sdr, hdr = await _create_named_pair(db, hdr_name="SHOT.jxr")
+
+    assert hdr["capture_group_id"] == sdr["id"]
+    details = await get_capture_details(hdr["id"])
+    assert sorted(variant["format"] for variant in details["variants"]) == ["jxr", "png"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("overrides", [
+    {"hdr_name": "other.jxr"},  # different name: dialogue may differ, review it
+    {"hdr_name": "shot.jxr", "hdr_hash": "f" * 32},  # different image
+    {"hdr_name": "shot.jxr", "hdr_width": 1280},  # different resolution
+    {"hdr_name": "shot.jxr", "hdr_taken_at": "2026-01-02T04:04:05"},  # an hour apart
+])
+async def test_same_name_pairing_requires_every_signal(duplicate_library, overrides):
+    db, _ = duplicate_library
+    sdr, hdr = await _create_named_pair(db, **overrides)
+
+    assert hdr["capture_group_id"] == hdr["id"]
+    assert sdr["capture_group_id"] == sdr["id"]
+
+
+@pytest.mark.asyncio
+async def test_like_wildcards_in_names_do_not_pair(duplicate_library):
+    db, _ = duplicate_library
+    _, hdr = await _create_named_pair(db, sdr_name="shotA1.png", hdr_name="shot_1.jxr")
+
+    assert hdr["capture_group_id"] == hdr["id"]
+
+
+@pytest.mark.asyncio
+async def test_scan_pairs_existing_same_name_captures(duplicate_library):
+    from backend.services import duplicate_service
+    from backend.services.game_service import get_game, update_screenshot_stats
+    from backend.services.screenshot_service import create_screenshot
+
+    db, library_dir = duplicate_library
+    cursor = await db.execute(
+        "INSERT INTO games (name, folder_name) VALUES ('Legacy', 'Legacy')"
+    )
+    game_id = cursor.lastrowid
+    await db.commit()
+    folder = library_dir / "Legacy"
+    folder.mkdir(parents=True)
+    image = Image.new("RGB", (640, 360), (30, 90, 160))
+    ids = []
+    for name, image_format in (("shot.png", "png"), ("shot.jxr", "jxr")):
+        image.save(folder / name, format="PNG")
+        # No fingerprint yet, like captures imported before auto-pairing.
+        created = await create_screenshot(
+            game_id=game_id, filename=name, file_path=f"Legacy/{name}",
+            format=image_format, width=640, height=360,
+            taken_at="2026-01-02T03:04:05", recalculate_stats=False,
+        )
+        ids.append(created["id"])
+    await update_screenshot_stats(game_id)
+    assert (await get_game(game_id))["screenshot_count"] == 2
+
+    job = await duplicate_service.start_scan_job()
+    await duplicate_service.run_scan_job(job["id"])
+
+    cursor = await db.execute(
+        "SELECT capture_group_id FROM screenshots WHERE game_id = ? ORDER BY id", (game_id,)
+    )
+    assert [row[0] for row in await cursor.fetchall()] == [ids[0], ids[0]]
+    assert (await get_game(game_id))["screenshot_count"] == 1
+    pending, _ = await duplicate_service.list_candidates()
+    assert pending == []
+    grouped, _ = await duplicate_service.list_candidates("grouped")
+    assert [item["reason"] for item in grouped] == ["hdr_sdr_same_name"]

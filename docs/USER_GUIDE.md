@@ -137,23 +137,32 @@ and every original remains available for download.
 
 ## Duplicate Review
 
-The Duplicates page (`/duplicates`) finds complementary HDR and SDR files that may
-be variants of one captured moment. Click **Scan library** to fingerprint existing
-screenshots and classify their source range. Progress is saved in the database, so
-an interrupted scan can resume instead of starting over.
+A JXR and a PNG/JPEG with the same file name (`shot.jxr` and `shot.png`, as Special K
+and Game Bar save them) are one capture. GameVault pairs them automatically when they
+also have the same resolution, a near-identical image, and capture times within five
+minutes. A paired capture shows one card with a file-count badge, and the viewer
+header gets a **JXR | PNG** toggle (or press **H**) to switch between the HDR and
+SDR files. Every original stays available for download, and **Ungroup** in the
+viewer splits a pair that shouldn't be one.
 
-Candidates are never merged or deleted automatically. Review the two previews:
+The Duplicates page (`/duplicates`) handles everything else. Click **Scan library**
+to fingerprint existing screenshots, pair same-name captures imported before
+automatic pairing existed, and propose the remaining HDR/SDR matches. Progress is
+saved in the database, so an interrupted scan can resume instead of starting over.
+
+Proposals with different file names are never merged automatically, because a
+visual fingerprint can't tell apart two shots that differ only in dialogue text.
+Review the two previews:
 
 - **Group variants** makes them one logical capture. Game totals count the group
-  once, while every original file remains available. The game and public galleries
-  show one card with a file-count badge; open it to switch formats in the viewer.
+  once, while every original file remains available.
 - **Not a match** dismisses the suggestion without changing either screenshot.
+  A dismissed pair is never paired automatically later.
 - Use the Pending, Grouped, and Dismissed tabs to review decision history.
 
-Matching is intentionally limited to an HDR asset paired with an SDR asset from the
-same game, with equal dimensions, strong filename or capture-time evidence, and a
-close visual fingerprint. Ordinary same-format burst captures are excluded before
-they enter the review queue. The final grouping decision remains manual.
+Matching is limited to an HDR asset paired with an SDR asset from the same game,
+with equal dimensions, strong filename or capture-time evidence, and a close visual
+fingerprint. Ordinary same-format burst captures are never proposed.
 
 ---
 
