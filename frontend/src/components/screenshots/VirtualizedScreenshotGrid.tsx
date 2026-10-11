@@ -6,7 +6,8 @@ interface VirtualizedScreenshotGridProps {
   screenshots: ScreenshotListItem[];
   onSelect: (index: number) => void;
   onEndReached?: () => void;
-  renderItem: (screenshot: ScreenshotListItem, onClick: () => void) => ReactNode;
+  /** Cards receive the index and call onSelect themselves so they can be memoized. */
+  renderItem: (screenshot: ScreenshotListItem, index: number, onSelect: (index: number) => void) => ReactNode;
 }
 
 function findScrollParent(element: HTMLElement | null): HTMLElement | null {
@@ -68,9 +69,7 @@ export function VirtualizedScreenshotGrid({
           rangeChanged={({ endIndex }) => {
             if (endIndex >= screenshots.length - 12) onEndReached?.();
           }}
-          itemContent={(index, screenshot) =>
-            renderItem(screenshot, () => onSelect(index))
-          }
+          itemContent={(index, screenshot) => renderItem(screenshot, index, onSelect)}
         />
       )}
       <div ref={endSentinelRef} className="h-px" aria-hidden="true" />

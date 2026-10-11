@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
 import json
 import logging
@@ -19,10 +20,15 @@ logger = logging.getLogger(__name__)
 
 _PAYLOAD_AAD = b"gamevault-import-job-v1"
 _POLL_SECONDS = 1.0
+_ERROR_BACKOFF_SECONDS = 5.0
+# A job interrupted this many times (each one a process crash or restart while it
+# ran) is failed instead of requeued, so one bad input cannot crash-loop the server.
+MAX_JOB_ATTEMPTS = 3
 
-_worker_task: asyncio.Task | None = None
-_worker_wakeup: asyncio.Event | None = None
-_prefer_upload = True
+# Uploads and imports run in separate lanes so a multi-hour import never queues
+# browser uploads behind it.
+_worker_tasks: list[asyncio.Task] = []
+_worker_wakeups: list[asyncio.Event] = []
 
 
 def _payload_key() -> bytes:
@@ -98,18 +104,34 @@ async def _create_session_job(
 
 
 def wake_import_worker() -> None:
-    """Wake the shared durable-work loop after any job type is queued."""
-    if _worker_wakeup is not None:
-        _worker_wakeup.set()
+    """Wake the durable-work lanes after any job type is queued."""
+    for wakeup in _worker_wakeups:
+        wakeup.set()
 
 
 async def recover_interrupted_jobs() -> int:
     """Return interrupted jobs to pending so idempotent import code can replay them."""
     db = await get_db()
     cursor = await db.execute(
-        "SELECT kind, session_id FROM import_jobs WHERE status = 'running'"
+        "SELECT id, kind, session_id, attempts FROM import_jobs WHERE status = 'running'"
     )
     interrupted = await cursor.fetchall()
+    exhausted = [row for row in interrupted if row[3] >= MAX_JOB_ATTEMPTS]
+    for job_id, kind, session_id, attempts in exhausted:
+        message = (
+            f"Import was interrupted {attempts} times and will not be retried "
+            "automatically. Check the server logs, then start the import again."
+        )
+        logger.error("Import job %s exceeded %d attempts; marking failed", job_id, attempts)
+        await _mark_session_failed(kind, session_id, message, commit=False)
+        await db.execute(
+            """UPDATE import_jobs
+               SET status = 'failed', payload_encrypted = NULL, error_message = ?,
+                   completed_at = datetime('now'), updated_at = datetime('now')
+               WHERE id = ?""",
+            (message, job_id),
+        )
+    interrupted = [row[1:3] for row in interrupted if row[3] < MAX_JOB_ATTEMPTS]
     for kind, session_id in interrupted:
         table = _session_table(kind)
         await db.execute(
@@ -233,7 +255,9 @@ async def _get_session_status(kind: str, session_id: int) -> str | None:
     return row[0] if row else None
 
 
-async def _mark_session_failed(kind: str, session_id: int, message: str) -> None:
+async def _mark_session_failed(
+    kind: str, session_id: int, message: str, *, commit: bool = True
+) -> None:
     db = await get_db()
     table = _session_table(kind)
     cursor = await db.execute(f"SELECT error_log FROM {table} WHERE id = ?", (session_id,))
@@ -246,7 +270,8 @@ async def _mark_session_failed(kind: str, session_id: int, message: str) -> None
             WHERE id = ?""",
         (json.dumps(errors), session_id),
     )
-    await db.commit()
+    if commit:
+        await db.commit()
 
 
 async def _finish_job(job_id: int, status: str, error_message: str | None = None) -> None:
@@ -302,60 +327,63 @@ def terminal_progress_event(session: dict[str, Any]) -> tuple[str, dict[str, Any
     return event_type, data
 
 
-async def _worker_loop() -> None:
-    assert _worker_wakeup is not None
+async def _lane_loop(name: str, run_next, wakeup: asyncio.Event) -> None:
+    """Run one queue forever; an unexpected error is logged and retried, never fatal."""
     while True:
-        if await _run_next_durable_job():
-            continue
-        _worker_wakeup.clear()
         try:
-            await asyncio.wait_for(_worker_wakeup.wait(), timeout=_POLL_SECONDS)
+            if await run_next():
+                continue
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Without this guard one transient error (for example "database is
+            # locked") silently stopped all background work until a restart.
+            logger.exception("Durable %s worker error; retrying", name)
+            await asyncio.sleep(_ERROR_BACKOFF_SECONDS)
+            continue
+        wakeup.clear()
+        try:
+            await asyncio.wait_for(wakeup.wait(), timeout=_POLL_SECONDS)
         except TimeoutError:
             pass
 
 
-async def _run_next_durable_job() -> bool:
-    """Alternate job types so a long import queue cannot starve browser uploads."""
-    global _prefer_upload
-    from backend.services.upload_job_service import run_next_upload_job
-
-    if _prefer_upload:
-        if await run_next_upload_job():
-            _prefer_upload = False
-            return True
-        if await run_next_import_job():
-            return True
-    else:
-        if await run_next_import_job():
-            _prefer_upload = True
-            return True
-        if await run_next_upload_job():
-            return True
-    return False
+def _log_lane_exit(task: asyncio.Task) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        logger.error("Durable worker %s stopped", task.get_name(), exc_info=task.exception())
 
 
-async def start_import_worker() -> asyncio.Task:
-    """Recover interrupted work and start the single in-process queue worker."""
-    global _worker_task, _worker_wakeup
-    if _worker_task is not None and not _worker_task.done():
-        return _worker_task
-    _worker_wakeup = asyncio.Event()
+async def start_import_worker() -> list[asyncio.Task]:
+    """Recover interrupted work and start the upload and import worker lanes."""
+    if _worker_tasks and not any(task.done() for task in _worker_tasks):
+        return _worker_tasks
+    await stop_import_worker()
     await recover_interrupted_jobs()
-    from backend.services.upload_job_service import recover_interrupted_upload_jobs
+    from backend.services.upload_job_service import (
+        recover_interrupted_upload_jobs,
+        run_next_upload_job,
+    )
 
     await recover_interrupted_upload_jobs()
-    _worker_task = asyncio.create_task(_worker_loop(), name="gamevault-import-worker")
-    return _worker_task
+    for name, run_next in (("upload", run_next_upload_job), ("import", run_next_import_job)):
+        wakeup = asyncio.Event()
+        task = asyncio.create_task(
+            _lane_loop(name, run_next, wakeup), name=f"gamevault-{name}-worker"
+        )
+        task.add_done_callback(_log_lane_exit)
+        _worker_wakeups.append(wakeup)
+        _worker_tasks.append(task)
+    return _worker_tasks
 
 
 async def stop_import_worker() -> None:
-    """Stop the worker; a running job remains recoverable on next startup."""
-    global _worker_task, _worker_wakeup
-    if _worker_task is not None:
-        _worker_task.cancel()
-        try:
-            await _worker_task
-        except asyncio.CancelledError:
-            pass
-    _worker_task = None
-    _worker_wakeup = None
+    """Stop the workers; a running job remains recoverable on next startup."""
+    tasks = list(_worker_tasks)
+    _worker_tasks.clear()
+    _worker_wakeups.clear()
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
+        # Lane failures were already logged by _log_lane_exit.
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task

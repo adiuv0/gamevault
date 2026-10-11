@@ -17,6 +17,7 @@ export interface SearchResult {
   has_annotation: boolean | number;
   annotation_preview: string | null;
   relevance_score: number | null;
+  media_version?: string;
 }
 
 export interface SearchResponse {

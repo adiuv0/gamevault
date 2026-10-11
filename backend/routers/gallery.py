@@ -23,6 +23,12 @@ from backend.services.media_cache_service import media_response_headers, media_v
 
 router = APIRouter(prefix="/api/gallery", tags=["gallery"])
 
+# Python's mimetypes module doesn't know JPEG XR.
+_EXTRA_MIME_TYPES = {
+    ".jxr": "image/vnd.ms-photo",
+    ".wdp": "image/vnd.ms-photo",
+}
+
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -39,7 +45,8 @@ async def _get_public_screenshot(screenshot_id: int) -> dict:
     """Get a screenshot, raising 404 if its game isn't public."""
     db = await get_db()
     cursor = await db.execute(
-        """SELECT s.*, g.is_public, g.folder_name
+        """SELECT s.id, s.file_path, s.thumbnail_path_sm, s.thumbnail_path_md,
+                  s.preview_path, s.updated_at, g.is_public, g.folder_name
            FROM screenshots s
            JOIN games g ON g.id = s.game_id
            WHERE s.id = ? AND g.is_public = 1""",
@@ -148,7 +155,11 @@ async def gallery_screenshot_image(screenshot_id: int, v: str | None = None):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image file not found")
 
-    media_type = mimetypes.guess_type(str(file_path))[0] or "image/jpeg"
+    media_type = (
+        _EXTRA_MIME_TYPES.get(file_path.suffix.lower())
+        or mimetypes.guess_type(str(file_path))[0]
+        or "image/jpeg"
+    )
     return FileResponse(
         file_path,
         media_type=media_type,
@@ -214,7 +225,9 @@ async def gallery_screenshot_preview(screenshot_id: int, v: str | None = None):
     media_type = (
         "image/jpeg"
         if is_derivative
-        else mimetypes.guess_type(str(full_path))[0] or "image/jpeg"
+        else _EXTRA_MIME_TYPES.get(full_path.suffix.lower())
+        or mimetypes.guess_type(str(full_path))[0]
+        or "image/jpeg"
     )
     return FileResponse(
         full_path,

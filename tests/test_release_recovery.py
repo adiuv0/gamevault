@@ -17,14 +17,17 @@ import pytest
 
 from backend.migrations.runner import MIGRATIONS, run_migrations
 
+# Each shipped schema, pinned by count: a slice from the end would shift every
+# time a migration is added and quietly stop testing the real upgrade.
 SUPPORTED_RELEASE_SCHEMAS = {
     "0.1.0": MIGRATIONS[:2],
     "0.2.0": MIGRATIONS[:3],
     "0.3.0": MIGRATIONS[:5],
     "0.3.1": MIGRATIONS[:5],
-    "1.0.0": MIGRATIONS[:-1],
-    "1.0.1": MIGRATIONS[:-1],
-    "1.0.2": MIGRATIONS[:-1],
+    "1.0.0": MIGRATIONS[:11],
+    "1.0.1": MIGRATIONS[:11],
+    "1.0.2": MIGRATIONS[:11],
+    "1.0.3": MIGRATIONS[:12],
 }
 
 
@@ -371,6 +374,7 @@ async def test_release_version_surfaces_stay_synchronized():
     assert frontend_lock["packages"][""]["version"] == APP_VERSION
     assert set(SUPPORTED_RELEASE_SCHEMAS) == stable_releases - {APP_VERSION}
     assert app.version == APP_VERSION
-    assert await health() == {"status": "ok", "version": APP_VERSION}
+    body = await health()
+    assert body["status"] == "ok" and body["version"] == APP_VERSION
     assert f"GameVault v{APP_VERSION}" in sidebar
     assert f'"version": "{APP_VERSION}"' in api_reference

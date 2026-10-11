@@ -203,11 +203,12 @@ class TestSortAllowlists:
 
 @pytest.fixture
 def cli_module(monkeypatch, tmp_path):
-    """Import the CLI module fresh with a redirected CONFIG_PATH."""
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cli"))
-    if "gamevault_sync" in sys.modules:
-        del sys.modules["gamevault_sync"]
-    import gamevault_sync as cli_mod  # type: ignore
+    """The sync app's config module, with CONFIG_PATH redirected."""
+    monkeypatch.setenv("GAMEVAULT_SYNC_HOME", str(tmp_path / "sync-home"))
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "desktop"))
+    for name in [m for m in sys.modules if m == "gamevault_sync" or m.startswith("gamevault_sync.")]:
+        monkeypatch.delitem(sys.modules, name)
+    from gamevault_sync import config as cli_mod  # type: ignore
     monkeypatch.setattr(cli_mod, "CONFIG_PATH", tmp_path / "test_sync.json")
     cli_mod._keyring_warning_shown = False
     return cli_mod

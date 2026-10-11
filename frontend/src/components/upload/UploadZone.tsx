@@ -1,4 +1,5 @@
-import { useCallback, useState, useRef } from 'react';
+import { useCallback, useState, useRef, useEffect } from 'react';
+import { api } from '@/api/client';
 import { Upload, ImagePlus } from 'lucide-react';
 import { ACCEPTED_IMAGE_TYPES } from '@/lib/constants';
 
@@ -13,6 +14,11 @@ const ACCEPTED_MIME = Object.keys(ACCEPTED_IMAGE_TYPES).join(',');
 export function UploadZone({ onFilesSelected, disabled = false }: UploadZoneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [limits, setLimits] = useState<{ max_file_mb: number; max_batch_mb: number; max_files: number } | null>(null);
+  useEffect(() => {
+    void api.get<{ max_file_mb: number; max_batch_mb: number; max_files: number }>('/upload/limits')
+      .then(setLimits).catch(() => {});
+  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -91,7 +97,8 @@ export function UploadZone({ onFilesSelected, disabled = false }: UploadZoneProp
               : 'Drag and drop screenshots here, or click to browse'}
           </p>
           <p className="text-xs text-text-muted mt-1">
-            Supports JPG, PNG, WebP, BMP, TIFF — up to 50 MB per file
+            JPG, PNG, WebP, BMP, TIFF, JXR
+            {limits && ` · ${limits.max_file_mb} MiB per file · ${limits.max_batch_mb} MiB / ${limits.max_files} files per batch`}
           </p>
         </div>
       </div>

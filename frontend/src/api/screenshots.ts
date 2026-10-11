@@ -25,6 +25,10 @@ export async function getScreenshot(id: number): Promise<Screenshot> {
   return api.get(`/screenshots/${id}`);
 }
 
+export async function ungroupScreenshot(id: number): Promise<Screenshot> {
+  return api.post(`/screenshots/${id}/ungroup`);
+}
+
 export async function toggleFavorite(id: number): Promise<{ is_favorite: boolean }> {
   return api.post(`/screenshots/${id}/favorite`);
 }

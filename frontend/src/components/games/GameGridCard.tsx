@@ -10,7 +10,7 @@ interface GameGridCardProps {
 
 export function GameGridCard({ game }: GameGridCardProps) {
   const coverUrl = game.cover_image_path
-    ? getCoverUrl(game.id)
+    ? getCoverUrl(game.id, game.updated_at)
     : null;
 
   return (

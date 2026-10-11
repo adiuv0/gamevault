@@ -18,10 +18,11 @@ export function ScreenshotGallery({
       screenshots={screenshots}
       onSelect={onSelect}
       onEndReached={onEndReached}
-      renderItem={(screenshot, onClick) => (
+      renderItem={(screenshot, index, select) => (
         <ScreenshotCard
           screenshot={screenshot}
-          onClick={onClick}
+          index={index}
+          onSelect={select}
         />
       )}
     />

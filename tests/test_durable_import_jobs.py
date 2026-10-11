@@ -22,8 +22,11 @@ async def durable_import_db(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(settings, "thumbnail_dir", tmp_path / "cache")
     monkeypatch.setattr(settings, "secret_key", "durable-import-test-secret")
     await init_db()
+    import aiosqlite
     try:
-        yield await get_db(), settings
+        async with aiosqlite.connect(str(settings.db_path)) as fixture_db:
+            await fixture_db.execute("PRAGMA foreign_keys=ON")
+            yield fixture_db, settings
     finally:
         await stop_import_worker()
         await close_db()
@@ -164,7 +167,7 @@ async def test_specialk_job_replay_does_not_duplicate_screenshot_rows(
     orphan.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, orphan)
 
-    async def skip_metadata(_game_id):
+    async def skip_metadata(_game_id, **_kwargs):
         return {}
 
     monkeypatch.setattr(specialk_import_service, "fetch_and_apply_metadata", skip_metadata)
@@ -238,3 +241,75 @@ async def test_durable_import_migration_is_registered(durable_import_db):
     cursor = await db.execute("PRAGMA table_info(import_jobs)")
     columns = {row[1] for row in await cursor.fetchall()}
     assert {"kind", "session_id", "payload_encrypted", "status", "attempts"} <= columns
+
+
+@pytest.mark.asyncio
+async def test_repeatedly_interrupted_job_fails_instead_of_looping(durable_import_db):
+    from backend.services import import_job_service
+
+    db, _ = durable_import_db
+    session_id = await import_job_service.create_specialk_import_job(
+        "D:/captures",
+        {"scan_path_str": "D:/captures", "folder_names": ["Game"]},
+    )
+    await db.execute(
+        "UPDATE import_jobs SET status = 'running', attempts = ? WHERE session_id = ?",
+        (import_job_service.MAX_JOB_ATTEMPTS, session_id),
+    )
+    await db.execute(
+        "UPDATE specialk_import_sessions SET status = 'running' WHERE id = ?", (session_id,)
+    )
+    await db.commit()
+
+    assert await import_job_service.recover_interrupted_jobs() == 0
+    cursor = await db.execute(
+        "SELECT status, payload_encrypted FROM import_jobs WHERE session_id = ?", (session_id,)
+    )
+    assert await cursor.fetchone() == ("failed", None)
+    cursor = await db.execute(
+        "SELECT status, error_log FROM specialk_import_sessions WHERE id = ?", (session_id,)
+    )
+    status, error_log = await cursor.fetchone()
+    assert status == "failed"
+    assert "interrupted" in error_log
+
+
+@pytest.mark.asyncio
+async def test_worker_lane_survives_errors_and_uploads_do_not_wait_for_imports(
+    durable_import_db, monkeypatch
+):
+    import asyncio
+
+    from backend.services import import_job_service, upload_job_service
+
+    monkeypatch.setattr(import_job_service, "_ERROR_BACKOFF_SECONDS", 0)
+    import_started, release_import = asyncio.Event(), asyncio.Event()
+    upload_calls = 0
+
+    async def slow_import():
+        import_started.set()
+        await release_import.wait()
+        return False
+
+    async def flaky_upload():
+        nonlocal upload_calls
+        upload_calls += 1
+        if upload_calls == 1:
+            raise RuntimeError("database is locked")
+        return False
+
+    monkeypatch.setattr(import_job_service, "run_next_import_job", slow_import)
+    monkeypatch.setattr(upload_job_service, "run_next_upload_job", flaky_upload)
+    await import_job_service.start_import_worker()
+    try:
+        await asyncio.wait_for(import_started.wait(), 2)
+        for _ in range(200):
+            if upload_calls >= 2:
+                break
+            await asyncio.sleep(0.01)
+        # The upload lane recovered from its error while the import is still running.
+        assert upload_calls >= 2
+        assert not release_import.is_set()
+    finally:
+        release_import.set()
+        await import_job_service.stop_import_worker()

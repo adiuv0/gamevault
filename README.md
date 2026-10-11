@@ -6,6 +6,7 @@ Self-hosted game screenshot manager. Import your Steam screenshots, upload manua
 
 - **Steam Import** — 4-step wizard to bulk-import screenshots from your Steam Community profile with live progress tracking
 - **Manual Upload** — drag-and-drop upload with automatic thumbnail generation and EXIF metadata extraction
+- **GameVault Sync** — a Windows tray app that backs up new Steam and Special K screenshots from your gaming PC on its own; sign in once with your password ([desktop/README.md](desktop/README.md))
 - **Game Library** — grid and list views, cover art, per-game screenshot counts, and metadata from Steam/SteamGridDB/IGDB
 - **Annotations** — rich text editor (Markdown) for adding notes to any screenshot
 - **Full-Text Search** — FTS5-powered search across game names, filenames, descriptions, and annotations with BM25 ranking
@@ -95,7 +96,9 @@ These enable richer game metadata and cover art. Add them anytime from the Setti
 |----------|---------|-------------|
 | `GAMEVAULT_DISABLE_AUTH` | `false` | Disable password auth (LAN-only setups) |
 | `GAMEVAULT_IMPORT_RATE_LIMIT_MS` | `1000` | Delay between Steam requests during import |
-| `GAMEVAULT_MAX_UPLOAD_SIZE_MB` | `50` | Max file size for uploads |
+| `GAMEVAULT_MAX_UPLOAD_SIZE_MB` | `512` | Per-file upload limit in MiB, including HDR originals |
+| `GAMEVAULT_MAX_UPLOAD_BATCH_SIZE_MB` | `8192` | Whole multipart request limit in MiB |
+| `GAMEVAULT_MAX_UPLOAD_FILES` | `200` | Maximum files in one upload batch |
 | `GAMEVAULT_THUMBNAIL_QUALITY` | `85` | JPEG quality for thumbnails (1-100) |
 | `GAMEVAULT_THUMBNAIL_DIR` | `/data/cache/thumbnails` | Fast local storage for generated thumbnails |
 | `GAMEVAULT_TOKEN_EXPIRY_DAYS` | `30` | Login token lifetime |
@@ -214,7 +217,7 @@ Reference docs live in [docs/](docs/README.md):
 - [Configuration](docs/CONFIGURATION.md) — env vars, DB-stored preferences, backups
 - [API Reference](docs/API_REFERENCE.md) — every REST endpoint
 - [Architecture](docs/ARCHITECTURE.md) — how the code is organized
-- [Releasing](docs/RELEASING.md) — version bump, Docker Hub push cheat sheet
+- [Review fixes](docs/REVIEW_FIXES_2026-09-21.md) — upgrade notes and upload limits
 
 ## License
 

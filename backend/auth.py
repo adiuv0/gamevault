@@ -1,7 +1,7 @@
 """Authentication: single-password auth with JWT tokens."""
 
+import hmac
 import re
-import time
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -11,10 +11,9 @@ from jwt import InvalidTokenError
 
 from backend.config import settings
 from backend.database import get_db
+from backend.services import device_token_service
 
 ALGORITHM = "HS256"
-_PASSWORD_HASH_CACHE_TTL_SECONDS = 30.0
-_password_hash_cache: tuple[float, str | None] | None = None
 
 
 # Endpoints where ``?token=`` query-string auth is allowed.
@@ -56,7 +55,11 @@ def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 
-def create_access_token(expires_days: int | None = None) -> str:
+def _credential_version(password_hash: str) -> str:
+    return hmac.digest(settings.secret_key.encode(), password_hash.encode(), "sha256").hex()
+
+
+def create_access_token(expires_days: int | None = None, *, password_hash: str | None = None) -> str:
     """Create a JWT access token."""
     if expires_days is None:
         expires_days = settings.token_expiry_days
@@ -64,6 +67,7 @@ def create_access_token(expires_days: int | None = None) -> str:
     payload = {
         "sub": "gamevault_user",
         "exp": expire,
+        "credential_version": _credential_version(password_hash) if password_hash else None,
     }
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
@@ -73,29 +77,34 @@ def decode_token(token: str) -> dict:
     return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
 
 
+# Every authenticated request (including each thumbnail) needs the hash, and it only
+# changes through set_password, so keep it in memory per database file.
+_password_hash_cache: dict[str, str] = {}
+
+
 async def get_password_hash() -> str | None:
     """Get the stored password hash from app_settings, or None if not set."""
-    global _password_hash_cache
-    now = time.monotonic()
-    if (
-        _password_hash_cache is not None
-        and now - _password_hash_cache[0] < _PASSWORD_HASH_CACHE_TTL_SECONDS
-    ):
-        return _password_hash_cache[1]
-
+    cache_key = str(settings.db_path)
+    cached = _password_hash_cache.get(cache_key)
+    if cached is not None:
+        return cached
     db = await get_db()
     cursor = await db.execute(
         "SELECT value FROM app_settings WHERE key = 'auth_password_hash'"
     )
     row = await cursor.fetchone()
     stored_hash = row[0] if row else None
-    _password_hash_cache = (now, stored_hash)
+    if stored_hash is not None:
+        _password_hash_cache[cache_key] = stored_hash
     return stored_hash
 
 
 async def set_password(password: str) -> None:
-    """Store a hashed password in app_settings."""
-    global _password_hash_cache
+    """Store a hashed password in app_settings.
+
+    Like browser sessions, paired sync devices stop working when the password
+    changes; each PC signs in again with the new password.
+    """
     db = await get_db()
     hashed = hash_password(password)
     await db.execute(
@@ -103,8 +112,9 @@ async def set_password(password: str) -> None:
            ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
         (hashed,),
     )
+    await device_token_service.revoke_all_devices()
     await db.commit()
-    _password_hash_cache = (time.monotonic(), hashed)
+    _password_hash_cache[str(settings.db_path)] = hashed
 
 
 async def require_auth(request: Request) -> dict | None:
@@ -161,8 +171,28 @@ async def require_auth(request: Request) -> dict | None:
     if not token:
         raise HTTPException(status_code=401, detail="Missing authentication token")
 
+    if device_token_service.is_device_token(token):
+        return await _authenticate_device(request, token)
+
     try:
         payload = decode_token(token)
+        version = payload.get("credential_version")
+        if not isinstance(version, str) or not hmac.compare_digest(version, _credential_version(stored_hash)):
+            raise InvalidTokenError("Password changed; log in again")
         return payload
     except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+async def _authenticate_device(request: Request, token: str) -> dict:
+    """Accept a sync-app device token, only from a header and only on sync endpoints."""
+    path = request.url.path
+    from_header = request.headers.get("Authorization", "") == f"Bearer {token}"
+    if not from_header:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    device = await device_token_service.authenticate(token)
+    if device is None:
+        raise HTTPException(status_code=401, detail="This device was signed out")
+    if not device_token_service.device_may_access(request.method, path):
+        raise HTTPException(status_code=403, detail="Device tokens can only upload screenshots")
+    return {"sub": "device", "device_id": device["id"], "device_name": device["name"]}

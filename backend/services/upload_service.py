@@ -3,22 +3,19 @@
 import asyncio
 import json as _json
 import logging
+import os
 import shutil
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 
-from backend.services import hdr_processor
 from backend.services.filesystem import get_screenshots_dir, sanitize_filename
 from backend.services.game_service import get_game, update_screenshot_stats
 from backend.services.image_processor import (
     compute_sha256,
-    extract_date_taken,
-    extract_exif,
+    describe_image,
     generate_thumbnails_with_hash,
-    get_image_dimensions,
-    get_image_format,
     validate_image,
 )
 from backend.services.performance_diagnostics import recorder
@@ -71,6 +68,15 @@ async def emit_progress(task_id: str, event: dict) -> None:
         await queue.put(event)
 
 
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def _generate_filename(game_name: str, taken_at: datetime | None, original_ext: str) -> str:
     """Generate a screenshot filename.
 
@@ -92,6 +98,37 @@ def _generate_filename(game_name: str, taken_at: datetime | None, original_ext: 
         ext = f".{ext}"
 
     return f"{base}{ext}"
+
+
+def _copy_exclusive(source: Path, destination: Path) -> None:
+    """Copy into a new file, failing instead of overwriting one that appeared meanwhile.
+
+    The name is chosen with an exists() check first; a concurrent upload (the
+    sync endpoint and the durable worker run side by side) could pick the same
+    minute-precision name, and copy2 would silently overwrite its file.
+
+    When staging and the library share a filesystem, a hard link moves the file
+    without writing it again; link() also refuses an existing name, so it is
+    exclusive too. Separate mounts (the usual Docker layout) fall back to a copy.
+    """
+    try:
+        os.link(source, destination)
+        return
+    except FileExistsError:
+        raise
+    except OSError:
+        pass
+    with open(source, "rb") as reader:
+        # Opened outside the try: if the name is taken, that file is not ours to remove.
+        writer = open(destination, "xb")  # noqa: SIM115
+        try:
+            with writer:
+                shutil.copyfileobj(reader, writer, 1024 * 1024)
+            shutil.copystat(source, destination)
+        except BaseException:
+            # Never leave a truncated original behind under the claimed name.
+            destination.unlink(missing_ok=True)
+            raise
 
 
 def _ensure_unique_filename(directory: Path, filename: str) -> str:
@@ -116,6 +153,7 @@ async def process_upload(
     temp_files: list[tuple[int, str, Path]],
     taken_at_override: str | None = None,
     *,
+    taken_at_hint: str | None = None,
     durable: bool = False,
     emit_complete: bool = True,
 ) -> list[dict]:
@@ -123,6 +161,8 @@ async def process_upload(
 
     Emits SSE progress events for each file.
     """
+    from backend.services.game_service import resolve_game_id
+    game_id = await resolve_game_id(game_id)
     game = await get_game(game_id)
     if not game:
         if durable:
@@ -182,9 +222,12 @@ async def process_upload(
                 file_terminal = True
                 continue
 
+            # One header read for format, size, EXIF, date and HDR class.
+            described = await asyncio.to_thread(describe_image, temp_path)
+
             # Determine real format from magic bytes and enforce whitelist.
             # This prevents Stored XSS via malicious extensions (e.g. .html).
-            detected_format = (await asyncio.to_thread(get_image_format, temp_path) or "").lower()
+            detected_format = (described["format"] or "").lower()
             if detected_format not in ALLOWED_IMAGE_FORMATS:
                 await report({
                     "type": "file_error",
@@ -196,22 +239,20 @@ async def process_upload(
                 continue
             ext = ALLOWED_IMAGE_FORMATS[detected_format]
 
-            img_dims = await asyncio.to_thread(get_image_dimensions, temp_path)
-            img_format = detected_format
             file_size = temp_path.stat().st_size
             sha256 = await asyncio.to_thread(compute_sha256, temp_path)
-            exif = await asyncio.to_thread(extract_exif, temp_path)
-            date_taken_exif = await asyncio.to_thread(extract_date_taken, temp_path)
+            exif = described["exif"]
+            date_taken_exif = described["taken_at"]
 
             img_data = {
-                "width": img_dims[0] if img_dims else None,
-                "height": img_dims[1] if img_dims else None,
-                "format": img_format,
+                "width": described["width"],
+                "height": described["height"],
+                "format": detected_format,
                 "file_size": file_size,
                 "sha256_hash": sha256,
                 "exif_data": _json.dumps(exif) if exif else None,
                 "taken_at": date_taken_exif.isoformat() if date_taken_exif else None,
-                "is_hdr": await asyncio.to_thread(hdr_processor.is_hdr_source, temp_path),
+                "is_hdr": described["is_hdr"],
             }
 
             source_key = f"upload:{task_id}:{file_index}"
@@ -244,15 +285,14 @@ async def process_upload(
                 file_terminal = True
                 continue
 
-            # Determine taken_at
-            taken_at = None
-            if taken_at_override:
-                try:
-                    taken_at = datetime.fromisoformat(taken_at_override)
-                except ValueError:
-                    pass
+            # Determine taken_at: an explicit override, then the file's EXIF date,
+            # then the client's hint (Steam's capture time or the file's modified
+            # time), which dates PNG/JXR captures that carry no EXIF at all.
+            taken_at = _parse_iso(taken_at_override)
             if not taken_at and img_data.get("taken_at"):
                 taken_at = datetime.fromisoformat(img_data["taken_at"])
+            if not taken_at:
+                taken_at = _parse_iso(taken_at_hint)
 
             # Generate final filename and save
             filename = _generate_filename(game["name"], taken_at, ext)
@@ -272,12 +312,21 @@ async def process_upload(
                 filename = _ensure_unique_filename(screenshots_dir, filename)
             final_path = screenshots_dir / filename
 
-            if final_path.exists():
-                existing_hash = await asyncio.to_thread(compute_sha256, final_path)
-                if not durable or existing_hash != sha256:
-                    raise FileExistsError(f"Upload destination already exists: {filename}")
-            else:
-                await asyncio.to_thread(shutil.copy2, str(temp_path), str(final_path))
+            while True:
+                if final_path.exists():
+                    existing_hash = await asyncio.to_thread(compute_sha256, final_path)
+                    if durable and existing_hash == sha256:
+                        break  # replay of a copy that finished before a restart
+                    if durable:
+                        raise FileExistsError(f"Upload destination already exists: {filename}")
+                    filename = _ensure_unique_filename(screenshots_dir, filename)
+                    final_path = screenshots_dir / filename
+                    continue
+                try:
+                    await asyncio.to_thread(_copy_exclusive, temp_path, final_path)
+                    break
+                except FileExistsError:
+                    continue  # another upload claimed this name first; re-check
             logger.info("process_upload: SAVED %s -> %s (%d bytes)",
                         original_name, final_path, final_path.stat().st_size)
 

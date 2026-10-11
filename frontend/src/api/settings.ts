@@ -11,6 +11,8 @@ export interface AppSettings {
   thumbnail_quality: number;
   preview_max_width: number;
   max_upload_size_mb: number;
+  max_upload_batch_size_mb: number;
+  max_upload_files: number;
   token_expiry_days: number;
   has_steam_api_key: boolean;
   has_steamgriddb_api_key: boolean;
@@ -108,7 +110,7 @@ export async function resetPerformanceDiagnostics(): Promise<PerformanceSnapshot
 export async function changePassword(
   currentPassword: string,
   newPassword: string,
-): Promise<{ message: string }> {
+): Promise<{ message: string; token: string }> {
   return api.post('/auth/change-password', {
     current_password: currentPassword,
     new_password: newPassword,

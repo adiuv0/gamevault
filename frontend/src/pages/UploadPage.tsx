@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Upload, CheckCircle } from 'lucide-react';
 import { UploadZone } from '@/components/upload/UploadZone';
 import { UploadQueue } from '@/components/upload/UploadQueue';
@@ -27,10 +27,24 @@ export function UploadPage() {
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
   const [uploadItems, setUploadItems] = useState<UploadFileStatus[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  // Object URLs pin each selected file in memory until revoked, and an open
+  // progress stream keeps a server connection alive; release both on leave.
+  const previewUrls = useRef(new Set<string>());
+  const progressStream = useRef<EventSource | null>(null);
+
+  useEffect(() => {
+    const urls = previewUrls.current;
+    return () => {
+      progressStream.current?.close();
+      for (const url of urls) URL.revokeObjectURL(url);
+      urls.clear();
+    };
+  }, []);
 
   const generatePreviews = (files: File[]): UploadFileStatus[] => {
     return files.map((file) => {
       const preview = URL.createObjectURL(file);
+      previewUrls.current.add(preview);
       return {
         file,
         status: 'pending' as const,
@@ -77,6 +91,7 @@ export function UploadPage() {
       // Connect to SSE for processing progress
       // Backend emits: start, file_start, file_complete, file_error, file_skipped, complete
       // We match files by file_index which corresponds to position in pendingItems
+      progressStream.current?.close();
       const es = connectUploadProgress(result.task_id, (data) => {
         const event = data as SSEEvent;
 
@@ -115,6 +130,7 @@ export function UploadPage() {
           });
           if (['completed', 'failed', 'cancelled'].includes(event.status ?? '')) {
             setIsUploading(false);
+            es.close();
           }
         } else if (event.type === 'file_start' && event.file_index !== undefined) {
           setUploadItems((prev) => {
@@ -153,11 +169,12 @@ export function UploadPage() {
           es.close();
         }
       });
-    } catch {
+      progressStream.current = es;
+    } catch (error) {
       setUploadItems((prev) =>
         prev.map((item) =>
           item.status === 'uploading'
-            ? { ...item, status: 'error' as const, error: 'Upload failed' }
+            ? { ...item, status: 'error' as const, error: error instanceof Error ? error.message : 'Upload failed' }
             : item,
         ),
       );
@@ -170,6 +187,7 @@ export function UploadPage() {
       prev.forEach((item) => {
         if (item.status === 'complete' && item.preview) {
           URL.revokeObjectURL(item.preview);
+          previewUrls.current.delete(item.preview);
         }
       });
       return prev.filter((item) => item.status !== 'complete');

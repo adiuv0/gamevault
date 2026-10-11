@@ -107,7 +107,12 @@ class ApiClient {
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve(JSON.parse(xhr.responseText));
         } else {
-          reject(new ApiError(xhr.status, 'Upload failed'));
+          let detail = `Upload failed (${xhr.status})`;
+          try {
+            const body = JSON.parse(xhr.responseText);
+            if (typeof body.detail === 'string') detail = body.detail;
+          } catch { /* Proxies may return an HTML error response. */ }
+          reject(new ApiError(xhr.status, detail));
         }
       };
 

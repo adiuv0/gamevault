@@ -30,20 +30,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from backend.config import settings
 from backend.database import get_db
-from backend.services import hdr_processor
 from backend.services.filesystem import get_screenshots_dir
 from backend.services.game_service import (
     get_or_create_game,
     update_screenshot_stats,
 )
 from backend.services.image_processor import (
+    analyze_image,
     compute_sha256,
-    extract_date_taken,
-    extract_exif,
-    generate_thumbnails_with_hash,
-    get_image_dimensions,
-    get_image_format,
     validate_image,
 )
 from backend.services.metadata_service import fetch_and_apply_metadata
@@ -65,17 +61,19 @@ SDR_FOLDER_HINTS = ("sdr", "ldr")
 
 _progress_queues: dict[int, asyncio.Queue] = {}
 _cancel_flags: dict[int, bool] = {}
+_QUEUE_LIMIT = 1000
 
 
 def get_progress_queue(session_id: int) -> asyncio.Queue:
     if session_id not in _progress_queues:
-        _progress_queues[session_id] = asyncio.Queue()
+        _progress_queues[session_id] = asyncio.Queue(maxsize=_QUEUE_LIMIT)
     return _progress_queues[session_id]
 
 
 def cleanup_session(session_id: int) -> None:
+    # The cancel flag outlives the progress stream: closing or reconnecting the
+    # tab must not silently undo a cancel. run_import clears it when it ends.
     _progress_queues.pop(session_id, None)
-    _cancel_flags.pop(session_id, None)
 
 
 def request_cancel(session_id: int) -> None:
@@ -151,7 +149,10 @@ async def append_error_log(session_id: int, error_msg: str) -> None:
 
 async def emit_progress(session_id: int, event_type: str, data: dict) -> None:
     queue = get_progress_queue(session_id)
-    await queue.put({"event": event_type, "data": data})
+    if queue.full():
+        # Nobody is listening (tab closed): keep the newest events, bounded.
+        queue.get_nowait()
+    queue.put_nowait({"event": event_type, "data": data})
 
 
 # ── Scanning ─────────────────────────────────────────────────────────────────
@@ -331,6 +332,16 @@ async def run_import(
                 overall_completed=overall_completed,
                 total_screenshots=total_screenshots,
             )
+            if is_cancelled(session_id):
+                # A cancel during the last game used to fall through to "completed".
+                await update_import_session(
+                    session_id,
+                    completed_screenshots=overall_completed + game_completed,
+                    skipped_screenshots=overall_skipped + game_skipped,
+                    failed_screenshots=overall_failed + game_failed,
+                )
+                await _cancel_import(session_id)
+                return
 
             overall_completed += game_completed
             overall_skipped += game_skipped
@@ -375,6 +386,7 @@ async def run_import(
         await _fail_import(session_id, f"Unexpected error: {e}")
     finally:
         await emit_progress(session_id, "done", {})
+        _cancel_flags.pop(session_id, None)
 
 
 async def _fail_import(session_id: int, error: str) -> None:
@@ -419,44 +431,59 @@ async def _import_game(
     game_id = game["id"]
     game_folder = game["folder_name"]
 
-    for index, src_path in enumerate(scanned.files):
-        if is_cancelled(session_id):
-            return completed, skipped, failed
+    # Decode several files at once; each worker task gets its own connection and
+    # commits each row atomically. Hashes in flight are claimed so two identical
+    # files in one folder still import once.
+    semaphore = asyncio.Semaphore(settings.import_concurrency)
+    in_flight_hashes: set[str] = set()
 
-        try:
-            result = await _import_single_file(
-                session_id=session_id,
-                src_path=src_path,
-                game_id=game_id,
-                game_folder=game_folder,
-                game_name=scanned.suggested_name,
-                index=index,
-                total_for_game=len(scanned.files),
-                overall_completed=overall_completed + completed + skipped,
-                total_screenshots=total_screenshots,
-            )
-            if result == "completed":
-                completed += 1
-            elif result == "skipped":
-                skipped += 1
-            else:
+    async def import_one(index: int, src_path: Path) -> None:
+        nonlocal completed, skipped, failed
+        async with semaphore:
+            if is_cancelled(session_id):
+                return
+            try:
+                result = await _import_single_file(
+                    session_id=session_id,
+                    src_path=src_path,
+                    game_id=game_id,
+                    game_folder=game_folder,
+                    game_name=scanned.suggested_name,
+                    index=index,
+                    total_for_game=len(scanned.files),
+                    overall_completed=overall_completed + completed + skipped,
+                    total_screenshots=total_screenshots,
+                    in_flight_hashes=in_flight_hashes,
+                )
+                if result == "completed":
+                    completed += 1
+                elif result == "skipped":
+                    skipped += 1
+                else:
+                    failed += 1
+            except Exception as e:
                 failed += 1
-        except Exception as e:
-            failed += 1
-            error_msg = f"{scanned.suggested_name} / {src_path.name}: {e}"
-            logger.exception(error_msg)
-            await append_error_log(session_id, error_msg)
-            await emit_progress(session_id, "screenshot_failed", {
-                "filename": src_path.name,
-                "game_name": scanned.suggested_name,
-                "error": str(e),
-            })
+                error_msg = f"{scanned.suggested_name} / {src_path.name}: {e}"
+                logger.exception(error_msg)
+                await append_error_log(session_id, error_msg)
+                await emit_progress(session_id, "screenshot_failed", {
+                    "filename": src_path.name,
+                    "game_name": scanned.suggested_name,
+                    "error": str(e),
+                })
+
+    await asyncio.gather(*(
+        import_one(index, src_path) for index, src_path in enumerate(scanned.files)
+    ))
+    if is_cancelled(session_id):
+        await update_screenshot_stats(game_id)
+        return completed, skipped, failed
 
     await update_screenshot_stats(game_id)
 
     # Auto-fetch metadata for new games (best effort)
     try:
-        await fetch_and_apply_metadata(game_id)
+        await fetch_and_apply_metadata(game_id, only_if_missing=True)
     except Exception as e:
         logger.warning("Special K auto-metadata fetch failed for %s: %s",
                        scanned.suggested_name, e)
@@ -475,6 +502,7 @@ async def _import_single_file(
     total_for_game: int,
     overall_completed: int,
     total_screenshots: int,
+    in_flight_hashes: set[str] | None = None,
 ) -> str:
     """Import a single Special K screenshot file. Returns 'completed' | 'skipped' | 'failed'."""
 
@@ -487,8 +515,8 @@ async def _import_single_file(
         return "failed"
 
     sha256 = await asyncio.to_thread(compute_sha256, src_path)
-    duplicate = await check_duplicate_hash(sha256)
-    if duplicate:
+    in_flight = in_flight_hashes if in_flight_hashes is not None else set()
+    if sha256 in in_flight or await check_duplicate_hash(sha256):
         await emit_progress(session_id, "screenshot_skipped", {
             "filename": src_path.name,
             "game_name": game_name,
@@ -499,7 +527,28 @@ async def _import_single_file(
             "total_screenshots": total_screenshots,
         })
         return "skipped"
+    in_flight.add(sha256)
+    try:
+        return await _store_single_file(
+            session_id, src_path, sha256, game_id, game_folder, game_name,
+            index, total_for_game, overall_completed, total_screenshots,
+        )
+    finally:
+        in_flight.discard(sha256)
 
+
+async def _store_single_file(
+    session_id: int,
+    src_path: Path,
+    sha256: str,
+    game_id: int,
+    game_folder: str,
+    game_name: str,
+    index: int,
+    total_for_game: int,
+    overall_completed: int,
+    total_screenshots: int,
+) -> str:
     # Determine destination filename — keep extension, prefix with game name
     # and source mtime so it sorts naturally with other library entries.
     mtime = datetime.fromtimestamp(src_path.stat().st_mtime)
@@ -522,19 +571,10 @@ async def _import_single_file(
     if not dest_path.exists():
         await asyncio.to_thread(shutil.copy2, str(src_path), str(dest_path))
 
-    # Image metadata + thumbnails (HDR-aware via image_processor)
-    dims = await asyncio.to_thread(get_image_dimensions, dest_path)
-    width, height = dims if dims else (None, None)
-    fmt = await asyncio.to_thread(get_image_format, dest_path)
-    file_size = dest_path.stat().st_size
-    exif = await asyncio.to_thread(extract_exif, dest_path)
-    date_taken = await asyncio.to_thread(extract_date_taken, dest_path)
-    taken_at = (date_taken or mtime).isoformat()
-
+    # Image metadata + thumbnails (HDR-aware) in one thread hop and one header read.
     filename_stem = Path(filename).stem
-    sm, md, preview, perceptual_hash = await asyncio.to_thread(
-        generate_thumbnails_with_hash, dest_path, game_folder, filename_stem
-    )
+    info = await asyncio.to_thread(analyze_image, dest_path, game_folder, filename_stem)
+    taken_at = (info["taken_at"] or mtime).isoformat()
 
     rel_path = f"{game_folder}/screenshots/{filename}"
 
@@ -545,18 +585,18 @@ async def _import_single_file(
         source="specialk_import",
         recalculate_stats=False,
         sha256_hash=sha256,
-        width=width,
-        height=height,
-        format=fmt,
-        file_size=file_size,
+        width=info["width"],
+        height=info["height"],
+        format=info["format"],
+        file_size=info["file_size"],
         taken_at=taken_at,
-        exif_data=json.dumps(exif) if exif else None,
-        thumbnail_path_sm=sm,
-        thumbnail_path_md=md,
-        preview_path=preview,
-        perceptual_hash=perceptual_hash,
+        exif_data=json.dumps(info["exif"]) if info["exif"] else None,
+        thumbnail_path_sm=info["thumbnail_path_sm"],
+        thumbnail_path_md=info["thumbnail_path_md"],
+        preview_path=info["preview_path"],
+        perceptual_hash=info["perceptual_hash"],
         source_key=f"specialk:{src_path.stem.casefold()}",
-        is_hdr=await asyncio.to_thread(hdr_processor.is_hdr_source, dest_path),
+        is_hdr=info["is_hdr"],
     )
 
     await emit_progress(session_id, "screenshot_complete", {

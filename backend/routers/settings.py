@@ -7,10 +7,9 @@ from backend.auth import require_auth
 from backend.config import settings
 from backend.database import get_db
 from backend.services import preview_service
+from backend.services.storage_stats import get_storage_sizes
 from backend.services.filesystem import (
     format_file_size,
-    get_library_size_bytes,
-    get_thumbnail_cache_size_bytes,
 )
 from backend.services.performance_diagnostics import get_snapshot, reset_snapshot
 from backend.services.thumbnail_cache_service import migrate_legacy_thumbnails
@@ -66,8 +65,7 @@ async def _read_preference(key_name: str, default: str = "") -> str:
 @router.get("")
 async def get_settings():
     """Get application settings (secrets redacted)."""
-    lib_size = get_library_size_bytes()
-    cache_size = get_thumbnail_cache_size_bytes()
+    lib_size, cache_size = await get_storage_sizes()
 
     # Database stats
     db = await get_db()
@@ -75,7 +73,7 @@ async def get_settings():
     cursor = await db.execute("SELECT COUNT(*) FROM games")
     game_count = (await cursor.fetchone())[0]
 
-    cursor = await db.execute("SELECT COUNT(*) FROM screenshots")
+    cursor = await db.execute("SELECT COUNT(*) FROM logical_captures")
     screenshot_count = (await cursor.fetchone())[0]
 
     cursor = await db.execute("SELECT COUNT(*) FROM annotations")
@@ -113,6 +111,8 @@ async def get_settings():
         "thumbnail_quality": settings.thumbnail_quality,
         "preview_max_width": settings.preview_max_width,
         "max_upload_size_mb": settings.max_upload_size_mb,
+        "max_upload_batch_size_mb": settings.max_upload_batch_size_mb,
+        "max_upload_files": settings.max_upload_files,
         "token_expiry_days": settings.token_expiry_days,
         "has_steam_api_key": has_steam,
         "has_steamgriddb_api_key": has_griddb,

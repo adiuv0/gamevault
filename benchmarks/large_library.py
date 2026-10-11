@@ -105,6 +105,8 @@ async def run_case(
         list_screenshots,
         list_screenshots_cursor,
     )
+    from backend.services.search_service import search_screenshots
+    from backend.services.timeline_service import get_timeline
 
     await close_db()
     with tempfile.TemporaryDirectory(prefix="gamevault-benchmark-") as temp_dir:
@@ -132,6 +134,8 @@ async def run_case(
             first_page_times = []
             deep_page_times = []
             cursor_page_times = []
+            timeline_times = []
+            search_times = []
             for _ in range(iterations):
                 started = time.perf_counter()
                 first_items, total = await list_screenshots(game_id, 1, 50)
@@ -148,6 +152,16 @@ async def run_case(
                     await list_screenshots_cursor(game_id, deep_cursor, 50)
                 )
                 cursor_page_times.append(time.perf_counter() - started)
+
+                # Timeline and search read the logical-capture view; keep them
+                # measured so a view or query change cannot regress them silently.
+                started = time.perf_counter()
+                await get_timeline()
+                timeline_times.append(time.perf_counter() - started)
+
+                started = time.perf_counter()
+                await search_screenshots("capture")
+                search_times.append(time.perf_counter() - started)
 
             first_page_payload = json.dumps(
                 first_items, separators=(",", ":")
@@ -174,6 +188,8 @@ async def run_case(
                     "items": len(deep_items),
                     "total": deep_total,
                 },
+                "timeline_first_page": _summary(timeline_times),
+                "search_first_page": _summary(search_times),
                 "cursor_deep_page": {
                     **_summary(cursor_page_times),
                     "page": deep_page,

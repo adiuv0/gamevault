@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import { galleryGetScreenshot, galleryImageUrl, galleryPreviewUrl } from '@/api/gallery';
 import { formatDateTime, formatFileSize } from '@/lib/formatters';
+import { ProgressiveImage } from '@/components/shared/ProgressiveImage';
+import { usePreloadImages } from '@/hooks/usePreloadImages';
 import type {
   PublicScreenshot,
   ScreenshotListItem,
@@ -76,6 +78,13 @@ export function GalleryScreenshotViewer({
     activeVariant?.format?.toLowerCase() || '',
   );
   const usePreview = !!activeVariant && (requiresPreview || !!originalFailures[activeVariant.id]);
+
+  const prevItem = screenshots[currentIndex - 1];
+  const nextItem = screenshots[currentIndex + 1];
+  usePreloadImages([
+    nextItem && galleryPreviewUrl(nextItem.id, nextItem.media_version),
+    prevItem && galleryPreviewUrl(prevItem.id, prevItem.media_version),
+  ]);
 
   useEffect(() => {
     if (!listItem || detailsById[listItem.id]) return;
@@ -231,21 +240,19 @@ export function GalleryScreenshotViewer({
 
         {/* Image */}
         <div className={`flex-1 flex items-center justify-center p-4 ${showInfo ? 'sm:mr-80' : ''}`}>
-          <img
-            key={`${activeVariant.id}-${usePreview ? 'preview' : 'original'}`}
-            src={usePreview
-              ? galleryPreviewUrl(activeVariant.id, activeVariant.media_version)
+          <ProgressiveImage
+            key={activeVariant.id}
+            previewUrl={galleryPreviewUrl(activeVariant.id, activeVariant.media_version)}
+            originalUrl={usePreview
+              ? null
               : galleryImageUrl(activeVariant.id, activeVariant.media_version)}
             alt={activeVariant.filename}
             className="max-w-full max-h-full object-contain select-none"
-            draggable={false}
-            onError={() => {
-              if (!usePreview) {
-                setOriginalFailures((current) => ({
-                  ...current,
-                  [activeVariant.id]: true,
-                }));
-              }
+            onOriginalError={() => {
+              setOriginalFailures((current) => ({
+                ...current,
+                [activeVariant.id]: true,
+              }));
             }}
           />
         </div>

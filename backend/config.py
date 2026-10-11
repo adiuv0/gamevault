@@ -38,11 +38,16 @@ class Settings(BaseSettings):
 
     # Import settings
     import_rate_limit_ms: int = 1000
+    # Files decoded in parallel during imports. Each HDR decode can hold a few
+    # hundred MB, so this stays conservative by default.
+    import_concurrency: int = Field(default=2, ge=1, le=16)
 
     # Image processing
     thumbnail_quality: int = 85
     preview_max_width: int = Field(default=1920, ge=800, le=7680)
-    max_upload_size_mb: int = 50
+    max_upload_size_mb: int = Field(default=512, ge=1)
+    max_upload_batch_size_mb: int = Field(default=8192, ge=1)
+    max_upload_files: int = Field(default=200, ge=1)
 
     # Special K import — server-side scanning is gated by an optional path
     # allowlist. Set this to a comma-separated list of absolute directories

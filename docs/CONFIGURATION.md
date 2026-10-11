@@ -60,7 +60,10 @@ take precedence over env vars.
 | Variable | Default | Notes |
 |---|---|---|
 | `GAMEVAULT_IMPORT_RATE_LIMIT_MS` | `1000` | Delay between Steam HTML requests during import. Lower = faster but may hit Steam's rate limiter. |
-| `GAMEVAULT_MAX_UPLOAD_SIZE_MB` | `50` | Per-file upload limit. Web requests over this return HTTP 413. |
+| `GAMEVAULT_IMPORT_CONCURRENCY` | `2` | Screenshots processed at once per Steam or Special K game (1-16). Each slot decodes one image, so raise it on hosts with spare cores and RAM; large JXR files need roughly 200 MB each while decoding. |
+| `GAMEVAULT_MAX_UPLOAD_SIZE_MB` | `512` | Per-file upload limit in MiB, enforced during multipart parsing. |
+| `GAMEVAULT_MAX_UPLOAD_BATCH_SIZE_MB` | `8192` | Total multipart request limit in MiB, including form overhead. |
+| `GAMEVAULT_MAX_UPLOAD_FILES` | `200` | Maximum files per multipart request. |
 | `GAMEVAULT_THUMBNAIL_QUALITY` | `85` | JPEG quality (1-100) for generated thumbnails. |
 | `GAMEVAULT_PREVIEW_MAX_WIDTH` | `1920` | Maximum width of the browser viewer derivative (800-7680). Originals are unaffected. |
 | `GAMEVAULT_CORS_ORIGINS` | `""` | Comma-separated list of additional origins beyond the localhost defaults. Required if you serve the frontend from a different host than the backend. |
@@ -249,6 +252,10 @@ Schema changes are applied automatically on startup by
 are listed in order in `MIGRATIONS`; an `_migrations` table tracks which
 have been applied so they only run once.
 
+SQLite runs in WAL mode with `synchronous=NORMAL`. A power loss can roll back
+the last few commits but cannot corrupt the database; originals are written to
+the library before their rows are committed either way.
+
 Current migrations:
 
 - `m001_initial` — all core tables, indexes, FTS5 virtual table, triggers
@@ -262,6 +269,12 @@ Current migrations:
 - `m009_preview_cache` — tracks generated large-preview state
 - `m010_durable_import_jobs` — adds the encrypted Steam and Special K job queue
 - `m011_durable_upload_jobs` — adds browser-upload jobs and per-file replay state
+- `m012_hdr_classification` — stores HDR classification for capture matching
+- `m013_merge_redirects` — keeps in-flight uploads working after a game merge
+- `m014_logical_capture_views` — gives search and timeline the gallery's capture semantics
+- `m015_capture_primary` — stores each capture's representative row (kept current by
+  triggers) and indexes it, so timeline and search no longer rank the whole table per query
+- `m016_device_tokens` — GameVault Sync sign-ins (hashed per-PC tokens)
 
 To add a new migration: create `mNNN_<name>.py` with an
 `async upgrade(db)` function and append it to `MIGRATIONS` in

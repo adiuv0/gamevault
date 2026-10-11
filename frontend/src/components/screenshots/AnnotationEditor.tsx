@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { Save, X, Edit3, Trash2, Loader2 } from 'lucide-react';
 import { getAnnotation, saveAnnotation, deleteAnnotation } from '@/api/screenshots';
 
+// Session-only drafts survive pane toggles and navigating away from a capture.
+const drafts = new Map<number, string>();
+
 interface AnnotationEditorProps {
   screenshotId: number;
   hasAnnotation: boolean;
@@ -13,19 +16,20 @@ export function AnnotationEditor({
   hasAnnotation,
   onAnnotationChanged,
 }: AnnotationEditorProps) {
-  const [mode, setMode] = useState<'view' | 'edit'>('view');
-  const [content, setContent] = useState('');
+  const [mode, setMode] = useState<'view' | 'edit'>(drafts.has(screenshotId) ? 'edit' : 'view');
+  const [content, setContent] = useState(drafts.get(screenshotId) ?? '');
   const [contentHtml, setContentHtml] = useState('');
   const [originalContent, setOriginalContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     if (!hasAnnotation) {
-      setContent('');
+      setContent(drafts.get(screenshotId) ?? '');
       setContentHtml('');
       setOriginalContent('');
       return;
@@ -36,12 +40,12 @@ export function AnnotationEditor({
         setLoading(true);
         const annotation = await getAnnotation(screenshotId);
         if (annotation && !cancelled) {
-          setContent(annotation.content);
+          setContent(drafts.get(screenshotId) ?? annotation.content);
           setContentHtml(annotation.content_html || '');
           setOriginalContent(annotation.content);
         }
       } catch {
-        // No annotation exists
+        if (!cancelled) setError('Could not load annotation. Your draft has been kept.');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -57,13 +61,15 @@ export function AnnotationEditor({
     if (!content.trim()) return;
     try {
       setSaving(true);
+      setError(null);
       const result = await saveAnnotation(screenshotId, content);
+      drafts.delete(screenshotId);
       setContentHtml(result.content_html || '');
       setOriginalContent(content);
       setMode('view');
       onAnnotationChanged?.(true);
     } catch {
-      // ignore
+      setError('Could not save annotation. Your draft has been kept.');
     } finally {
       setSaving(false);
     }
@@ -72,20 +78,23 @@ export function AnnotationEditor({
   const handleDelete = async () => {
     try {
       setDeleting(true);
+      setError(null);
       await deleteAnnotation(screenshotId);
+      drafts.delete(screenshotId);
       setContent('');
       setContentHtml('');
       setOriginalContent('');
       setMode('view');
       onAnnotationChanged?.(false);
     } catch {
-      // ignore
+      setError('Could not delete annotation. Please try again.');
     } finally {
       setDeleting(false);
     }
   };
 
   const handleCancel = () => {
+    drafts.delete(screenshotId);
     setContent(originalContent);
     setMode('view');
   };
@@ -103,9 +112,11 @@ export function AnnotationEditor({
   if (mode === 'edit') {
     return (
       <div className="space-y-2">
+        {error && <p role="alert" className="text-sm text-accent-danger">{error}</p>}
         <textarea
           value={content}
-          onChange={(e) => setContent(e.target.value)}
+          disabled={saving || deleting}
+          onChange={(e) => { drafts.set(screenshotId, e.target.value); setContent(e.target.value); }}
           placeholder="Write your annotation... (supports Markdown)"
           className="w-full h-32 px-3 py-2 bg-bg-primary border border-border rounded-md text-sm text-text-primary placeholder-text-muted resize-y focus:outline-none focus:border-accent-primary"
           autoFocus
@@ -129,6 +140,7 @@ export function AnnotationEditor({
           <div className="flex items-center gap-2">
             <button
               onClick={handleCancel}
+              disabled={saving || deleting}
               className="flex items-center gap-1 px-3 py-1 text-xs text-text-secondary hover:text-text-primary rounded transition-colors"
             >
               <X className="h-3 w-3" />
@@ -151,6 +163,8 @@ export function AnnotationEditor({
   // View mode - no annotation
   if (!hasAnnotation || !originalContent) {
     return (
+      <div>
+      {error && <p role="alert" className="text-sm text-accent-danger">{error}</p>}
       <button
         onClick={() => setMode('edit')}
         className="flex items-center gap-2 text-sm text-text-muted hover:text-accent-primary transition-colors py-1"
@@ -158,6 +172,7 @@ export function AnnotationEditor({
         <Edit3 className="h-4 w-4" />
         Add annotation...
       </button>
+      </div>
     );
   }
 

@@ -103,6 +103,9 @@ async def create_upload_job(
 
     db = await get_db()
     try:
+        from backend.services.game_service import resolve_game_id
+        await db.execute("BEGIN IMMEDIATE")
+        game_id = await resolve_game_id(game_id)
         await db.execute(
             """INSERT INTO upload_jobs (task_id, game_id, taken_at, total_files)
                VALUES (?, ?, ?, ?)""",
@@ -251,10 +254,29 @@ async def reserve_target(task_id: str, file_index: int, filename: str) -> str:
 
 async def recover_interrupted_upload_jobs() -> int:
     """Requeue interrupted jobs and remove staging directories with no active job."""
+    from backend.services.import_job_service import MAX_JOB_ATTEMPTS
+
     db = await get_db()
-    cursor = await db.execute("SELECT task_id FROM upload_jobs WHERE status = 'running'")
-    interrupted = [row[0] for row in await cursor.fetchall()]
+    cursor = await db.execute(
+        "SELECT task_id, attempts FROM upload_jobs WHERE status = 'running'"
+    )
+    rows = await cursor.fetchall()
+    interrupted = [task_id for task_id, _ in rows]
     if interrupted:
+        # A file that was mid-processing through repeated crashes is the likely
+        # cause; fail it so the rest of the batch can finish instead of looping.
+        exhausted = [task_id for task_id, attempts in rows if attempts >= MAX_JOB_ATTEMPTS]
+        if exhausted:
+            logger.error("Failing files that interrupted upload jobs %s repeatedly", exhausted)
+            await db.execute(
+                f"""UPDATE upload_job_files
+                    SET status = 'failed', error_message = ?, updated_at = datetime('now')
+                    WHERE task_id IN ({", ".join("?" for _ in exhausted)})
+                      AND status = 'processing'""",
+                ("Processing this file was interrupted repeatedly; it was skipped", *exhausted),
+            )
+            for task_id in exhausted:
+                await _refresh_counts(db, task_id)
         placeholders = ", ".join("?" for _ in interrupted)
         await db.execute(
             f"""UPDATE upload_job_files SET status = 'pending', updated_at = datetime('now')
@@ -361,7 +383,7 @@ async def _run_claimed_upload_job(job: dict[str, Any]) -> None:
                 "total_files": finished["total_files"],
             },
         )
-        cleanup_staging_area(task_id)
+        await asyncio.to_thread(cleanup_staging_area, task_id)
     except asyncio.CancelledError:
         raise
     except Exception as error:
@@ -371,7 +393,7 @@ async def _run_claimed_upload_job(job: dict[str, Any]) -> None:
 
         await emit_progress(task_id, {"type": "error", "error": str(error)})
         await emit_progress(task_id, {"type": "complete"})
-        cleanup_staging_area(task_id)
+        await asyncio.to_thread(cleanup_staging_area, task_id)
 
 
 async def _finish_upload_job(

@@ -3,9 +3,8 @@
 Covers:
   - get_game_by_name is case-insensitive (prevents Special K importer
     creating ``Cyberpunk 2077`` next to existing ``CYBERPUNK 2077``).
-  - merge_games moves screenshot rows + files + thumbnails into the
-    target, handles filename collisions, transfers cover when the
-    target lacks one, re-syncs FTS, deletes the source row + folder.
+  - merge_games moves ownership in the database while preserving every file,
+    transfers the cover reference, re-syncs FTS, and deletes only the source row.
 """
 
 from __future__ import annotations
@@ -149,17 +148,12 @@ class TestMergeGames:
         moved = await screenshot_service.get_screenshot(s1["id"])
         assert moved["game_id"] == target["id"]
 
-        # Files actually live in the target folder now
-        t_folder = target["folder_name"]
-        assert (library_dir / t_folder / "screenshots" / "shot_a.jpg").read_bytes() == b"AAAA"
-        assert (thumbnail_dir / t_folder / "300" / "shot_a.jpg").exists()
-        assert (thumbnail_dir / t_folder / "800" / "shot_a.jpg").exists()
-        assert (thumbnail_dir / t_folder / "1920" / "shot_a.jpg").exists()
-        assert moved["file_path"] == f"{t_folder}/screenshots/shot_a.jpg"
-
-        # Source folder is cleaned up
-        assert not (library_dir / s_folder).exists()
-        assert not (thumbnail_dir / s_folder).exists()
+        # Metadata-only merges preserve all original and derivative paths.
+        assert (library_dir / s_folder / "screenshots" / "shot_a.jpg").read_bytes() == b"AAAA"
+        assert (thumbnail_dir / s_folder / "300" / "shot_a.jpg").exists()
+        assert (thumbnail_dir / s_folder / "800" / "shot_a.jpg").exists()
+        assert (thumbnail_dir / s_folder / "1920" / "shot_a.jpg").exists()
+        assert moved["file_path"] == s1["file_path"]
 
     @pytest.mark.asyncio
     async def test_resolves_filename_collisions(
@@ -192,11 +186,11 @@ class TestMergeGames:
         result = await game_service.merge_games(source["id"], target["id"])
 
         assert result["moved"] == 1
-        assert result["had_collisions"] == 1
+        assert result["had_collisions"] == 0
 
-        # Target now has both: original + the renamed merged-in copy
+        # Both originals survive at their distinct existing paths.
         assert (tmp_path / t_folder / "screenshots" / "shot.jpg").read_bytes() == b"T"
-        assert (tmp_path / t_folder / "screenshots" / "shot (1).jpg").read_bytes() == b"S"
+        assert (tmp_path / s_folder / "screenshots" / "shot.jpg").read_bytes() == b"S"
 
     @pytest.mark.asyncio
     async def test_transfers_cover_when_target_lacks_one(
@@ -227,8 +221,7 @@ class TestMergeGames:
     async def test_keeps_target_cover_if_present(
         self, db_with_library, tmp_path: Path
     ):
-        """Source cover is dropped (along with the source folder) if the
-        target already has its own cover."""
+        """The target retains its cover; the unused source cover also survives."""
         from backend.services import game_service
 
         source = await game_service.create_game(name="Source")

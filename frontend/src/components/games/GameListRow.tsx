@@ -10,7 +10,7 @@ interface GameListRowProps {
 
 export function GameListRow({ game }: GameListRowProps) {
   const coverUrl = game.cover_image_path
-    ? getCoverUrl(game.id)
+    ? getCoverUrl(game.id, game.updated_at)
     : null;
 
   return (
