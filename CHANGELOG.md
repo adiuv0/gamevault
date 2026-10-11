@@ -67,6 +67,12 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 - Concurrent uploads that pick the same filename can no longer overwrite each other.
 - IGDB and SteamGridDB lookups escape game names.
 
+### Security
+
+- PyJWT is upgraded to 2.15.1, which fixes several token-forgery and
+  authentication-bypass advisories in 2.13.0. Frontend build tooling picks up patched
+  `brace-expansion` and `source-map-js`.
+
 ### Removed
 
 - The Settings page's **Sync Token** (a copy of the 30-day browser session) is
