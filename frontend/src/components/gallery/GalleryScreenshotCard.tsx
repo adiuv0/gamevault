@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Files } from 'lucide-react';
 import { galleryThumbUrl } from '@/api/gallery';
 import { formatDate } from '@/lib/formatters';
@@ -5,14 +6,20 @@ import type { ScreenshotListItem } from '@/lib/types';
 
 interface GalleryScreenshotCardProps {
   screenshot: ScreenshotListItem;
-  onClick: () => void;
+  index: number;
+  onSelect: (index: number) => void;
 }
 
-export function GalleryScreenshotCard({ screenshot, onClick }: GalleryScreenshotCardProps) {
+// Memoized: loading another page re-renders only the new cards.
+export const GalleryScreenshotCard = memo(function GalleryScreenshotCard({
+  screenshot,
+  index,
+  onSelect,
+}: GalleryScreenshotCardProps) {
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={() => onSelect(index)}
       className="group block w-full rounded-lg overflow-hidden bg-bg-secondary border border-border hover:border-accent-primary/50 transition-all duration-200 hover:scale-[1.02] hover:shadow-lg hover:shadow-accent-primary/5 text-left"
     >
       {/* Thumbnail */}
@@ -46,4 +53,4 @@ export function GalleryScreenshotCard({ screenshot, onClick }: GalleryScreenshot
       </div>
     </button>
   );
-}
+});

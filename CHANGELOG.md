@@ -7,6 +7,77 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-11
+
+### Added
+
+- GameVault Sync is now a desktop app instead of a Python script: a Windows
+  installer and portable `.exe` (built by the `Desktop app` workflow and attached
+  to `v*` releases), a tray icon, start with Windows, and a window that signs in
+  with your password. It finds Steam and Special K by itself, including non-Steam
+  games added to Steam, checks for new screenshots about once a minute, reads only
+  files it hasn't seen before, and waits for a click before the first big upload.
+  `cli/gamevault_sync.py` and its options still work and start the app.
+- Sync-app sign-ins are per-PC device tokens (`m016`), listed under
+  **Settings > GameVault Sync** with a **Sign out** button. They don't expire, can
+  only reach the upload endpoints, and are all revoked when the password changes.
+  Signing in again from the same install replaces its old token; two PCs with the
+  same name keep their own. `POST /api/auth/devices/pair`, `GET/POST /api/auth/devices`,
+  `DELETE /api/auth/devices/{id}` and `DELETE /api/auth/devices/current`.
+- `GET /api/health` includes `instance`, a random id per database, so the sync app
+  can tell a new address for the same server from a different server.
+- `POST /api/upload/sync` reports which files were skipped as duplicates and which
+  were refused, and accepts a `taken_at_hint` date used when a file has no EXIF date.
+- `GET /api/games/by-steam-appid/{id}` accepts `?name=`, used instead of an
+  `App 12345` placeholder when the server can't reach the Steam store.
+
+### Changed
+
+- Timeline and search are roughly 600x and 900x faster on an 11k-screenshot
+  library (3.4 s to 6 ms, 2.0 s to 2 ms). Each capture's representative asset is
+  now stored and indexed (`m015`) instead of being ranked across the whole table
+  on every query, and the timeline loads a page of days in three queries.
+- The admin UI no longer waits on a full library disk scan when it opens. Token
+  checks use `/api/auth/verify`, and storage sizes are served from the last scan
+  while a fresh one runs in the background.
+- The viewer shows the cached preview immediately, swaps in the original once it
+  has downloaded, and preloads the neighbouring previews.
+- Steam and Special K imports process screenshots concurrently
+  (`GAMEVAULT_IMPORT_CONCURRENCY`, default 2) and decode each image once. JXR
+  dimensions are read from the file header, and JPEG previews decode at reduced scale.
+- Uploads and imports run in separate background lanes, so a long import no longer
+  blocks browser uploads.
+- Database connections are pooled and use `synchronous=NORMAL`; the security-headers
+  middleware is pure ASGI. Pages are code-split per route.
+
+### Fixed
+
+- A single error no longer stops all background jobs; lanes log, back off, and continue.
+- A file that crashes the process during import is failed after three attempts
+  instead of being retried on every restart.
+- Steam imports retry rate-limited and failed requests, fail instead of silently
+  truncating when a later page errors, validate downloads as images, and check the
+  host allowlist on every redirect.
+- Cancelling an import during its last game now reports it as cancelled.
+- Search thumbnails load when authentication is enabled, and stale search or timeline
+  responses can no longer replace newer ones.
+- The share panel can no longer show or delete another screenshot's link after navigating.
+- Deleting a screenshot removes its database row before its files.
+- Replaced covers appear immediately instead of after the 24-hour cache expires.
+- Concurrent uploads that pick the same filename can no longer overwrite each other.
+- IGDB and SteamGridDB lookups escape game names.
+
+### Security
+
+- PyJWT is upgraded to 2.15.1, which fixes several token-forgery and
+  authentication-bypass advisories in 2.13.0. Frontend build tooling picks up patched
+  `brace-expansion` and `source-map-js`.
+
+### Removed
+
+- The Settings page's **Sync Token** (a copy of the 30-day browser session) is
+  replaced by the sign-in above.
+
 ## [1.0.3] - 2026-08-22
 
 ### Added

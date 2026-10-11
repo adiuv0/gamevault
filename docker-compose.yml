@@ -4,7 +4,7 @@ services:
     # For production where you want bit-exact reproducibility, pin to an
     # immutable digest instead, e.g.:
     #     image: adiuv0/gamevault@sha256:abcd1234...
-    # See docs/RELEASING.md for how to find the current digest.
+    # Pin an image digest for reproducible deployments.
     image: adiuv0/gamevault:latest
     # To build from source instead, comment out 'image' and uncomment:
     # build: .
@@ -30,7 +30,9 @@ services:
       #
       # Import settings
       # - GAMEVAULT_IMPORT_RATE_LIMIT_MS=1000
-      # - GAMEVAULT_MAX_UPLOAD_SIZE_MB=50
+      # - GAMEVAULT_MAX_UPLOAD_SIZE_MB=512
+      # - GAMEVAULT_MAX_UPLOAD_BATCH_SIZE_MB=8192
+      # - GAMEVAULT_MAX_UPLOAD_FILES=200
       # - GAMEVAULT_THUMBNAIL_QUALITY=85
       # - GAMEVAULT_TOKEN_EXPIRY_DAYS=30
       #

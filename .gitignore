@@ -9,6 +9,8 @@ __pycache__/
 # Node
 node_modules/
 frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
 
 # Environment
 .env
@@ -23,3 +25,8 @@ data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Desktop app builds
+desktop/build/
+desktop/dist/
+desktop/gamevault_sync/_version.py

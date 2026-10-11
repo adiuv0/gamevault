@@ -27,8 +27,11 @@ async def durable_upload_db(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(settings, "thumbnail_dir", tmp_path / "cache")
     monkeypatch.setattr(settings, "secret_key", "durable-upload-test-secret")
     await init_db()
+    import aiosqlite
     try:
-        yield await get_db(), settings
+        async with aiosqlite.connect(str(settings.db_path)) as fixture_db:
+            await fixture_db.execute("PRAGMA foreign_keys=ON")
+            yield fixture_db, settings
     finally:
         await stop_import_worker()
         await close_db()

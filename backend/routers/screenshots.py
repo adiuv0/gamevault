@@ -1,5 +1,6 @@
 """Screenshot management routes."""
 
+import asyncio
 import mimetypes
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,7 @@ _EXTRA_MIME_TYPES = {
 }
 
 from backend.auth import require_auth
+from backend.database import get_db
 from backend.models.annotation import AnnotationCreate
 from backend.models.screenshot import ScreenshotResponse
 from backend.services import screenshot_service
@@ -34,7 +36,7 @@ router = APIRouter(
 async def check_hashes(data: HashCheckRequest):
     """Check which sha256 hashes already exist in the database.
 
-    Used by the CLI sync tool to determine which local files need uploading.
+    Used by GameVault Sync to determine which local files need uploading.
     """
     existing = await screenshot_service.check_hashes_batch(data.hashes)
     all_set = set(data.hashes)
@@ -57,8 +59,10 @@ async def delete_screenshot(screenshot_id: int):
     if not screenshot:
         raise HTTPException(status_code=404, detail="Screenshot not found")
 
-    # Delete files from disk — every path resolution goes through the
-    # library-containment check so a poisoned DB row can't reach outside.
+    # Resolve every file first — through the library-containment check so a
+    # poisoned DB row can't reach outside — and skip any still shared by
+    # another row.
+    doomed = []
     for path_field in [
         "file_path",
         "thumbnail_path_sm",
@@ -68,18 +72,41 @@ async def delete_screenshot(screenshot_id: int):
         rel_path = screenshot.get(path_field)
         if not rel_path:
             continue
+        db = await get_db()
+        cursor = await db.execute(
+            """SELECT 1 FROM screenshots WHERE id != ? AND (
+                file_path = ? OR thumbnail_path_sm = ? OR thumbnail_path_md = ? OR preview_path = ?
+            ) LIMIT 1""",
+            (screenshot_id, rel_path, rel_path, rel_path, rel_path),
+        )
+        if await cursor.fetchone():
+            continue
         try:
             resolver = safe_library_path if path_field == "file_path" else safe_media_path
-            full_path = resolver(rel_path)
+            doomed.append(resolver(rel_path))
         except HTTPException:
             # Unsafe stored path — skip the unlink rather than fail the
             # whole delete. The DB row will still be removed below.
             continue
-        if full_path.exists():
-            full_path.unlink()
 
+    # Remove the row before the files: if the delete fails, nothing points at
+    # missing originals.
     await screenshot_service.delete_screenshot(screenshot_id)
+
+    def unlink_all():
+        for full_path in doomed:
+            full_path.unlink(missing_ok=True)
+
+    await asyncio.to_thread(unlink_all)
     return {"message": "Screenshot deleted"}
+
+
+@router.post("/{screenshot_id}/ungroup", response_model=ScreenshotResponse)
+async def ungroup_screenshot(screenshot_id: int):
+    screenshot = await screenshot_service.ungroup_screenshot(screenshot_id)
+    if screenshot is None:
+        raise HTTPException(404, "Screenshot not found")
+    return screenshot
 
 
 @router.get("/{screenshot_id}/image")

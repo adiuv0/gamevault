@@ -1,196 +1,78 @@
-"""Full-text search service using FTS5 with BM25 ranking."""
+"""Full-text search across logical captures, including every file variant."""
 
 from backend.database import get_db
+from backend.services.media_cache_service import media_version
 
-
-# GV-013: explicit allowlist for ORDER BY fragments. The relevance
-# variant uses bm25() with our column weights; date variants use the
-# coalesce pattern. Any unknown caller-supplied sort token falls back
-# to relevance.
-SEARCH_SORT_CLAUSES: dict[str, str] = {
-    "relevance": "bm25(screenshots_fts, 5.0, 1.0, 3.0, 10.0)",
-    "date_desc": "COALESCE(s.taken_at, s.uploaded_at) DESC",
-    "date_asc": "COALESCE(s.taken_at, s.uploaded_at) ASC",
+SEARCH_SORT_CLAUSES = {
+    "relevance": "bm25_score ASC, s.id ASC",
+    "date_desc": "COALESCE(s.taken_at, s.uploaded_at) DESC, s.id DESC",
+    "date_asc": "COALESCE(s.taken_at, s.uploaded_at) ASC, s.id ASC",
 }
-SEARCH_LIST_ALL_SORT_CLAUSES: dict[str, str] = {
-    "date_desc": "COALESCE(s.taken_at, s.uploaded_at) DESC",
-    "date_asc": "COALESCE(s.taken_at, s.uploaded_at) ASC",
-}
+SEARCH_LIST_ALL_SORT_CLAUSES = {key: SEARCH_SORT_CLAUSES[key] for key in ("date_desc", "date_asc")}
 
 
 async def search_screenshots(
-    query: str,
-    game_id: int | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
-    favorites_only: bool = False,
-    sort: str = "relevance",
-    page: int = 1,
-    limit: int = 50,
+    query: str, game_id: int | None = None, date_from: str | None = None,
+    date_to: str | None = None, favorites_only: bool = False, sort: str = "relevance",
+    page: int = 1, limit: int = 50,
 ) -> tuple[list[dict], int]:
-    """Search screenshots using FTS5 full-text search with BM25 ranking.
-
-    BM25 weights: annotation_content(10.0), game_name(5.0),
-                  steam_description(3.0), filename(1.0)
-
-    Returns (results_list, total_count).
-    """
     db = await get_db()
-
-    if not query.strip():
-        # Empty query — return all screenshots with optional filters
-        return await _list_all_filtered(
-            db, game_id, date_from, date_to, favorites_only, sort, page, limit
-        )
-
-    # Sanitize FTS5 query: escape special chars and append wildcard for partial matches
-    fts_query = _build_fts_query(query)
-
-    # Base query: join FTS results with screenshots + games
-    # BM25 column order: game_name, filename, steam_description, annotation_content
-    # Weights: higher = more important (negative values for BM25)
-    base_query = """
-        FROM screenshots_fts fts
-        JOIN screenshots s ON s.id = fts.rowid
-        JOIN games g ON g.id = s.game_id
-        LEFT JOIN annotations a ON a.screenshot_id = s.id
-        WHERE screenshots_fts MATCH ?
-    """
-    params: list = [fts_query]
-
-    # Apply filters
+    params = []
+    prefix = ""
+    hits_join = ""
+    score = "0.0"
+    if query.strip():
+        # Materialize bm25 before aggregation: SQLite's FTS auxiliary functions
+        # must run directly against the MATCH cursor.
+        prefix = """WITH matched AS MATERIALIZED (
+            SELECT m.game_id, COALESCE(m.capture_group_id, m.id) AS capture_id,
+                   bm25(screenshots_fts, 5.0, 1.0, 3.0, 10.0) AS score
+            FROM screenshots_fts JOIN screenshots m ON m.id = screenshots_fts.rowid
+            WHERE screenshots_fts MATCH ?
+        ), hits AS (
+            SELECT game_id, capture_id, MIN(score) AS bm25_score
+            FROM matched GROUP BY game_id, capture_id
+        )"""
+        params.append(_build_fts_query(query))
+        hits_join = """JOIN hits h ON h.game_id = s.game_id
+                       AND h.capture_id = COALESCE(s.capture_group_id, s.id)"""
+        score = "h.bm25_score"
+    base = f"""FROM logical_captures s JOIN games g ON g.id = s.game_id
+               {hits_join} WHERE 1=1"""
     if game_id is not None:
-        base_query += " AND s.game_id = ?"
+        base += " AND s.game_id = ?"
         params.append(game_id)
     if date_from:
-        base_query += " AND (s.taken_at >= ? OR s.uploaded_at >= ?)"
-        params.extend([date_from, date_from])
+        base += " AND COALESCE(s.taken_at, s.uploaded_at) >= ?"
+        params.append(date_from)
     if date_to:
-        base_query += " AND (s.taken_at <= ? OR s.uploaded_at <= ?)"
-        params.extend([date_to, date_to])
+        base += " AND COALESCE(s.taken_at, s.uploaded_at) <= ?"
+        params.append(date_to)
     if favorites_only:
-        base_query += " AND s.is_favorite = 1"
-
-    # Count total
-    count_cursor = await db.execute(
-        f"SELECT COUNT(*) {base_query}", params
-    )
-    total = (await count_cursor.fetchone())[0]
-
-    # Sort — allowlisted, falls back to relevance (BM25 with our column weights)
-    order = SEARCH_SORT_CLAUSES.get(sort, SEARCH_SORT_CLAUSES["relevance"])
-
-    offset = (page - 1) * limit
-    results_cursor = await db.execute(
-        f"""SELECT
-            s.id as screenshot_id,
-            s.game_id,
-            g.name as game_name,
-            s.filename,
-            s.file_path,
-            s.thumbnail_path_sm,
-            s.thumbnail_path_md,
-            s.taken_at,
-            s.uploaded_at,
-            s.is_favorite,
-            s.width,
-            s.height,
-            s.file_size,
-            EXISTS(SELECT 1 FROM annotations ann WHERE ann.screenshot_id = s.id) as has_annotation,
-            a.content as annotation_content,
-            bm25(screenshots_fts, 5.0, 1.0, 3.0, 10.0) as relevance_score
-        {base_query}
-        ORDER BY {order}
-        LIMIT ? OFFSET ?""",
-        params + [limit, offset],
-    )
-    columns = [desc[0] for desc in results_cursor.description]
-    rows = await results_cursor.fetchall()
-    results = [dict(zip(columns, row)) for row in rows]
-
-    # Truncate annotation to preview
-    for r in results:
-        if r.get("annotation_content"):
-            r["annotation_preview"] = _truncate(r["annotation_content"], 150)
-        else:
-            r["annotation_preview"] = None
-        r.pop("annotation_content", None)
-
-    return results, total
-
-
-async def _list_all_filtered(
-    db,
-    game_id: int | None,
-    date_from: str | None,
-    date_to: str | None,
-    favorites_only: bool,
-    sort: str,
-    page: int,
-    limit: int,
-) -> tuple[list[dict], int]:
-    """List all screenshots with filters (no FTS query)."""
-    base_query = """
-        FROM screenshots s
-        JOIN games g ON g.id = s.game_id
-        LEFT JOIN annotations a ON a.screenshot_id = s.id
-        WHERE 1=1
-    """
-    params: list = []
-
-    if game_id is not None:
-        base_query += " AND s.game_id = ?"
-        params.append(game_id)
-    if date_from:
-        base_query += " AND (s.taken_at >= ? OR s.uploaded_at >= ?)"
-        params.extend([date_from, date_from])
-    if date_to:
-        base_query += " AND (s.taken_at <= ? OR s.uploaded_at <= ?)"
-        params.extend([date_to, date_to])
-    if favorites_only:
-        base_query += " AND s.is_favorite = 1"
-
-    count_cursor = await db.execute(f"SELECT COUNT(*) {base_query}", params)
-    total = (await count_cursor.fetchone())[0]
-
-    # No FTS query → only date_asc / date_desc make sense; default newest-first
-    order = SEARCH_LIST_ALL_SORT_CLAUSES.get(sort, SEARCH_LIST_ALL_SORT_CLAUSES["date_desc"])
-
-    offset = (page - 1) * limit
-    results_cursor = await db.execute(
-        f"""SELECT
-            s.id as screenshot_id,
-            s.game_id,
-            g.name as game_name,
-            s.filename,
-            s.file_path,
-            s.thumbnail_path_sm,
-            s.thumbnail_path_md,
-            s.taken_at,
-            s.uploaded_at,
-            s.is_favorite,
-            s.width,
-            s.height,
-            s.file_size,
-            EXISTS(SELECT 1 FROM annotations ann WHERE ann.screenshot_id = s.id) as has_annotation,
-            a.content as annotation_content,
-            0.0 as relevance_score
-        {base_query}
-        ORDER BY {order}
-        LIMIT ? OFFSET ?""",
-        params + [limit, offset],
-    )
-    columns = [desc[0] for desc in results_cursor.description]
-    rows = await results_cursor.fetchall()
-    results = [dict(zip(columns, row)) for row in rows]
-
-    for r in results:
-        if r.get("annotation_content"):
-            r["annotation_preview"] = _truncate(r["annotation_content"], 150)
-        else:
-            r["annotation_preview"] = None
-        r.pop("annotation_content", None)
-
+        base += " AND s.capture_favorite = 1"
+    cursor = await db.execute(f"{prefix} SELECT COUNT(*) {base}", params)
+    total = (await cursor.fetchone())[0]
+    sorts = SEARCH_SORT_CLAUSES if query.strip() else SEARCH_LIST_ALL_SORT_CLAUSES
+    order = sorts.get(sort, sorts.get("relevance", SEARCH_LIST_ALL_SORT_CLAUSES["date_desc"]))
+    page_order = order.replace("s.id", "page.screenshot_id").replace("s.", "page.")
+    # Annotation text is joined only for the visible page, never for the count.
+    cursor = await db.execute(f"""{prefix} SELECT page.*, a.content AS annotation_content
+        FROM (SELECT
+            s.id AS screenshot_id, s.game_id, g.name AS game_name, s.filename, s.file_path,
+            s.thumbnail_path_sm, s.thumbnail_path_md, s.taken_at, s.uploaded_at,
+            s.updated_at AS media_updated_at,
+            s.capture_favorite AS is_favorite, s.width, s.height, s.file_size,
+            s.annotation_id, {score} AS bm25_score, {score} AS relevance_score
+            {base} ORDER BY {order} LIMIT ? OFFSET ?) AS page
+        LEFT JOIN annotations a ON a.id = page.annotation_id
+        ORDER BY {page_order}""", params + [limit, (page - 1) * limit])
+    results = [dict(zip((column[0] for column in cursor.description), row)) for row in await cursor.fetchall()]
+    for result in results:
+        result["has_annotation"] = result.pop("annotation_id") is not None
+        result["media_version"] = media_version(result.pop("media_updated_at"))
+        content = result.pop("annotation_content")
+        result["annotation_preview"] = _truncate(content, 150) if content else None
+        result.pop("bm25_score")
     return results, total
 
 

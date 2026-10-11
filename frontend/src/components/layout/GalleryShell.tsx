@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { Outlet, Link } from 'react-router-dom';
 import { Gamepad2 } from 'lucide-react';
 
@@ -21,7 +23,9 @@ export function GalleryShell() {
 
       {/* Main content */}
       <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full">
-        <Outlet />
+        <Suspense fallback={<div className="py-12"><LoadingSpinner /></div>}>
+          <Outlet />
+        </Suspense>
       </main>
 
       {/* Footer */}

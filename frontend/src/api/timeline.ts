@@ -14,6 +14,7 @@ export interface TimelineScreenshot {
   game_id: number;
   game_name: string;
   has_annotation: boolean;
+  media_version?: string;
 }
 
 export interface TimelineDay {

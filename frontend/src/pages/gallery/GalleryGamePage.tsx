@@ -33,6 +33,7 @@ export function GalleryGamePage() {
   const loadingMoreRef = useRef(false);
   const requestVersionRef = useRef(0);
   const [screenshotSort, setScreenshotSort] = useState<ScreenshotSort>('date_desc');
+  const [loadedRouteId, setLoadedRouteId] = useState<number | null>(null);
 
   useEffect(() => {
     const requestVersion = ++requestVersionRef.current;
@@ -47,6 +48,7 @@ export function GalleryGamePage() {
         ]);
         if (requestVersion !== requestVersionRef.current) return;
         setGame(gameData);
+        setLoadedRouteId(gameId);
         setScreenshots(screenshotData.screenshots);
         setNextCursor(screenshotData.next_cursor);
         setLoadMoreError(false);
@@ -92,7 +94,8 @@ export function GalleryGamePage() {
     }
   }, [gameId, nextCursor, screenshotSort]);
 
-  if (loading) {
+  // Re-sorting keeps the grid mounted; only a different game blanks the page.
+  if (loading && (!game || loadedRouteId !== gameId)) {
     return (
       <div className="flex items-center justify-center py-24">
         <LoadingSpinner size="lg" />
@@ -197,10 +200,11 @@ export function GalleryGamePage() {
             screenshots={screenshots}
             onSelect={setViewerIndex}
             onEndReached={nextCursor ? loadMore : undefined}
-            renderItem={(screenshot, onClick) => (
+            renderItem={(screenshot, index, select) => (
               <GalleryScreenshotCard
                 screenshot={screenshot}
-                onClick={onClick}
+                index={index}
+                onSelect={select}
               />
             )}
           />

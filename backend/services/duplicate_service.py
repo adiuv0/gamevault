@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 
-from backend.database import get_db
+from backend.database import atomic, get_db
 from backend.services import hdr_processor
 from backend.services.capture_matching import (
     is_complementary_variant_pair,
@@ -124,7 +124,9 @@ async def run_scan_job(job_id: int) -> None:
                 for asset in assets:
                     try:
                         await _index_asset(asset)
+                        await db.commit()
                     except Exception:
+                        await db.rollback()
                         batch_errors += 1
 
                 last_id = assets[-1]["id"]
@@ -290,6 +292,7 @@ async def list_candidates(
     return [dict(zip(columns, row)) for row in await cursor.fetchall()], total
 
 
+@atomic
 async def group_candidate(candidate_id: int) -> dict:
     db = await get_db()
     candidate = await _get_candidate(candidate_id)
@@ -325,7 +328,6 @@ async def group_candidate(candidate_id: int) -> dict:
         (candidate["game_id"],),
     )
     await update_screenshot_stats(candidate["game_id"], commit=False)
-    await db.commit()
     return await _get_candidate(candidate_id)
 
 

@@ -246,7 +246,9 @@ async def cancel_import(session_id: int):
         if await cancel_pending_import_job("specialk", session_id):
             return {"message": "Import cancelled"}
 
-    if session["status"] != "running":
+    # A "pending" session whose job the worker just claimed is starting now;
+    # flag it rather than rejecting the cancel.
+    if session["status"] not in ("running", "pending"):
         raise HTTPException(status_code=400, detail="Import is not running")
     request_cancel(session_id)
     return {"message": "Cancel requested"}

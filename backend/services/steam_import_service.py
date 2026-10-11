@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+from backend.config import settings
 from backend.database import get_db
 from backend.routers.settings import get_effective_key
 from backend.services.filesystem import (
@@ -13,10 +14,8 @@ from backend.services.filesystem import (
 )
 from backend.services.game_service import get_or_create_game, update_screenshot_stats
 from backend.services.image_processor import (
+    analyze_image,
     compute_sha256_bytes,
-    generate_thumbnails_with_hash,
-    get_image_dimensions,
-    get_image_format,
 )
 from backend.services.metadata_service import fetch_and_apply_metadata
 from backend.services.performance_diagnostics import measure_async
@@ -38,19 +37,21 @@ logger = logging.getLogger(__name__)
 
 _progress_queues: dict[int, asyncio.Queue] = {}
 _cancel_flags: dict[int, bool] = {}
+_QUEUE_LIMIT = 1000
 
 
 def get_progress_queue(session_id: int) -> asyncio.Queue:
     """Get or create an SSE progress queue for a session."""
     if session_id not in _progress_queues:
-        _progress_queues[session_id] = asyncio.Queue()
+        _progress_queues[session_id] = asyncio.Queue(maxsize=_QUEUE_LIMIT)
     return _progress_queues[session_id]
 
 
 def cleanup_session(session_id: int) -> None:
-    """Remove progress queue and cancel flag for a completed session."""
+    """Remove the progress queue when its SSE listener goes away."""
+    # The cancel flag outlives the progress stream: closing or reconnecting the
+    # tab must not silently undo a cancel. run_import clears it when it ends.
     _progress_queues.pop(session_id, None)
-    _cancel_flags.pop(session_id, None)
 
 
 def request_cancel(session_id: int) -> None:
@@ -131,7 +132,10 @@ async def append_error_log(session_id: int, error_msg: str) -> None:
 async def emit_progress(session_id: int, event_type: str, data: dict) -> None:
     """Push an SSE event to the session's queue."""
     queue = get_progress_queue(session_id)
-    await queue.put({"event": event_type, "data": data})
+    if queue.full():
+        # Nobody is listening (tab closed): keep the newest events, bounded.
+        queue.get_nowait()
+    queue.put_nowait({"event": event_type, "data": data})
 
 
 # ── Main import pipeline ─────────────────────────────────────────────────────
@@ -257,6 +261,16 @@ async def run_import(
                     overall_completed=overall_completed,
                     total_screenshots=total_screenshots,
                 )
+                if is_cancelled(session_id):
+                    # A cancel during the last game used to fall through to "completed".
+                    await update_import_session(
+                        session_id,
+                        completed_screenshots=overall_completed + game_completed,
+                        skipped_screenshots=overall_skipped + game_skipped,
+                        failed_screenshots=overall_failed + game_failed,
+                    )
+                    await _cancel_import(session_id)
+                    return
 
                 overall_completed += game_completed
                 overall_skipped += game_skipped
@@ -303,6 +317,7 @@ async def run_import(
     finally:
         # Send a terminal event so SSE listeners know to disconnect
         await emit_progress(session_id, "done", {})
+        _cancel_flags.pop(session_id, None)
 
 
 async def _fail_import(session_id: int, error: str) -> None:
@@ -367,41 +382,54 @@ async def _import_game(
         })
         return 0, 0, game_info.screenshot_count
 
-    for i, screenshot in enumerate(screenshots):
-        if is_cancelled(session_id):
-            return completed, skipped, failed
+    # Downloads and decoding overlap across a few workers; Steam page requests
+    # still share the scraper's single pace. In-flight Steam IDs and hashes are
+    # claimed so duplicates within one game import once.
+    semaphore = asyncio.Semaphore(settings.import_concurrency)
+    claimed: set[str] = set()
 
-        try:
-            result = await _import_single_screenshot(
-                session_id=session_id,
-                scraper=scraper,
-                screenshot=screenshot,
-                game_id=game_id,
-                game_folder=game_folder,
-                game_name=game_info.name,
-                index=i,
-                total_for_game=len(screenshots),
-                overall_completed=overall_completed + completed + skipped,
-                total_screenshots=total_screenshots,
-            )
-            if result == "completed":
-                completed += 1
-            elif result == "skipped":
-                skipped += 1
-            else:
+    async def import_one(i: int, screenshot: SteamScreenshot) -> None:
+        nonlocal completed, skipped, failed
+        async with semaphore:
+            if is_cancelled(session_id):
+                return
+            try:
+                result = await _import_single_screenshot(
+                    session_id=session_id,
+                    scraper=scraper,
+                    screenshot=screenshot,
+                    game_id=game_id,
+                    game_folder=game_folder,
+                    game_name=game_info.name,
+                    index=i,
+                    total_for_game=len(screenshots),
+                    overall_completed=overall_completed + completed + skipped,
+                    total_screenshots=total_screenshots,
+                    claimed=claimed,
+                )
+                if result == "completed":
+                    completed += 1
+                elif result == "skipped":
+                    skipped += 1
+                else:
+                    failed += 1
+            except Exception as e:
                 failed += 1
-        except Exception as e:
-            failed += 1
-            error_msg = f"Screenshot {screenshot.screenshot_id}: {e}"
-            logger.error(error_msg)
-            await append_error_log(session_id, error_msg)
+                error_msg = f"Screenshot {screenshot.screenshot_id}: {e}"
+                logger.error(error_msg)
+                await append_error_log(session_id, error_msg)
+
+    await asyncio.gather(*(import_one(i, shot) for i, shot in enumerate(screenshots)))
+    if is_cancelled(session_id):
+        await update_screenshot_stats(game_id)
+        return completed, skipped, failed
 
     # Update game stats after all screenshots imported
     await update_screenshot_stats(game_id)
 
     # Auto-fetch metadata (cover art, description, etc.) for new games
     try:
-        meta = await fetch_and_apply_metadata(game_id)
+        meta = await fetch_and_apply_metadata(game_id, only_if_missing=True)
         if meta.get("fields_updated") or meta.get("cover_downloaded"):
             logger.info(
                 "Auto-fetched metadata for %s: fields=%s, cover=%s",
@@ -425,9 +453,37 @@ async def _import_single_screenshot(
     total_for_game: int,
     overall_completed: int,
     total_screenshots: int,
+    claimed: set[str] | None = None,
 ) -> str:
     """Import a single screenshot. Returns 'completed', 'skipped', or 'failed'."""
+    claimed = claimed if claimed is not None else set()
+    steam_id = screenshot.screenshot_id
+    steam_key = f"id:{steam_id}"
+    if steam_key in claimed:
+        return "skipped"
+    claimed.add(steam_key)
+    try:
+        return await _import_claimed_screenshot(
+            session_id, scraper, screenshot, game_id, game_folder, game_name,
+            index, total_for_game, overall_completed, total_screenshots, claimed,
+        )
+    finally:
+        claimed.discard(steam_key)
 
+
+async def _import_claimed_screenshot(
+    session_id: int,
+    scraper: SteamScraper,
+    screenshot: SteamScreenshot,
+    game_id: int,
+    game_folder: str,
+    game_name: str,
+    index: int,
+    total_for_game: int,
+    overall_completed: int,
+    total_screenshots: int,
+    claimed: set[str],
+) -> str:
     steam_id = screenshot.screenshot_id
     logger.info(
         "Importing screenshot %s (%d/%d for %s): full_url=%s, detail_url=%s",
@@ -479,10 +535,10 @@ async def _import_single_screenshot(
         })
         return "failed"
 
-    # Check duplicate by hash
-    sha256 = compute_sha256_bytes(image_data)
-    existing = await check_duplicate_hash(sha256)
-    if existing:
+    # Check duplicate by hash (hashing multi-MB bodies stays off the event loop)
+    sha256 = await asyncio.to_thread(compute_sha256_bytes, image_data)
+    hash_key = f"sha:{sha256}"
+    if hash_key in claimed or await check_duplicate_hash(sha256):
         await emit_progress(session_id, "screenshot_skipped", {
             "steam_id": steam_id,
             "reason": "duplicate_hash",
@@ -494,6 +550,32 @@ async def _import_single_screenshot(
         })
         return "skipped"
 
+    claimed.add(hash_key)
+    try:
+        return await _store_screenshot(
+            session_id, screenshot, image_url, image_data, sha256, game_id,
+            game_folder, game_name, index, total_for_game, overall_completed,
+            total_screenshots,
+        )
+    finally:
+        claimed.discard(hash_key)
+
+
+async def _store_screenshot(
+    session_id: int,
+    screenshot: SteamScreenshot,
+    image_url: str,
+    image_data: bytes,
+    sha256: str,
+    game_id: int,
+    game_folder: str,
+    game_name: str,
+    index: int,
+    total_for_game: int,
+    overall_completed: int,
+    total_screenshots: int,
+) -> str:
+    steam_id = screenshot.screenshot_id
     # Save to disk
     # Generate filename: steam_<id>.<ext>
     ext = _guess_extension(image_url, image_data)
@@ -503,17 +585,24 @@ async def _import_single_screenshot(
     file_path = screenshots_dir / filename
     await asyncio.to_thread(file_path.write_bytes, image_data)
 
-    # Get image metadata
-    dims = await asyncio.to_thread(get_image_dimensions, file_path)
-    width, height = dims if dims else (None, None)
-    fmt = await asyncio.to_thread(get_image_format, file_path)
-    file_size = len(image_data)
-
-    # Generate thumbnails
+    # Metadata and thumbnails in one decode, off the event loop.
     filename_stem = Path(filename).stem
-    thumb_sm, thumb_md, preview, perceptual_hash = await asyncio.to_thread(
-        generate_thumbnails_with_hash, file_path, game_folder, filename_stem
-    )
+    info = await asyncio.to_thread(analyze_image, file_path, game_folder, filename_stem)
+    if info["width"] is None or info["thumbnail_path_sm"] is None:
+        # Not a decodable image: don't record a row that would be skipped forever
+        # by the Steam-ID duplicate check on every later import.
+        await asyncio.to_thread(file_path.unlink, True)
+        await emit_progress(session_id, "screenshot_failed", {
+            "steam_id": steam_id,
+            "error": "Downloaded file is not a readable image",
+            "game_name": game_name,
+        })
+        return "failed"
+    width, height = info["width"], info["height"]
+    fmt = info["format"]
+    file_size = len(image_data)
+    thumb_sm, thumb_md = info["thumbnail_path_sm"], info["thumbnail_path_md"]
+    preview, perceptual_hash = info["preview_path"], info["perceptual_hash"]
 
     # Parse date from scraper
     taken_at = screenshot.date_taken  # already ISO string or None

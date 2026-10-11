@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useMemo, useState } from 'react';
+import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import {
   X,
   ChevronLeft,
@@ -12,14 +12,18 @@ import {
   Loader2,
   Trash2,
   Repeat2,
+  Unlink,
 } from 'lucide-react';
 import {
   getScreenshot,
+  ungroupScreenshot,
   getScreenshotImageUrl,
   getScreenshotPreviewUrl,
 } from '@/api/screenshots';
 import { toggleFavorite, createShareLink, getShareLink, deleteShareLink } from '@/api/screenshots';
 import { AnnotationEditor } from './AnnotationEditor';
+import { ProgressiveImage } from '@/components/shared/ProgressiveImage';
+import { usePreloadImages } from '@/hooks/usePreloadImages';
 import { formatDateTime, formatFileSize } from '@/lib/formatters';
 import type {
   Screenshot,
@@ -61,6 +65,7 @@ interface ScreenshotViewerProps {
   onNavigate: (index: number) => void;
   onFavoriteToggle?: (id: number, isFav: boolean) => void;
   onAnnotationChanged?: (id: number, hasAnnotation: boolean) => void;
+  onGroupingChanged?: () => void;
 }
 
 export function ScreenshotViewer({
@@ -70,8 +75,11 @@ export function ScreenshotViewer({
   onNavigate,
   onFavoriteToggle,
   onAnnotationChanged,
+  onGroupingChanged,
 }: ScreenshotViewerProps) {
   const [showInfo, setShowInfo] = useState(false);
+  const [ungrouping, setUngrouping] = useState(false);
+  const [groupError, setGroupError] = useState<string | null>(null);
   const [togglingFav, setTogglingFav] = useState(false);
   const [activeVariantId, setActiveVariantId] = useState<number | null>(null);
   const [detailsById, setDetailsById] = useState<Record<number, Screenshot>>({});
@@ -102,6 +110,13 @@ export function ScreenshotViewer({
   );
   const usePreview = !!activeVariant && (requiresPreview || !!originalFailures[activeVariant.id]);
 
+  const prevItem = screenshots[currentIndex - 1];
+  const nextItem = screenshots[currentIndex + 1];
+  usePreloadImages([
+    nextItem && getScreenshotPreviewUrl(nextItem.id, nextItem.media_version),
+    prevItem && getScreenshotPreviewUrl(prevItem.id, prevItem.media_version),
+  ]);
+
   useEffect(() => {
     if (!listItem || detailsById[listItem.id]) return;
     let cancelled = false;
@@ -126,9 +141,15 @@ export function ScreenshotViewer({
     setActiveVariantId(variants[(currentVariantIndex + 1) % variants.length].id);
   }, [activeVariant, variants]);
 
+  // Bumped whenever the screenshot changes so a slow share request can't attach
+  // its link to the screenshot the user navigated to.
+  const shareRequest = useRef(0);
+
   // Reset share state when screenshot changes
   useEffect(() => {
+    shareRequest.current += 1;
     setShowSharePanel(false);
+    setShareLoading(false);
     setShareLink(null);
     setShareCopied(false);
   }, [currentIndex]);
@@ -143,6 +164,9 @@ export function ScreenshotViewer({
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      const target = e.target;
+      if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.metaKey || e.altKey
+        || (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]'))) return;
       // Don't handle keyboard shortcuts if share panel is open (for text selection)
       if (showSharePanel) {
         if (e.key === 'Escape') {
@@ -203,30 +227,32 @@ export function ScreenshotViewer({
 
     setShowSharePanel(true);
     setShareLoading(true);
+    const request = shareRequest.current;
 
     try {
       // Try to get existing share link first
       const existing = await getShareLink(listItem.id);
-      if (existing) {
+      if (existing && request === shareRequest.current) {
         setShareLink(existing);
       }
     } catch {
       // No existing link, that's fine
     } finally {
-      setShareLoading(false);
+      if (request === shareRequest.current) setShareLoading(false);
     }
   };
 
   const handleCreateShareLink = async () => {
     if (!listItem) return;
+    const request = shareRequest.current;
     try {
       setShareLoading(true);
       const link = await createShareLink(listItem.id);
-      setShareLink(link);
+      if (request === shareRequest.current) setShareLink(link);
     } catch {
       // ignore
     } finally {
-      setShareLoading(false);
+      if (request === shareRequest.current) setShareLoading(false);
     }
   };
 
@@ -281,6 +307,23 @@ export function ScreenshotViewer({
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-2">
+          {variants.length > 1 && (
+            <button title="Ungroup selected variant" disabled={ungrouping}
+              className="p-2 rounded-md hover:bg-white/10 disabled:opacity-50"
+              onClick={async () => {
+                setUngrouping(true);
+                setGroupError(null);
+                try {
+                  await ungroupScreenshot(activeVariant.id);
+                  setDetailsById({});
+                  onGroupingChanged?.();
+                } catch (error) {
+                  setGroupError(error instanceof Error ? error.message : 'Could not ungroup variant');
+                } finally { setUngrouping(false); }
+              }}>
+              {ungrouping ? <Loader2 className="h-5 w-5 animate-spin" /> : <Unlink className="h-5 w-5" />}
+            </button>
+          )}
           {variants.length > 1 && (
             <div className="flex items-center rounded-md bg-white/5 p-0.5" title="Switch file variant (h)">
               <Repeat2 className="h-4 w-4 text-white/50 mx-1.5" />
@@ -355,6 +398,7 @@ export function ScreenshotViewer({
       </div>
 
       {/* Main area */}
+      {groupError && <p role="alert" className="px-4 text-sm text-accent-danger">{groupError}</p>}
       <div className="flex-1 flex relative overflow-hidden">
         {/* Navigation arrows */}
         {hasPrev && (
@@ -376,21 +420,19 @@ export function ScreenshotViewer({
 
         {/* Image */}
         <div className={`flex-1 flex items-center justify-center p-4 ${showInfo ? 'sm:mr-80' : ''}`}>
-          <img
-            key={`${activeVariant.id}-${usePreview ? 'preview' : 'original'}`}
-            src={usePreview
-              ? getScreenshotPreviewUrl(activeVariant.id, activeVariant.media_version)
+          <ProgressiveImage
+            key={activeVariant.id}
+            previewUrl={getScreenshotPreviewUrl(activeVariant.id, activeVariant.media_version)}
+            originalUrl={usePreview
+              ? null
               : getScreenshotImageUrl(activeVariant.id, activeVariant.media_version)}
             alt={activeVariant.filename}
             className="max-w-full max-h-full object-contain select-none"
-            draggable={false}
-            onError={() => {
-              if (!usePreview) {
-                setOriginalFailures((current) => ({
-                  ...current,
-                  [activeVariant.id]: true,
-                }));
-              }
+            onOriginalError={() => {
+              setOriginalFailures((current) => ({
+                ...current,
+                [activeVariant.id]: true,
+              }));
             }}
           />
         </div>
@@ -535,6 +577,7 @@ export function ScreenshotViewer({
 
               <div className="pt-3 border-t border-border">
                 <AnnotationEditor
+                  key={listItem.id}
                   screenshotId={listItem.id}
                   hasAnnotation={!!listItem.has_annotation}
                   onAnnotationChanged={(has) => onAnnotationChanged?.(listItem.id, has)}

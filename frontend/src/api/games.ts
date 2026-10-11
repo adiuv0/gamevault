@@ -1,8 +1,9 @@
 import { api, tokenQs } from './client';
 import type { Game } from '@/lib/types';
 
-export function getCoverUrl(gameId: number): string {
-  return `/api/games/${gameId}/cover${tokenQs()}`;
+/** Pass the game's updated_at so a replaced cover isn't served from a day-long cache. */
+export function getCoverUrl(gameId: number, version?: string): string {
+  return `/api/games/${gameId}/cover${tokenQs(version)}`;
 }
 
 export async function listGames(sort = 'name'): Promise<{ games: Game[]; total: number }> {

@@ -48,9 +48,12 @@ gamevault/
 │   │   ├── pages/              # Top-level route components
 │   │   └── stores/             # Zustand stores (auth, view, import progress)
 │   └── vite.config.ts
+├── desktop/                    # GameVault Sync, the gaming-PC app (own pyproject + tests)
+│   ├── gamevault_sync/         # sources, engine, service, gui, tray, api, state
+│   ├── packaging/              # PyInstaller build + Inno Setup installer
+│   └── tests/
 ├── cli/
-│   ├── gamevault_sync.py       # Standalone sync tool (tk GUI + headless)
-│   └── README.md
+│   └── gamevault_sync.py       # Old entry point; starts the desktop app
 ├── tests/                      # pytest suites
 ├── docs/                       # This documentation set
 ├── Dockerfile                  # Multi-stage build
@@ -411,48 +414,65 @@ There's no light theme.
 
 ---
 
-## CLI: GameVault Sync
+## Desktop app: GameVault Sync
 
-[`cli/gamevault_sync.py`](../cli/gamevault_sync.py) is a single-file
-Python script that runs on a user's gaming PC. It supports two scan
-sources controlled by `--mode {steam,specialk,both}`:
+[`desktop/gamevault_sync`](../desktop/gamevault_sync) is a tkinter app (sv-ttk
+theme, pystray tray icon) shipped as a PyInstaller build with an Inno Setup
+installer. It replaced the single-file `cli/gamevault_sync.py`, which now just
+starts it. The pieces:
 
-**Steam mode** (default for backward compatibility):
+- **`sources`** finds Steam (registry, then common paths) and Special K
+  (SKIF's registry path, the real Documents folder, install folders), then
+  lists captures with `os.scandir`, statting files but not reading them.
+  Steam: every account's `userdata/<id>/760/remote/<appid>/screenshots/`;
+  names come from `appmanifest_*.acf` across all libraries in
+  `libraryfolders.vdf`, and non-Steam games are named from the binary
+  `shortcuts.vdf`. Special K: each folder under `Profiles` is a game, with
+  `.png`/`.jxr` collected recursively and the folder name cleaned like the
+  server's importer does. Each file gets a `taken_at_hint` from
+  `screenshots.vdf`, the file name, or its modified time.
+- **`state`** is a small SQLite file remembering, per path, size, mtime,
+  SHA-256 and status (`synced`, `rejected`). Unchanged files are skipped
+  without being opened; a synced file is never sent again, so deletions in
+  GameVault stick. There is one file per server, named by the `instance` id
+  from `GET /api/health`, so a new address for the same server keeps it and
+  another server (or a one-off `--sync-once` against one) never touches it.
+  Uploads that fail for a reason that may pass get a `retry_at` that grows
+  from 1 minute to 6 hours; only "not an image", "unsupported format", 400,
+  413, 415 and 422 mark a file `rejected`. A damaged file is renamed
+  `.corrupt-…` and started fresh.
+- **`engine`** runs one pass: scan, hash only new or changed files (skipping
+  any modified in the last 3 s), `POST /api/screenshots/check-hashes` in
+  batches of 500, resolve each game that has new files (cached), then upload
+  newest first with two workers through `POST /api/upload/sync`, whose
+  `uploaded`/`skipped`/`errors` lists say whether a file was stored, already
+  there, or refused.
+  - Steam games resolve with `GET /api/games/by-steam-appid/{id}?name=…`,
+    passing the local name for when the server can't reach the Steam store.
+  - Special K and non-Steam games resolve with `POST /api/games/by-name`.
+- **`service`** loops in a background thread, by default every 60 s. It backs
+  off while the server is unreachable, stops on a 401 ("signed out"), and does
+  a counting-only pass until the user confirms the first sync.
+- **`gui`/`tray`** read the service's status snapshot on a 250 ms timer, so
+  no Tk call ever happens off the main thread. A failing command or callback
+  is logged and shown, and never stops the timer. Quitting hides the window
+  at once, gives a running upload 3 s, then ends the process.
+- **Single instance**: a `Local\GameVaultSync` mutex on Windows (a localhost
+  socket elsewhere) keeps one copy running; a second launch asks the first,
+  over that socket, to show its window.
+- **HTTPS** is verified against the OS certificate store (`truststore`). An
+  address typed without `http://` gets https only, unless it looks like a home
+  network or Tailscale name, so the password never falls back to plain http
+  over the internet.
 
-1. Auto-detect Steam install via common paths
-2. Walk `<Steam>/userdata/<user>/760/remote/<appid>/screenshots/`
-3. Cross-reference with `screenshots.vdf` for original dimensions / time
-
-**Special K mode**:
-
-1. Walk a user-supplied root path
-2. Treat each top-level subdirectory as a game
-3. Collect `.jxr` and `.png` files recursively under each
-4. Clean folder names client-side (mirrors `_clean_game_name` from the
-   server's [specialk_import_service](../backend/services/specialk_import_service.py))
-   so the resulting display name converges with what the server's
-   filesystem importer would produce
-
-After scanning (one or both sources), the unified flow is:
-
-1. Hash every discovered file with SHA-256
-2. Bulk-call `POST /api/screenshots/check-hashes` to find which files
-   the server doesn't have yet
-3. Resolve the GameVault game record per source:
-   - Steam: `GET /api/games/by-steam-appid/{appid}`
-   - Special K: `POST /api/games/by-name` with the cleaned folder name
-4. Upload new files via `POST /api/upload/sync`
-
-The two sources merge naturally — a Special K folder named the same as a
-Steam-imported game lands on the same `games` row, so screenshots from
-both sources show up under one library entry.
-
-Two execution modes: tkinter GUI (default) and headless CLI
-(`--no-gui`). Settings are saved to `~/.gamevault_sync.json`, including
-the chosen mode and both paths.
-
-The CLI's only third-party dependency is httpx — VDF parsing is
-embedded.
+**Sign-in** is a device token, not the browser JWT. `POST
+/api/auth/devices/pair` takes the password and returns a `gvd_…` token,
+stored as a SHA-256 hash in `device_tokens` (`m016`). `require_auth`
+recognises the prefix and allows such tokens only on the five sync endpoints
+(plus `DELETE /api/auth/devices/current` to sign out), from the
+`Authorization` header only. Tokens never expire. They are revoked one by one
+from Settings, all at once when the password changes, and replaced when the
+same install (a random `install_id` the app keeps) pairs again.
 
 ### Why two Special K paths?
 
@@ -461,7 +481,7 @@ There are two distinct ways to import Special K screenshots:
 | Path | Reads from | Use when |
 |---|---|---|
 | **Web UI: Special K Import page** | Server-side filesystem | GameVault and Special K both run on the same machine, or you have a bind-mount |
-| **Sync CLI: Special K mode** | Local-PC filesystem | GameVault runs remotely (e.g. Unraid) and can't see your gaming PC's drives |
+| **GameVault Sync app** | Gaming-PC filesystem | GameVault runs remotely (e.g. Unraid) and can't see your gaming PC's drives |
 
 They produce identical library entries (same hash dedup, same metadata
 shape). Pick whichever matches your deployment topology.

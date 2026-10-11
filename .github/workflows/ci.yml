@@ -51,6 +51,8 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npm run lint
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
 
   container:
     runs-on: ubuntu-latest

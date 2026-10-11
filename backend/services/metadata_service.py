@@ -5,7 +5,9 @@ Falls through providers in priority order: Steam API -> SteamGridDB -> IGDB.
 """
 
 import logging
+import time
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 
@@ -98,7 +100,7 @@ async def fetch_steamgriddb_cover(game_name: str, steam_app_id: int | None = Non
             if not game_id:
                 # Search by name
                 resp = await client.get(
-                    f"{STEAMGRIDDB_API}/search/autocomplete/{game_name}"
+                    f"{STEAMGRIDDB_API}/search/autocomplete/{quote(game_name, safe='')}"
                 )
                 if resp.status_code == 200:
                     data = resp.json()
@@ -143,6 +145,11 @@ async def fetch_steamgriddb_cover(game_name: str, steam_app_id: int | None = Non
 
 # ── IGDB API ─────────────────────────────────────────────────────────────────
 
+# (client_id, client_secret) -> (token, monotonic expiry). Twitch tokens last
+# weeks; requesting a new one per game made every import slower and noisier.
+_igdb_token_cache: dict[tuple[str, str], tuple[str, float]] = {}
+
+
 async def _get_igdb_token() -> tuple[str | None, str]:
     """Get an IGDB access token via Twitch OAuth2. Returns (token, client_id)."""
     from backend.routers.settings import get_effective_key
@@ -151,6 +158,9 @@ async def _get_igdb_token() -> tuple[str | None, str]:
     client_secret = await get_effective_key("igdb_client_secret")
     if not client_id or not client_secret:
         return None, ""
+    cached = _igdb_token_cache.get((client_id, client_secret))
+    if cached and cached[1] > time.monotonic():
+        return cached[0], client_id
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -163,10 +173,23 @@ async def _get_igdb_token() -> tuple[str | None, str]:
                 },
             )
             if resp.status_code == 200:
-                return resp.json().get("access_token"), client_id
+                body = resp.json()
+                token = body.get("access_token")
+                if token:
+                    # Refresh a minute early so a request never races expiry.
+                    lifetime = max(0, int(body.get("expires_in", 0)) - 60)
+                    _igdb_token_cache[(client_id, client_secret)] = (
+                        token, time.monotonic() + lifetime,
+                    )
+                return token, client_id
     except Exception as e:
         logger.warning("IGDB auth error: %s", e)
     return None, ""
+
+
+def _igdb_escape(value: str) -> str:
+    """Keep a game name inside the quoted Apicalypse search string."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 async def fetch_igdb_metadata(game_name: str) -> dict | None:
@@ -186,7 +209,7 @@ async def fetch_igdb_metadata(game_name: str) -> dict | None:
             resp = await client.post(
                 f"{IGDB_API}/games",
                 data=(
-                    f'search "{game_name}"; '
+                    f'search "{_igdb_escape(game_name)}"; '
                     f'fields name,summary,genres.name,involved_companies.company.name,'
                     f'involved_companies.developer,involved_companies.publisher,'
                     f'first_release_date,cover.image_id; '
@@ -245,15 +268,24 @@ async def fetch_igdb_metadata(game_name: str) -> dict | None:
 
 # ── Unified metadata fetcher ─────────────────────────────────────────────────
 
-async def fetch_and_apply_metadata(game_id: int) -> dict:
+async def fetch_and_apply_metadata(game_id: int, *, only_if_missing: bool = False) -> dict:
     """Fetch metadata from all available sources and apply to a game.
 
     Priority: Steam Store API > SteamGridDB (covers) > IGDB (fallback).
-    Returns a dict with what was updated.
+    Returns a dict with what was updated. Imports pass ``only_if_missing`` so a
+    game that already has a cover and description isn't refetched every run.
     """
     game = await get_game(game_id)
     if not game:
         raise ValueError(f"Game {game_id} not found")
+    if only_if_missing and game.get("cover_image_path") and game.get("description"):
+        return {
+            "game_id": game_id,
+            "sources_tried": [],
+            "sources_succeeded": [],
+            "fields_updated": [],
+            "cover_downloaded": False,
+        }
 
     updates = {}
     cover_url = None
@@ -284,7 +316,7 @@ async def fetch_and_apply_metadata(game_id: int) -> dict:
             cover_url = sgdb_data["cover_image_url"]  # Prefer SteamGridDB covers
 
     # 3. IGDB (fallback for non-Steam games)
-    if not game.get("steam_app_id") or not updates.get("description"):
+    if not game.get("steam_app_id") or not (updates.get("description") or game.get("description")):
         sources_tried.append("igdb")
         igdb_data = await fetch_igdb_metadata(game["name"])
         if igdb_data:
@@ -298,6 +330,7 @@ async def fetch_and_apply_metadata(game_id: int) -> dict:
                 cover_url = igdb_data["cover_image_url"]
 
     # Download and save cover image
+    cover_downloaded = False
     if cover_url and not game.get("cover_image_path"):
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
@@ -310,6 +343,7 @@ async def fetch_and_apply_metadata(game_id: int) -> dict:
                     elif "webp" in ct:
                         ext = "webp"
                     await save_cover_image(game_id, resp.content, f"cover.{ext}")
+                    cover_downloaded = True
         except Exception as e:
             logger.warning("Failed to download cover for game %d: %s", game_id, e)
 
@@ -322,7 +356,7 @@ async def fetch_and_apply_metadata(game_id: int) -> dict:
         "sources_tried": sources_tried,
         "sources_succeeded": sources_succeeded,
         "fields_updated": list(updates.keys()),
-        "cover_downloaded": cover_url is not None and not game.get("cover_image_path"),
+        "cover_downloaded": cover_downloaded,
     }
 
 

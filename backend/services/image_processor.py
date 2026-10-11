@@ -8,6 +8,8 @@ original file is always preserved on disk for download.
 import hashlib
 import json
 import logging
+import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -36,13 +38,30 @@ else:
     EXIF_TAG_NAMES = {v: k for k, v in ExifTags.TAGS.items()}
 
 
+_HASH_CHUNK_BYTES = 1024 * 1024
+_HASH_CACHE_LIMIT = 512
+# (resolved path, size, mtime_ns) -> sha256. The import pipelines hash a file and
+# then hash it again to name its derivatives; this avoids rereading multi-MB HDR
+# files. A changed file has a new size/mtime and misses the cache.
+_hash_cache: dict[tuple[str, int, int], str] = {}
+
+
 def compute_sha256(file_path: Path) -> str:
     """Compute SHA256 hash of a file."""
+    stat = os.stat(file_path)
+    key = (str(Path(file_path).resolve()), stat.st_size, stat.st_mtime_ns)
+    cached = _hash_cache.get(key)
+    if cached is not None:
+        return cached
     h = hashlib.sha256()
     with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
+        for chunk in iter(lambda: f.read(_HASH_CHUNK_BYTES), b""):
             h.update(chunk)
-    return h.hexdigest()
+    digest = h.hexdigest()
+    if len(_hash_cache) >= _HASH_CACHE_LIMIT:
+        _hash_cache.pop(next(iter(_hash_cache)))
+    _hash_cache[key] = digest
+    return digest
 
 
 def compute_sha256_bytes(data: bytes) -> str:
@@ -75,6 +94,87 @@ def get_image_format(file_path: Path) -> str | None:
         return None
 
 
+def _exif_to_dict(exif_data) -> dict:
+    result = {}
+    for tag_id, value in exif_data.items():
+        tag_name = EXIF_TAG_NAMES.get(tag_id, f"Tag_{tag_id}")
+        # Convert to string, skip binary data
+        if isinstance(value, bytes):
+            try:
+                value = value.decode("utf-8", errors="replace")
+            except Exception:
+                continue
+        elif isinstance(value, (int, float)):
+            value = str(value)
+        elif not isinstance(value, str):
+            try:
+                value = str(value)
+            except Exception:
+                continue
+        result[tag_name] = value
+    return result
+
+
+def _exif_date(exif_data) -> datetime | None:
+    # DateTimeOriginal, DateTimeDigitized, then DateTime
+    for tag in (0x9003, 0x9004, 0x0132):
+        value = exif_data.get(tag)
+        if value and isinstance(value, str):
+            try:
+                return datetime.strptime(value, "%Y:%m:%d %H:%M:%S")
+            except ValueError:
+                continue
+    return None
+
+
+def describe_image(file_path: Path) -> dict:
+    """Read dimensions, format, EXIF, capture date and HDR class in one open.
+
+    The pipelines used to open each file separately for every one of these, and
+    fully decoded JPEG XR files just to learn their size.
+    """
+    info = {
+        "width": None, "height": None, "format": None,
+        "exif": {}, "taken_at": None,
+        "is_hdr": hdr_processor.is_hdr_source(file_path),
+    }
+    if hdr_processor.is_jxr(file_path):
+        info["format"] = "jxr"
+        dims = hdr_processor.get_hdr_dimensions(file_path)
+        if dims:
+            info["width"], info["height"] = dims
+        return info
+    try:
+        with Image.open(file_path) as img:
+            info["width"], info["height"] = img.size
+            info["format"] = img.format.lower() if img.format else None
+            exif_data = img.getexif()
+            if exif_data:
+                info["exif"] = _exif_to_dict(exif_data)
+                info["taken_at"] = _exif_date(exif_data)
+    except Exception as e:  # noqa: BLE001 - unreadable files are reported by validation
+        logger.debug("Could not read image header for %s: %s", file_path, e)
+    return info
+
+
+@measure_sync("image", "analyze", threshold_ms=3000)
+def analyze_image(
+    file_path: Path,
+    game_folder: str,
+    filename_stem: str,
+) -> dict:
+    """Describe an image and build all derivatives in a single worker-thread hop."""
+    info = describe_image(file_path)
+    info["file_size"] = os.stat(file_path).st_size
+    (
+        info["thumbnail_path_sm"],
+        info["thumbnail_path_md"],
+        info["preview_path"],
+        info["perceptual_hash"],
+    ) = generate_thumbnails_with_hash(file_path, game_folder, filename_stem)
+    return info
+
+
 def extract_exif(file_path: Path) -> dict:
     """Extract EXIF metadata from an image file.
 
@@ -84,33 +184,12 @@ def extract_exif(file_path: Path) -> dict:
     """
     if hdr_processor.is_jxr(file_path):
         return {}
-
-    result = {}
     try:
         with Image.open(file_path) as img:
             exif_data = img.getexif()
-            if not exif_data:
-                return result
-
-            for tag_id, value in exif_data.items():
-                tag_name = EXIF_TAG_NAMES.get(tag_id, f"Tag_{tag_id}")
-                # Convert to string, skip binary data
-                if isinstance(value, bytes):
-                    try:
-                        value = value.decode("utf-8", errors="replace")
-                    except Exception:
-                        continue
-                elif isinstance(value, (int, float)):
-                    value = str(value)
-                elif not isinstance(value, str):
-                    try:
-                        value = str(value)
-                    except Exception:
-                        continue
-                result[tag_name] = value
+            return _exif_to_dict(exif_data) if exif_data else {}
     except Exception:
-        pass
-    return result
+        return {}
 
 
 def extract_date_taken(file_path: Path) -> datetime | None:
@@ -124,26 +203,9 @@ def extract_date_taken(file_path: Path) -> datetime | None:
     try:
         with Image.open(file_path) as img:
             exif_data = img.getexif()
-            if not exif_data:
-                return None
-
-            # Priority order for date fields
-            date_tags = [
-                0x9003,  # DateTimeOriginal
-                0x9004,  # DateTimeDigitized
-                0x0132,  # DateTime
-            ]
-
-            for tag in date_tags:
-                value = exif_data.get(tag)
-                if value and isinstance(value, str):
-                    try:
-                        return datetime.strptime(value, "%Y:%m:%d %H:%M:%S")
-                    except ValueError:
-                        continue
+            return _exif_date(exif_data) if exif_data else None
     except Exception:
-        pass
-    return None
+        return None
 
 
 # ── Tone-map settings lookup ─────────────────────────────────────────────────
@@ -216,8 +278,13 @@ def invalidate_tone_map_cache() -> None:
 # ── Thumbnail generation ─────────────────────────────────────────────────────
 
 
-def _open_for_thumbnail(source_path: Path) -> Image.Image | None:
-    """Open an image as an SDR Pillow RGB image, tone-mapping HDR sources."""
+def _open_for_thumbnail(source_path: Path, min_width: int | None = None) -> Image.Image | None:
+    """Open an image as an SDR Pillow RGB image, tone-mapping HDR sources.
+
+    With ``min_width``, JPEG sources are decoded by libjpeg at the smallest DCT
+    scale that is still at least that wide: a 4K Steam JPEG needed for a 1920px
+    preview decodes at half size, roughly a quarter of the work.
+    """
     if hdr_processor.is_hdr_source(source_path):
         algo, exposure = _get_tone_map_settings()
         try:
@@ -233,6 +300,8 @@ def _open_for_thumbnail(source_path: Path) -> Image.Image | None:
 
     try:
         with Image.open(source_path) as img:
+            if min_width and img.format == "JPEG" and img.width > min_width:
+                img.draft("RGB", (min_width, -(-img.height * min_width // img.width)))
             if img.mode in ("RGBA", "P", "LA"):
                 return img.convert("RGB")
             if img.mode != "RGB":
@@ -261,7 +330,7 @@ def generate_thumbnail(
     try:
         dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-        img = _open_for_thumbnail(source_path)
+        img = _open_for_thumbnail(source_path, max_width)
         if img is None:
             return False
 
@@ -292,7 +361,13 @@ def _save_thumbnail(
             image.close()
             image = resized
         dest_path.parent.mkdir(parents=True, exist_ok=True)
-        image.save(dest_path, "JPEG", quality=quality, optimize=True)
+        fd, temp_name = tempfile.mkstemp(dir=dest_path.parent, suffix=".tmp")
+        os.close(fd)
+        try:
+            image.save(temp_name, "JPEG", quality=quality, optimize=True)
+            os.replace(temp_name, dest_path)
+        finally:
+            Path(temp_name).unlink(missing_ok=True)
         return True
     finally:
         image.close()
@@ -313,6 +388,11 @@ def generate_thumbnails(
     return sm, md
 
 
+def derivative_filename(source_path: Path) -> str:
+    """Versioned, content-addressed cache names keep HDR and SDR files distinct."""
+    return f"v2-{compute_sha256(source_path)}.jpg"
+
+
 @measure_sync("image", "thumbnail_bundle", threshold_ms=2000)
 def generate_thumbnails_with_hash(
     source_path: Path,
@@ -322,14 +402,14 @@ def generate_thumbnails_with_hash(
     """Generate thumbnails, a large preview, and perceptual dHash in one decode."""
     from backend.services.filesystem import get_thumbnails_dir
 
-    thumb_filename = f"{filename_stem}.jpg"
+    thumb_filename = derivative_filename(source_path)
 
     sm_path = get_thumbnails_dir(game_folder, "300") / thumb_filename
     md_path = get_thumbnails_dir(game_folder, "800") / thumb_filename
     preview_width = settings.preview_max_width
     preview_path = get_thumbnails_dir(game_folder, str(preview_width)) / thumb_filename
 
-    image = _open_for_thumbnail(source_path)
+    image = _open_for_thumbnail(source_path, max(preview_width, 800))
     if image is None:
         return None, None, None, None
     try:
@@ -367,18 +447,19 @@ def generate_preview(
     from backend.services.filesystem import get_thumbnails_dir
 
     preview_width = settings.preview_max_width
+    thumb_filename = derivative_filename(source_path)
     preview_path = (
         get_thumbnails_dir(game_folder, str(preview_width))
-        / f"{filename_stem}.jpg"
+        / thumb_filename
     )
     if not generate_thumbnail(source_path, preview_path, preview_width):
         return None
-    return f"{game_folder}/thumbnails/{preview_width}/{filename_stem}.jpg"
+    return f"{game_folder}/thumbnails/{preview_width}/{thumb_filename}"
 
 
 def compute_perceptual_hash(file_path: Path) -> str | None:
     """Compute the same normalized 128-bit dHash used during import."""
-    image = _open_for_thumbnail(file_path)
+    image = _open_for_thumbnail(file_path, max(settings.preview_max_width, 800))
     if image is None:
         return None
     try:
@@ -416,37 +497,19 @@ def process_image(file_path: Path, game_folder: str, filename_stem: str) -> dict
     - taken_at (ISO string or None)
     - thumbnail_path_sm, thumbnail_path_md, preview_path
     """
-    result = {}
-
-    # Dimensions
-    dims = get_image_dimensions(file_path)
-    if dims:
-        result["width"], result["height"] = dims
-
-    # Format
-    result["format"] = get_image_format(file_path)
-
-    # File size
-    result["file_size"] = file_path.stat().st_size
-
-    # Hash
-    result["sha256_hash"] = compute_sha256(file_path)
-
-    # EXIF
-    exif = extract_exif(file_path)
-    result["exif_data"] = json.dumps(exif) if exif else None
-
-    # Date taken
-    date_taken = extract_date_taken(file_path)
-    result["taken_at"] = date_taken.isoformat() if date_taken else None
-
-    # Thumbnails
-    sm, md, preview, perceptual_hash = generate_thumbnails_with_hash(
-        file_path, game_folder, filename_stem
-    )
-    result["thumbnail_path_sm"] = sm
-    result["thumbnail_path_md"] = md
-    result["preview_path"] = preview
-    result["perceptual_hash"] = perceptual_hash
-
+    sha256 = compute_sha256(file_path)
+    info = analyze_image(file_path, game_folder, filename_stem)
+    result = {
+        "format": info["format"],
+        "file_size": info["file_size"],
+        "sha256_hash": sha256,
+        "exif_data": json.dumps(info["exif"]) if info["exif"] else None,
+        "taken_at": info["taken_at"].isoformat() if info["taken_at"] else None,
+        "thumbnail_path_sm": info["thumbnail_path_sm"],
+        "thumbnail_path_md": info["thumbnail_path_md"],
+        "preview_path": info["preview_path"],
+        "perceptual_hash": info["perceptual_hash"],
+    }
+    if info["width"] is not None:
+        result["width"], result["height"] = info["width"], info["height"]
     return result

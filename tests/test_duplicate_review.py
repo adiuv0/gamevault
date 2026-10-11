@@ -17,8 +17,11 @@ async def duplicate_library(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(settings, "library_dir", tmp_path / "library")
     monkeypatch.setattr(settings, "thumbnail_dir", tmp_path / "cache")
     await init_db()
+    import aiosqlite
     try:
-        yield await get_db(), settings.library_dir
+        async with aiosqlite.connect(str(settings.db_path)) as fixture_db:
+            await fixture_db.execute("PRAGMA foreign_keys=ON")
+            yield fixture_db, settings.library_dir
     finally:
         await close_db()
 
@@ -159,7 +162,7 @@ async def test_scan_rejects_visually_identical_sdr_pair(duplicate_library):
 
 
 @pytest.mark.asyncio
-async def test_automatic_grouping_requires_hdr_sdr_pair(duplicate_library):
+async def test_perceptually_similar_hdr_sdr_pair_requires_review(duplicate_library):
     from backend.services.screenshot_service import create_screenshot
 
     db, _ = duplicate_library
@@ -205,7 +208,7 @@ async def test_automatic_grouping_requires_hdr_sdr_pair(duplicate_library):
     assert await cursor.fetchall() == [
         (first["id"], first["id"]),
         (second["id"], second["id"]),
-        (hdr["id"], second["id"]),
+        (hdr["id"], hdr["id"]),
     ]
 
 

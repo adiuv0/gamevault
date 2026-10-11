@@ -30,16 +30,9 @@ export function AuthGate({ children }: AuthGateProps) {
         return;
       }
 
-      // If we have a token, try to verify it by making an authenticated request
-      if (token) {
-        try {
-          await api.get('/settings');
-          setStatus({ ...authStatus, authenticated: true });
-        } catch {
-          // Token is invalid, clear it
-          useAuthStore.getState().clearToken();
-          setStatus({ ...authStatus, authenticated: false });
-        }
+      // /auth/verify validates the stored token itself, so no second request is needed.
+      if (token && !authStatus.authenticated) {
+        useAuthStore.getState().clearToken();
       }
     } catch {
       // API unreachable

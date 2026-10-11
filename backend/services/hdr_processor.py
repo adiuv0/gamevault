@@ -54,18 +54,13 @@ def is_jxr(file_path: Path) -> bool:
 
 
 def is_hdr_png(file_path: Path) -> bool:
-    """Return True if the PNG is HDR (16 bits per channel)."""
+    """Recognize high-bit-depth PNGs from IHDR, before Pillow reduces RGB to 8 bits."""
     try:
-        with Image.open(file_path) as img:
-            if img.format != "PNG":
-                return False
-            # 16-bit PNG modes Pillow uses: "I", "I;16", "I;16B", "RGB" with
-            # 16-bit channels (rare). The reliable signal is bit depth.
-            depth = img.info.get("bit-depth") or img.info.get("bits")
-            if depth and int(depth) > 8:
-                return True
-            return img.mode in ("I", "I;16", "I;16B", "I;16L")
-    except Exception:
+        with file_path.open("rb") as stream:
+            header = stream.read(29)
+        return (len(header) == 29 and header[:8] == b"\x89PNG\r\n\x1a\n"
+                and header[12:16] == b"IHDR" and header[24] == 16)
+    except OSError:
         return False
 
 
@@ -112,33 +107,15 @@ def decode_jxr(file_path: Path) -> np.ndarray:
 
 
 def decode_hdr_png(file_path: Path) -> np.ndarray:
-    """Decode a 16-bit (or higher) PNG to a float32 RGB array.
-
-    Pillow handles 16-bit PNG natively — we read it raw and normalize.
-    """
-    with Image.open(file_path) as img:
-        if img.mode in ("I", "I;16", "I;16B", "I;16L"):
-            arr = np.asarray(img, dtype=np.float32) / 65535.0
-            return np.stack([arr, arr, arr], axis=-1)
-
-        # 16-bit RGB / RGBA — convert to "I;16" for each channel
-        if img.mode == "RGB":
-            arr = np.asarray(img, dtype=np.float32)
-            # If max value > 255 we have 16-bit range
-            if arr.max() > 255.0:
-                return arr / 65535.0
-            return arr / 255.0
-
-        if img.mode == "RGBA":
-            arr = np.asarray(img, dtype=np.float32)
-            arr = arr[:, :, :3]
-            if arr.max() > 255.0:
-                return arr / 65535.0
-            return arr / 255.0
-
-        # Fallback: convert to RGB (loses HDR range, but at least decodes)
-        rgb = img.convert("RGB")
-        return np.asarray(rgb, dtype=np.float32) / 255.0
+    """Decode all channels at native precision; Pillow truncates RGB16 to RGB8."""
+    arr = _get_imagecodecs().png_decode(file_path.read_bytes())
+    maximum = np.iinfo(arr.dtype).max if np.issubdtype(arr.dtype, np.integer) else 1.0
+    out = arr.astype(np.float32) / maximum
+    if out.ndim == 2:
+        out = np.repeat(out[:, :, None], 3, axis=2)
+    elif out.shape[2] < 3:
+        out = np.repeat(out[:, :, :1], 3, axis=2)
+    return out[:, :, :3]
 
 
 # ── Tone-mapping ─────────────────────────────────────────────────────────────
@@ -235,13 +212,54 @@ def render_sdr_pil(
 
     mapped = tone_map(arr, algorithm=algorithm, exposure=exposure)
     rgb8 = to_8bit_srgb(mapped)
-    return Image.fromarray(rgb8, mode="RGB")
+    return Image.fromarray(rgb8)
+
+
+_JXR_TAG_WIDTH = 0xBC80
+_JXR_TAG_HEIGHT = 0xBC81
+
+
+def read_jxr_header_dimensions(file_path: Path) -> tuple[int, int] | None:
+    """Read width/height from the JPEG XR container's first IFD without decoding."""
+    try:
+        with open(file_path, "rb") as stream:
+            header = stream.read(8)
+            if len(header) < 8 or header[:3] != JXR_MAGIC:
+                return None
+            stream.seek(int.from_bytes(header[4:8], "little"))
+            count_bytes = stream.read(2)
+            if len(count_bytes) < 2:
+                return None
+            count = int.from_bytes(count_bytes, "little")
+            if count > 256:
+                return None
+            entries = stream.read(count * 12)
+    except OSError:
+        return None
+    values: dict[int, int] = {}
+    for offset in range(0, len(entries) - 11, 12):
+        tag = int.from_bytes(entries[offset:offset + 2], "little")
+        if tag not in (_JXR_TAG_WIDTH, _JXR_TAG_HEIGHT):
+            continue
+        field_type = int.from_bytes(entries[offset + 2:offset + 4], "little")
+        raw = entries[offset + 8:offset + 12]
+        if field_type == 3:  # SHORT
+            values[tag] = int.from_bytes(raw[:2], "little")
+        elif field_type == 4:  # LONG
+            values[tag] = int.from_bytes(raw, "little")
+    width, height = values.get(_JXR_TAG_WIDTH), values.get(_JXR_TAG_HEIGHT)
+    if width and height:
+        return width, height
+    return None
 
 
 def get_hdr_dimensions(file_path: Path) -> tuple[int, int] | None:
     """Get (width, height) for an HDR source without a full decode if possible."""
     if is_jxr(file_path):
-        # imagecodecs has no metadata-only API — decode is the cleanest path
+        dims = read_jxr_header_dimensions(file_path)
+        if dims:
+            return dims
+        # Unusual container layout: fall back to a full decode.
         try:
             arr = decode_jxr(file_path)
             return (arr.shape[1], arr.shape[0])

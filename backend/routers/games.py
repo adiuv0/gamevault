@@ -87,7 +87,7 @@ async def merge_into(source_id: int, body: GameMergeRequest):
 async def get_or_create_by_name(req: GameByNameRequest):
     """Get or create a game by display name.
 
-    Used by the GameVault Sync CLI for Special K imports — the local folder
+    Used by GameVault Sync for Special K imports — the local folder
     name (cleaned client-side) becomes the canonical game name. If a game
     with that name already exists (e.g. from a Steam import), it's returned
     as-is so the two sources merge into one library entry.
@@ -100,14 +100,20 @@ async def get_or_create_by_name(req: GameByNameRequest):
 
 
 @router.get("/by-steam-appid/{app_id}")
-async def get_or_create_by_steam_appid(app_id: int):
+async def get_or_create_by_steam_appid(
+    app_id: int,
+    name: str | None = Query(default=None, max_length=200),
+):
     """Get or create a game by its Steam app ID.
 
-    Used by the CLI sync tool to resolve games before uploading.
+    Used by the sync app to resolve games before uploading.
     Tries to resolve the real game name via Steam Store API first.
     If the game already exists with a placeholder name ("App {id}"),
-    re-fetches the real name from Steam.
+    re-fetches the real name from Steam. ``name`` is the name the sync app
+    read from the game's local install; it is used when the store can't be
+    reached, instead of the placeholder.
     """
+    fallback = " ".join((name or "").split()) or None
     existing = await game_service.get_game_by_steam_app_id(app_id)
 
     # If game exists but still has a placeholder name, try to resolve it
@@ -117,25 +123,26 @@ async def get_or_create_by_steam_appid(app_id: int):
             try:
                 from backend.services.metadata_service import fetch_steam_metadata
                 steam_data = await fetch_steam_metadata(app_id)
-                if steam_data and steam_data.get("name"):
-                    await game_service.update_game(existing["id"], name=steam_data["name"])
-                    existing = await game_service.get_game(existing["id"])
+                better = (steam_data or {}).get("name") or fallback
             except Exception:
-                pass  # Keep placeholder name if resolution fails
+                better = fallback
+            if better:
+                await game_service.update_game(existing["id"], name=better)
+                existing = await game_service.get_game(existing["id"])
         return existing
 
     # New game — try to get the real name from Steam Store API before creating
-    name = f"App {app_id}"
+    resolved = fallback or f"App {app_id}"
     try:
         from backend.services.metadata_service import fetch_steam_metadata
         steam_data = await fetch_steam_metadata(app_id)
         if steam_data and steam_data.get("name"):
-            name = steam_data["name"]
+            resolved = steam_data["name"]
     except Exception:
-        pass  # Fall back to generic name
+        pass  # Fall back to the local or generic name
 
     game = await game_service.get_or_create_game(
-        name=name,
+        name=resolved,
         steam_app_id=app_id,
     )
     return game

@@ -1,0 +1,6 @@
+# Keep repository text files LF on every platform; Windows checkouts were mixing CRLF in.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jxr binary
+*.ico binary

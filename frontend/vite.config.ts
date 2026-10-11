@@ -10,6 +10,19 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // React and the router change far less often than app code, so keep them
+        // in a chunk browsers can hold onto across GameVault upgrades.
+        manualChunks(id) {
+          if (/node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/.test(id)) {
+            return 'react-vendor';
+          }
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

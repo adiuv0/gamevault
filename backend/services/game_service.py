@@ -1,19 +1,12 @@
 """Game management service: CRUD operations and folder management."""
 
 import logging
-import os
-import shutil
-from pathlib import Path
 
 from backend.config import settings
 from backend.database import get_db
 from backend.services.filesystem import (
     ensure_game_directories,
     get_game_dir,
-    get_screenshots_dir,
-    get_thumbnails_dir,
-    safe_library_path,
-    safe_media_path,
     sanitize_folder_name,
 )
 from backend.services.performance_diagnostics import measure_async
@@ -188,6 +181,7 @@ async def delete_game(game_id: int) -> bool:
 async def update_screenshot_stats(game_id: int, *, commit: bool = True) -> None:
     """Recalculate denormalized screenshot stats for a game."""
     db = await get_db()
+    game_id = await resolve_game_id(game_id)
 
     cursor = await db.execute(
         """SELECT
@@ -253,199 +247,47 @@ async def list_public_games(sort: str = "name") -> list[dict]:
     return [dict(zip(columns, row)) for row in rows]
 
 
+async def resolve_game_id(game_id: int) -> int:
+    db = await get_db()
+    cursor = await db.execute("SELECT target_id FROM game_redirects WHERE source_id = ?", (game_id,))
+    row = await cursor.fetchone()
+    return row[0] if row else game_id
+
+
 async def merge_games(source_id: int, target_id: int) -> dict:
-    """Merge ``source_id`` into ``target_id``: move every screenshot (DB
-    rows + files on disk) into the target game, transfer the cover if the
-    target lacks one, re-sync the FTS index, then delete the source game.
+    """Atomically combine records, leaving irreplaceable originals at their paths."""
+    from backend.database import transaction
+    from backend.services.screenshot_service import _sync_fts
 
-    Use case: the Special K importer's name-only matching can produce a
-    duplicate game when its cleaned folder name disagrees with the Steam
-    Store API's canonical name (e.g. ``Cyberpunk2077`` vs
-    ``Cyberpunk 2077: Phantom Liberty``). Merging consolidates them after
-    the fact.
-
-    Filename collisions in the target are resolved by appending
-    ``" (N)"`` before the extension. Annotations and share-links FK to
-    screenshot IDs (not game IDs), so they ride along automatically.
-
-    Returns a dict with ``moved`` (count), ``had_collisions`` (count),
-    plus the source/target IDs and the resolved target name.
-    """
     if source_id == target_id:
         raise ValueError("Cannot merge a game into itself")
-
-    source = await get_game(source_id)
-    target = await get_game(target_id)
-    if not source:
-        raise ValueError(f"Source game {source_id} not found")
-    if not target:
-        raise ValueError(f"Target game {target_id} not found")
-
-    db = await get_db()
-
-    # Pull every screenshot row attached to the source
-    cursor = await db.execute(
-        """SELECT id, filename, file_path, thumbnail_path_sm, thumbnail_path_md,
-                  preview_path
-           FROM screenshots WHERE game_id = ?""",
-        (source_id,),
-    )
-    cols = [d[0] for d in cursor.description]
-    rows = [dict(zip(cols, row)) for row in await cursor.fetchall()]
-
-    target_folder = target["folder_name"]
-    target_screenshots_dir = get_screenshots_dir(target_folder)
-    target_thumb_sm_dir = get_thumbnails_dir(target_folder, "300")
-    target_thumb_md_dir = get_thumbnails_dir(target_folder, "800")
-    preview_width = str(settings.preview_max_width)
-    target_preview_dir = get_thumbnails_dir(target_folder, preview_width)
-    target_screenshots_dir.mkdir(parents=True, exist_ok=True)
-    target_thumb_sm_dir.mkdir(parents=True, exist_ok=True)
-    target_thumb_md_dir.mkdir(parents=True, exist_ok=True)
-    target_preview_dir.mkdir(parents=True, exist_ok=True)
-
-    moved = 0
-    collisions = 0
-
-    for ss in rows:
-        # Resolve unique filename in the target folder (handle collision
-        # by appending " (N)" before the extension).
-        new_name = ss["filename"]
-        if (target_screenshots_dir / new_name).exists():
-            stem, ext = os.path.splitext(ss["filename"])
-            counter = 1
-            while True:
-                candidate = f"{stem} ({counter}){ext}"
-                if not (target_screenshots_dir / candidate).exists():
-                    new_name = candidate
-                    break
-                counter += 1
-            collisions += 1
-
-        new_stem = Path(new_name).stem
-        new_thumb_filename = f"{new_stem}.jpg"
-
-        # Physical moves — best-effort. If a source file is missing we
-        # still update the DB row so it points at the (intended) target
-        # location; serving will 404 the same way it would now.
-        old_main = safe_library_path(ss["file_path"]) if ss["file_path"] else None
-        old_sm = (
-            safe_media_path(ss["thumbnail_path_sm"])
-            if ss["thumbnail_path_sm"]
-            else None
-        )
-        old_md = (
-            safe_media_path(ss["thumbnail_path_md"])
-            if ss["thumbnail_path_md"]
-            else None
-        )
-        old_preview = safe_media_path(ss["preview_path"]) if ss["preview_path"] else None
-
-        new_main = target_screenshots_dir / new_name
-        new_sm = target_thumb_sm_dir / new_thumb_filename
-        new_md = target_thumb_md_dir / new_thumb_filename
-        new_preview = target_preview_dir / new_thumb_filename
-
-        if old_main and old_main.exists():
-            shutil.move(str(old_main), str(new_main))
-        if old_sm and old_sm.exists():
-            shutil.move(str(old_sm), str(new_sm))
-        if old_md and old_md.exists():
-            shutil.move(str(old_md), str(new_md))
-        if old_preview and old_preview.exists():
-            shutil.move(str(old_preview), str(new_preview))
-
-        # Update DB row to point at the new game + new paths
-        new_file_path = f"{target_folder}/screenshots/{new_name}"
-        new_sm_rel = (
-            f"{target_folder}/thumbnails/300/{new_thumb_filename}"
-            if ss["thumbnail_path_sm"]
-            else None
-        )
-        new_md_rel = (
-            f"{target_folder}/thumbnails/800/{new_thumb_filename}"
-            if ss["thumbnail_path_md"]
-            else None
-        )
-        new_preview_rel = (
-            f"{target_folder}/thumbnails/{preview_width}/{new_thumb_filename}"
-            if ss["preview_path"]
-            else None
-        )
-
+    async with transaction() as db:
+        source = await get_game(source_id)
+        target = await get_game(target_id)
+        if not source:
+            raise ValueError(f"Source game {source_id} not found")
+        if not target:
+            raise ValueError(f"Target game {target_id} not found")
+        cursor = await db.execute("SELECT id FROM screenshots WHERE game_id = ?", (source_id,))
+        ids = [row[0] for row in await cursor.fetchall()]
         await db.execute(
-            """UPDATE screenshots
-               SET game_id = ?, filename = ?, file_path = ?,
-                   thumbnail_path_sm = ?, thumbnail_path_md = ?, preview_path = ?,
-                   updated_at = datetime('now')
-               WHERE id = ?""",
-            (
-                target_id,
-                new_name,
-                new_file_path,
-                new_sm_rel,
-                new_md_rel,
-                new_preview_rel,
-                ss["id"],
-            ),
+            "UPDATE screenshots SET game_id = ?, updated_at = datetime('now') WHERE game_id = ?",
+            (target_id, source_id),
         )
-        moved += 1
-
-    await db.commit()
-
-    # Transfer the cover image if the target doesn't have one. We move
-    # rather than copy so the source folder ends up cleanly empty.
-    if not target.get("cover_image_path") and source.get("cover_image_path"):
-        old_cover = settings.library_dir / source["cover_image_path"]
-        if old_cover.exists():
-            new_cover = settings.library_dir / target_folder / old_cover.name
-            try:
-                shutil.move(str(old_cover), str(new_cover))
-                await db.execute(
-                    "UPDATE games SET cover_image_path = ? WHERE id = ?",
-                    (f"{target_folder}/{old_cover.name}", target_id),
-                )
-                await db.commit()
-            except OSError as e:
-                logger.warning("merge_games: cover transfer failed: %s", e)
-
-    # Re-sync the FTS index for every moved screenshot — game_name
-    # appears in the searchable content table.
-    from backend.services.screenshot_service import _sync_fts
-    for ss in rows:
-        await _sync_fts(ss["id"])
-
-    # Refresh stats on the target now that screenshots have moved
-    await update_screenshot_stats(target_id)
-
-    # Drop the source DB row. Annotations + share_links FK to screenshot
-    # IDs (not game IDs), so they stayed attached to the moved rows.
-    await db.execute("DELETE FROM games WHERE id = ?", (source_id,))
-    await db.commit()
-
-    # Best-effort cleanup of the now-empty source folder on disk
-    source_dir = settings.library_dir / source["folder_name"]
-    if source_dir.exists():
-        try:
-            shutil.rmtree(source_dir)
-        except OSError as e:
-            logger.warning("merge_games: source folder cleanup failed: %s", e)
-
-    source_thumbnail_dir = settings.thumbnail_dir / source["folder_name"]
-    if source_thumbnail_dir.exists():
-        try:
-            shutil.rmtree(source_thumbnail_dir)
-        except OSError as e:
-            logger.warning("merge_games: source thumbnail cleanup failed: %s", e)
-
-    target_fresh = await get_game(target_id)
-    return {
-        "moved": moved,
-        "had_collisions": collisions,
-        "source_id": source_id,
-        "target_id": target_id,
-        "target_name": (target_fresh or target).get("name", ""),
-    }
+        # Running workers may still hold the old game ID and file paths.
+        await db.execute("UPDATE upload_jobs SET game_id = ? WHERE game_id = ?", (target_id, source_id))
+        await db.execute("UPDATE duplicate_candidates SET game_id = ? WHERE game_id = ?", (target_id, source_id))
+        await db.execute("UPDATE game_redirects SET target_id = ? WHERE target_id = ?", (target_id, source_id))
+        await db.execute("INSERT INTO game_redirects VALUES (?, ?)", (source_id, target_id))
+        if not target.get("cover_image_path") and source.get("cover_image_path"):
+            await db.execute("UPDATE games SET cover_image_path = ? WHERE id = ?",
+                             (source["cover_image_path"], target_id))
+        for screenshot_id in ids:
+            await _sync_fts(screenshot_id, commit=False)
+        await update_screenshot_stats(target_id, commit=False)
+        await db.execute("DELETE FROM games WHERE id = ?", (source_id,))
+    return {"moved": len(ids), "had_collisions": 0, "source_id": source_id,
+            "target_id": target_id, "target_name": target["name"]}
 
 
 async def save_cover_image(game_id: int, image_data: bytes, filename: str = "cover.jpg") -> str:
