@@ -113,6 +113,15 @@ class TestHdrProcessor:
         out_white = to_8bit_srgb(rgb_white)
         assert out_white[0, 0, 0] == 255
 
+    def test_to_8bit_srgb_table_matches_exact_curve(self):
+        from backend.services.hdr_processor import _srgb_oetf, to_8bit_srgb
+
+        rgb = np.random.default_rng(7).random((256, 256, 3), dtype=np.float32) ** 4
+        exact = (_srgb_oetf(rgb.astype(np.float64)) * 255.0 + 0.5).astype(np.uint8)
+        out = to_8bit_srgb(rgb)
+        assert out.dtype == np.uint8
+        assert np.abs(out.astype(int) - exact.astype(int)).max() <= 1
+
 
 # ── Special K scanner tests ──────────────────────────────────────────────────
 

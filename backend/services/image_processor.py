@@ -348,8 +348,13 @@ def _save_thumbnail(
     dest_path: Path,
     max_width: int,
     quality: int,
+    subsampling: int = -1,
 ) -> bool:
-    """Resize and save one thumbnail from an already-decoded image."""
+    """Resize and save one thumbnail from an already-decoded image.
+
+    ``subsampling=0`` keeps full-resolution chroma (4:4:4); the default lets
+    Pillow pick 4:2:0, which is fine for downscaled thumbnails.
+    """
     width, height = source.size
     ratio = min(1.0, max_width / width)
     new_size = (int(width * ratio), int(height * ratio))
@@ -364,7 +369,9 @@ def _save_thumbnail(
         fd, temp_name = tempfile.mkstemp(dir=dest_path.parent, suffix=".tmp")
         os.close(fd)
         try:
-            image.save(temp_name, "JPEG", quality=quality, optimize=True)
+            image.save(
+                temp_name, "JPEG", quality=quality, optimize=True, subsampling=subsampling
+            )
             os.replace(temp_name, dest_path)
         finally:
             Path(temp_name).unlink(missing_ok=True)
@@ -455,6 +462,33 @@ def generate_preview(
     if not generate_thumbnail(source_path, preview_path, preview_width):
         return None
     return f"{game_folder}/thumbnails/{preview_width}/{thumb_filename}"
+
+
+# Full-size renders replace the original in the viewer, so they get more
+# quality than grid thumbnails and keep full chroma for HUD text and edges.
+FULL_RENDER_QUALITY = 92
+
+
+@measure_sync("image", "full_render", threshold_ms=2000)
+def generate_full_render(source_path: Path, dest_path: Path) -> bool:
+    """Write a full-resolution SDR JPEG for a source browsers can't display.
+
+    JPEG XR and TIFF originals can't be shown by browsers, and the bounded
+    preview is capped at ``preview_max_width``. This keeps every pixel of the
+    original, tone-mapped the same way as the previews.
+    """
+    image = _open_for_thumbnail(source_path)
+    if image is None:
+        return False
+    try:
+        return _save_thumbnail(
+            image, dest_path, image.width, FULL_RENDER_QUALITY, subsampling=0
+        )
+    except Exception as e:
+        logger.warning("Full-size render failed for %s: %s", source_path, e)
+        return False
+    finally:
+        image.close()
 
 
 def compute_perceptual_hash(file_path: Path) -> str | None:

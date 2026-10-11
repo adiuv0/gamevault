@@ -11,6 +11,9 @@ from backend.config import settings
 INVALID_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 TRAILING_DOTS_SPACES = re.compile(r'[\s.]+$')
 
+# Cache subdirectory for full-resolution renders of JXR/TIFF originals.
+FULL_RENDER_DIR = "full"
+
 # Windows reserved filenames
 RESERVED_NAMES = frozenset({
     "CON", "PRN", "AUX", "NUL",
@@ -118,7 +121,7 @@ def thumbnail_cache_path(rel_path: str | None) -> Path | None:
         return None
     relative = Path(rel_path)
     parts = relative.parts
-    cache_sizes = {"300", "800", str(settings.preview_max_width)}
+    cache_sizes = {"300", "800", str(settings.preview_max_width), FULL_RENDER_DIR}
     if len(parts) < 4 or parts[1] != "thumbnails" or parts[2] not in cache_sizes:
         return None
 

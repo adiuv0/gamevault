@@ -7,6 +7,23 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+### Fixed
+
+- JPEG XR (HDR) and TIFF screenshots now open at full resolution. Browsers can't
+  show those formats, so the viewer used to stop at the 1920px preview. It now
+  shows the preview at once and swaps in a full-size tone-mapped JPEG, rendered
+  on first view and cached (`GET /api/screenshots/{id}/full`). Public galleries
+  and share links get the same render; share links used to serve the raw `.jxr`,
+  which browsers and link previews couldn't display. Download still gives the
+  original file.
+
+### Changed
+
+- HDR tone-mapping encodes sRGB through a lookup table, which cuts that step from
+  about 1.3 s to 0.16 s on a 4K capture. Thumbnails and previews of JPEG XR
+  imports are made correspondingly faster; output differs by at most one 8-bit
+  code on about 0.1% of pixels.
+
 ## [1.1.0] - 2026-10-11
 
 ### Added

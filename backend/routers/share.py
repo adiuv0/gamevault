@@ -7,7 +7,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from backend.auth import require_auth
 from backend.config import settings
-from backend.services.filesystem import safe_library_path
+from backend.services import full_render_service
+from backend.services.filesystem import safe_library_path, safe_media_path
 from backend.services.share_service import (
     create_share_link,
     get_active_share_link,
@@ -126,6 +127,16 @@ async def share_image(token: str):
         or mimetypes.guess_type(str(file_path))[0]
         or "image/jpeg"
     )
+    # Browsers and link-preview crawlers can't show JPEG XR or TIFF: share a
+    # full-size JPEG render instead, or the bounded preview if that fails.
+    if full_render_service.needs_full_render(screenshot):
+        render = await full_render_service.ensure_full_render(screenshot)
+        if render is None and screenshot.get("preview_path"):
+            preview = safe_media_path(screenshot["preview_path"])
+            render = preview if preview.exists() else None
+        if render is not None:
+            file_path = render
+            media_type = "image/jpeg"
     return FileResponse(
         file_path,
         media_type=media_type,

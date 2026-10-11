@@ -8,7 +8,12 @@ import {
   Loader2,
   Repeat2,
 } from 'lucide-react';
-import { galleryGetScreenshot, galleryImageUrl, galleryPreviewUrl } from '@/api/gallery';
+import {
+  galleryFullUrl,
+  galleryGetScreenshot,
+  galleryImageUrl,
+  galleryPreviewUrl,
+} from '@/api/gallery';
 import { formatDateTime, formatFileSize } from '@/lib/formatters';
 import { ProgressiveImage } from '@/components/shared/ProgressiveImage';
 import { usePreloadImages } from '@/hooks/usePreloadImages';
@@ -74,10 +79,11 @@ export function GalleryScreenshotViewer({
   const activeVariant = variants.find((variant) => variant.id === activeVariantId)
     || variants[0]
     || listItem;
-  const requiresPreview = ['jxr', 'wdp', 'tif', 'tiff'].includes(
+  // Browsers can't decode these; the server renders them to a full-size JPEG.
+  const needsRender = ['jxr', 'wdp', 'tif', 'tiff'].includes(
     activeVariant?.format?.toLowerCase() || '',
-  );
-  const usePreview = !!activeVariant && (requiresPreview || !!originalFailures[activeVariant.id]);
+  ) || /\.(jxr|wdp|tiff?)$/i.test(activeVariant?.filename || '');
+  const usePreview = !!activeVariant && !!originalFailures[activeVariant.id];
 
   const prevItem = screenshots[currentIndex - 1];
   const nextItem = screenshots[currentIndex + 1];
@@ -245,7 +251,7 @@ export function GalleryScreenshotViewer({
             previewUrl={galleryPreviewUrl(activeVariant.id, activeVariant.media_version)}
             originalUrl={usePreview
               ? null
-              : galleryImageUrl(activeVariant.id, activeVariant.media_version)}
+              : (needsRender ? galleryFullUrl : galleryImageUrl)(activeVariant.id, activeVariant.media_version)}
             alt={activeVariant.filename}
             className="max-w-full max-h-full object-contain select-none"
             onOriginalError={() => {

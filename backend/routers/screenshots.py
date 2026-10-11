@@ -17,8 +17,12 @@ from backend.auth import require_auth
 from backend.database import get_db
 from backend.models.annotation import AnnotationCreate
 from backend.models.screenshot import ScreenshotResponse
-from backend.services import screenshot_service
-from backend.services.filesystem import safe_library_path, safe_media_path
+from backend.services import full_render_service, screenshot_service
+from backend.services.filesystem import (
+    safe_library_path,
+    safe_media_path,
+    thumbnail_cache_path,
+)
 from backend.services.media_cache_service import media_response_headers
 
 
@@ -89,6 +93,27 @@ async def delete_screenshot(screenshot_id: int):
             # whole delete. The DB row will still be removed below.
             continue
 
+    # The full-size render is content-addressed like the preview, so a
+    # duplicate of the same original still needs it.
+    if full_render_service.needs_full_render(screenshot):
+        try:
+            full_rel = await asyncio.to_thread(
+                full_render_service.full_render_rel_path, screenshot
+            )
+            full_path = thumbnail_cache_path(full_rel)
+        except HTTPException:
+            full_path = None
+        if full_path is not None:
+            db = await get_db()
+            cursor = await db.execute(
+                """SELECT 1 FROM screenshots WHERE id != ? AND (
+                    sha256_hash = ? OR preview_path = ?
+                ) LIMIT 1""",
+                (screenshot_id, screenshot.get("sha256_hash"), screenshot.get("preview_path")),
+            )
+            if not await cursor.fetchone():
+                doomed.append(full_path)
+
     # Remove the row before the files: if the delete fails, nothing points at
     # missing originals.
     await screenshot_service.delete_screenshot(screenshot_id)
@@ -129,6 +154,34 @@ async def get_image(screenshot_id: int, v: str | None = None):
     return FileResponse(
         file_path,
         media_type=media_type,
+        headers=media_response_headers(
+            public=False,
+            requested_version=v,
+            current_version=screenshot["media_version"],
+        ),
+    )
+
+
+@router.get("/{screenshot_id}/full")
+async def get_full(screenshot_id: int, v: str | None = None):
+    """Serve the full-resolution image in a format browsers can display.
+
+    Browser-native originals are served as-is. JPEG XR and TIFF originals get
+    a cached full-size JPEG render; if that can't be made, the preview is
+    served instead so the viewer still shows something.
+    """
+    screenshot = await screenshot_service.get_screenshot_media(screenshot_id)
+    if not screenshot:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    if not full_render_service.needs_full_render(screenshot):
+        return await get_image(screenshot_id, v)
+
+    render = await full_render_service.ensure_full_render(screenshot)
+    if render is None:
+        return await get_preview(screenshot_id, v)
+    return FileResponse(
+        render,
+        media_type="image/jpeg",
         headers=media_response_headers(
             public=False,
             requested_version=v,
