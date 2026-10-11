@@ -231,6 +231,14 @@ Falls back to the full image if no thumbnail exists.
 Serves the configured bounded JPEG viewer preview. While backfill is incomplete or a
 cache entry is missing, it falls back to the 800px thumbnail and then the original.
 
+### `GET /api/screenshots/{id}/full`
+
+Serves the full-resolution image in a format browsers can display; the viewer uses it
+for JPEG XR and TIFF captures. Browser-native originals are served exactly like
+`/image`. JPEG XR and TIFF originals are tone-mapped (with the HDR settings) to a
+full-size JPEG cached under `thumbnail_dir/<game>/full/`, made at import (and by
+the preview-cache repair job for older captures) or on first request if missing. If the original can't be decoded, the preview is served.
+
 ### `POST /api/screenshots/{id}/favorite`
 
 Toggle favorite state for every variant in the logical capture. Returns
@@ -688,10 +696,11 @@ Renders the share page (full-size image, game info, annotation,
 OpenGraph + Twitter Card meta tags). Increments view count. 404 if the
 token is unknown or expired.
 
-### `GET /share/{token}/image` — *public, redirect*
+### `GET /share/{token}/image` — *public*
 
-Redirects to `/api/screenshots/{id}/image` so OpenGraph crawlers can
-fetch the image directly.
+Serves the shared image directly, authorized by the token alone, so
+OpenGraph crawlers can fetch it. JPEG XR and TIFF captures are served as
+the same full-size JPEG render as `/api/screenshots/{id}/full`.
 
 ---
 
@@ -721,6 +730,11 @@ cache it.
 ### `GET /api/gallery/screenshots/{id}/image`
 
 Full image — only if the game is public. Same caching headers as cover.
+
+### `GET /api/gallery/screenshots/{id}/full`
+
+Full resolution in a browser format, as `/api/screenshots/{id}/full` — only if the
+game is public.
 
 ### `GET /api/gallery/screenshots/{id}`
 

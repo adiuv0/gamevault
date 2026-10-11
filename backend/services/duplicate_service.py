@@ -2,13 +2,15 @@
 
 import asyncio
 from datetime import datetime
-from pathlib import Path
 
 from backend.database import atomic, get_db
 from backend.services import hdr_processor
 from backend.services.capture_matching import (
+    LIKELY_HASH_DISTANCE,
+    hash_distance,
     is_complementary_variant_pair,
     is_known_hdr_variant,
+    same_capture_name,
 )
 from backend.services.filesystem import safe_library_path
 from backend.services.game_service import update_screenshot_stats
@@ -17,13 +19,8 @@ from backend.services.image_processor import compute_perceptual_hash
 JOB_KIND = "duplicate_backfill"
 SCAN_BATCH_SIZE = 25
 MAX_HASH_DISTANCE = 8
-LIKELY_HASH_DISTANCE = 4
 
 _scan_lock = asyncio.Lock()
-
-
-def _hash_distance(left: str, right: str) -> int:
-    return (int(left, 16) ^ int(right, 16)).bit_count()
 
 
 def _capture_times_match(left: str | None, right: str | None) -> bool:
@@ -221,10 +218,10 @@ async def _index_asset(asset: dict) -> None:
         _,
         candidate_is_hdr,
     ) in await cursor.fetchall():
-        distance = _hash_distance(perceptual_hash, candidate_hash)
+        distance = hash_distance(perceptual_hash, candidate_hash)
         if distance > MAX_HASH_DISTANCE:
             continue
-        same_stem = Path(candidate_filename).stem.casefold() == Path(asset["filename"]).stem.casefold()
+        same_stem = same_capture_name(candidate_filename, asset["filename"])
         if not is_complementary_variant_pair(bool(is_hdr), bool(candidate_is_hdr)):
             continue
         if not same_stem and not _capture_times_match(
@@ -233,13 +230,19 @@ async def _index_asset(asset: dict) -> None:
             continue
         confidence = "likely" if distance <= LIKELY_HASH_DISTANCE else "possible"
         reason = "hdr_sdr_same_name" if same_stem else "hdr_sdr_capture_time"
-        await db.execute(
+        # The same file name in HDR and SDR with a near-identical image is one
+        # capture saved twice (Special K, Game Bar): pair it without review.
+        auto_pair = same_stem and confidence == "likely"
+        cursor = await db.execute(
             """INSERT OR IGNORE INTO duplicate_candidates
                (game_id, left_screenshot_id, right_screenshot_id,
                 hash_distance, confidence, reason)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (asset["game_id"], candidate_id, asset["id"], distance, confidence, reason),
         )
+        if auto_pair and cursor.rowcount:
+            await _group_candidate(cursor.lastrowid)
+            return
 
 
 async def list_candidates(
@@ -294,6 +297,10 @@ async def list_candidates(
 
 @atomic
 async def group_candidate(candidate_id: int) -> dict:
+    return await _group_candidate(candidate_id)
+
+
+async def _group_candidate(candidate_id: int) -> dict:
     db = await get_db()
     candidate = await _get_candidate(candidate_id)
     left_group = candidate["left_group"] or candidate["left_screenshot_id"]

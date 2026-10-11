@@ -7,6 +7,32 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+### Fixed
+
+- JPEG XR (HDR) and TIFF screenshots now open at full resolution. Browsers can't
+  show those formats, so the viewer used to stop at the 1920px preview. It now
+  shows the preview at once and swaps in a full-size tone-mapped JPEG
+  (`GET /api/screenshots/{id}/full`). New imports make that render alongside the
+  thumbnails from the same decode, so it costs only a JPEG encode and ~0.5-1 MB
+  of cache per 4K capture. **Settings > Repair image cache** renders existing
+  captures; until then they are rendered on first view. Public galleries
+  and share links get the same render; share links used to serve the raw `.jxr`,
+  which browsers and link previews couldn't display. Download still gives the
+  original file.
+
+### Changed
+
+- A JXR and a PNG/JPEG with the same file name, resolution and image, captured
+  within five minutes of each other, are now paired as one capture on import
+  instead of waiting on the Duplicates page, so the viewer's JXR/PNG toggle
+  appears on its own. **Scan library** on the Duplicates page pairs existing
+  ones. Differently named matches still go to review, and dismissed pairs stay
+  apart.
+- HDR tone-mapping encodes sRGB through a lookup table, which cuts that step from
+  about 1.3 s to 0.16 s on a 4K capture. Thumbnails and previews of JPEG XR
+  imports are made correspondingly faster; output differs by at most one 8-bit
+  code on about 0.1% of pixels.
+
 ## [1.1.0] - 2026-10-11
 
 ### Added

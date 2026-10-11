@@ -165,21 +165,35 @@ def tone_map(
     return mapper(rgb, exposure).astype(np.float32)
 
 
+def _srgb_oetf(rgb: np.ndarray) -> np.ndarray:
+    a = 0.055
+    threshold = 0.0031308
+    return np.where(
+        rgb <= threshold,
+        rgb * 12.92,
+        (1.0 + a) * np.power(rgb, 1.0 / 2.4) - a,
+    )
+
+
+# The OETF over a 4K frame costs a pow() per channel per pixel (~1 s). Linear
+# values quantized to 16 bits are far finer than the 8-bit output, so a
+# 64 Ki-entry table gives the same codes for a fraction of the work.
+_SRGB_LUT_MAX = 65535
+_SRGB_LUT = (
+    _srgb_oetf(np.linspace(0.0, 1.0, _SRGB_LUT_MAX + 1)) * 255.0 + 0.5
+).astype(np.uint8)
+
+
 def to_8bit_srgb(rgb_linear: np.ndarray) -> np.ndarray:
     """Apply sRGB OETF and convert to uint8.
 
     The tone-mapped output is approximately scene-linear in [0, 1]; encode it
     with the sRGB transfer function so it looks correct on standard displays.
     """
-    a = 0.055
-    threshold = 0.0031308
-    rgb = np.clip(rgb_linear, 0.0, 1.0)
-    encoded = np.where(
-        rgb <= threshold,
-        rgb * 12.92,
-        (1.0 + a) * np.power(rgb, 1.0 / 2.4) - a,
-    )
-    return (encoded * 255.0 + 0.5).astype(np.uint8)
+    index = np.clip(rgb_linear, 0.0, 1.0).astype(np.float32, copy=False)
+    index *= _SRGB_LUT_MAX
+    index += 0.5
+    return _SRGB_LUT[index.astype(np.uint16)]
 
 
 # ── Public API ───────────────────────────────────────────────────────────────

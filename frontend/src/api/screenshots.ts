@@ -49,6 +49,11 @@ export function getScreenshotImageUrl(id: number, mediaVersion?: string): string
   return `/api/screenshots/${id}/image${tokenQs(mediaVersion)}`;
 }
 
+/** Full resolution in a browser format: JXR/TIFF originals come back as a JPEG render. */
+export function getScreenshotFullUrl(id: number, mediaVersion?: string): string {
+  return `/api/screenshots/${id}/full${tokenQs(mediaVersion)}`;
+}
+
 export function getScreenshotPreviewUrl(id: number, mediaVersion?: string): string {
   return `/api/screenshots/${id}/preview${tokenQs(mediaVersion)}`;
 }

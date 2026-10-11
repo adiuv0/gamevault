@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 interface ProgressiveImageProps {
   previewUrl: string;
-  /** Full-resolution source; null shows only the preview (HDR, TIFF, or a failed original). */
+  /** Full-resolution source (a JPEG render for JXR/TIFF); null shows only the preview. */
   originalUrl: string | null;
   alt: string;
   className?: string;
