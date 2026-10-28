@@ -1,0 +1,82 @@
+name: Publish Docker image
+
+# After CI passes on main, push adiuv0/gamevault:latest (what Unraid pulls on a
+# force update), :sha-<commit>, and :<version> the first time that version ships.
+# Needs the DOCKERHUB_TOKEN repository secret (a Docker Hub read/write token).
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-publish
+  cancel-in-progress: false
+
+env:
+  IMAGE: adiuv0/gamevault
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Check for the Docker Hub token
+        id: token
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::warning::DOCKERHUB_TOKEN is not set; skipping the image push."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/login-action@v3
+        if: steps.token.outputs.present == 'true'
+        with:
+          username: adiuv0
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Choose tags
+        if: steps.token.outputs.present == 'true'
+        id: tags
+        run: |
+          version=$(sed -n 's/^APP_VERSION = "\(.*\)"$/\1/p' backend/version.py)
+          test -n "$version"
+          sha=$(git rev-parse --short=7 HEAD)
+          tags="$IMAGE:latest,$IMAGE:sha-$sha"
+          # A version tag is published once; later commits on the same version
+          # only move latest, so :1.2.0 always means the same image.
+          if docker manifest inspect "$IMAGE:$version" > /dev/null 2>&1; then
+            echo "::notice::$IMAGE:$version already exists; pushing latest and sha-$sha only."
+          else
+            tags="$tags,$IMAGE:$version"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "Publishing: $tags"
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.token.outputs.present == 'true'
+
+      - uses: docker/build-push-action@v6
+        if: steps.token.outputs.present == 'true'
+        with:
+          context: .
+          platforms: linux/amd64
+          pull: true
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}

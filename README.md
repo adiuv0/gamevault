@@ -195,6 +195,15 @@ cd frontend && npm install && npm run dev &
 cd .. && pip install -e ".[dev]" && uvicorn backend.main:app --reload
 ```
 
+## Publishing
+
+Every push to `main` that passes CI publishes `adiuv0/gamevault:latest` and
+`:sha-<commit>` to Docker Hub (`.github/workflows/docker-publish.yml`), plus
+`:<version>` the first time that version from `backend/version.py` ships. It needs
+a Docker Hub read/write access token in the `DOCKERHUB_TOKEN` repository secret;
+without one the workflow skips the push. After a merge, a force update in Unraid
+pulls the new image.
+
 ## Running Tests
 
 ```bash
