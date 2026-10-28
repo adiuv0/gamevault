@@ -7,6 +7,8 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-28
+
 ### Fixed
 
 - JPEG XR (HDR) and TIFF screenshots now open at full resolution. Browsers can't

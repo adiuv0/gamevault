@@ -14,6 +14,7 @@ rollback procedures. Migrations run automatically when GameVault starts.
 | `1.0.1` | `1.0.3` | Applies `m012` | Automated fixture confirms the existing capture schema remains intact |
 | `1.0.2` | `1.0.3` | Applies `m012` | Automated fixture confirms the existing capture schema remains intact |
 | `1.0.3` | `1.1.0` | Applies `m013` through `m016` | Automated tests cover the `m015` backfill of existing rows and its triggers, and the `m016` sign-in table |
+| `1.1.0` | `1.2.0` | Applies `m017` | Automated fixture upgrades the shipped `1.1.0` schema; a test covers the background regroup `m017` queues |
 
 The `1.0.0` migrations add gallery indexes, logical capture groups, duplicate review,
 viewer previews, and durable import/upload jobs to Docker `0.3.1`. They do not rewrite

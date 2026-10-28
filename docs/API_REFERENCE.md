@@ -109,7 +109,7 @@ Revokes one device. Its next request gets 401 and the app asks to sign in again.
 
 ### `GET /api/health` — *public*
 
-Returns `{ "status": "ok", "version": "1.1.0" }`, plus `instance`, a random id
+Returns `{ "status": "ok", "version": "1.2.0" }`, plus `instance`, a random id
 created once per database. GameVault Sync uses it to tell servers apart: the
 same server under another address keeps the app's memory of what it uploaded,
 and a different server at the same address starts fresh. Used by Docker
