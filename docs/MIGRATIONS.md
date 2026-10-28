@@ -31,6 +31,11 @@ triggers. `m015` touches only metadata; on a large library the one-time backfill
 index builds take a few seconds at first startup. `m016` adds the empty
 `device_tokens` table for GameVault Sync sign-ins.
 
+`m017` queues a duplicate scan that the server runs in the background after startup.
+The scan pairs saved copies of one capture (for example Steam's JPG and Special K's
+JXR) by changing only `screenshots.capture_group_id`; it never touches image files,
+and every pairing can be undone with **Ungroup** in the viewer.
+
 ## Before Upgrading
 
 1. Let browser uploads finish.

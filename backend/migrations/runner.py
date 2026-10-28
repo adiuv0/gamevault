@@ -26,6 +26,7 @@ MIGRATIONS = [
     "backend.migrations.m014_logical_capture_views",
     "backend.migrations.m015_capture_primary",
     "backend.migrations.m016_device_tokens",
+    "backend.migrations.m017_repair_capture_variants",
 ]
 
 

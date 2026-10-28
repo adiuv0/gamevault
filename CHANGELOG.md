@@ -22,12 +22,17 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ### Changed
 
-- A JXR and a PNG/JPEG with the same file name, resolution and image, captured
-  within five minutes of each other, are now paired as one capture on import
-  instead of waiting on the Duplicates page, so the viewer's JXR/PNG toggle
-  appears on its own. **Scan library** on the Duplicates page pairs existing
-  ones. Differently named matches still go to review, and dismissed pairs stay
-  apart.
+- Copies of one capture saved by different tools are now one capture. Steam's
+  JPG and Special K's JXR (and PNG) of the same moment used to be listed
+  separately, doubling or tripling a game's count: pairing needed identical file
+  names, but GameVault names uploads by capture minute and the copies are written
+  a second or two apart, often across a minute. Files now pair on import when
+  they are different types from the same game, have the same shape, a close
+  image fingerprint (within 12 of 128 bits; real JXR/JPG pairs measured 2-8)
+  and capture times within five seconds. A capture keeps at most one file per
+  type, and Ungroup or "Not a match" keeps files apart for good. Migration
+  `m017` queues a background library scan at first start so existing captures
+  pair without any action.
 - HDR tone-mapping encodes sRGB through a lookup table, which cuts that step from
   about 1.3 s to 0.16 s on a 4K capture. Thumbnails and previews of JPEG XR
   imports are made correspondingly faster; output differs by at most one 8-bit

@@ -3,17 +3,9 @@
 import base64
 import binascii
 import json
-from datetime import datetime
-from pathlib import Path
 
 from backend.database import atomic, get_db
-from backend.services.capture_matching import (
-    LIKELY_HASH_DISTANCE,
-    hash_distance,
-    is_complementary_variant_pair,
-    is_known_hdr_variant,
-    same_capture_name,
-)
+from backend.services.capture_matching import find_variant_group
 from backend.services.game_service import update_screenshot_stats
 from backend.services.media_cache_service import media_version
 from backend.services.performance_diagnostics import measure_async
@@ -36,70 +28,6 @@ _VARIANT_PREFERENCE = """CASE
 END, s.id"""
 
 _CURSOR_VERSION = 1
-
-# Same-name HDR/SDR files more than this far apart in capture time stay separate.
-_SAME_NAME_PAIR_SECONDS = 300
-
-
-def _variant_is_hdr(filename: str, image_format: str | None, is_hdr) -> bool | None:
-    if is_hdr is not None:
-        return bool(is_hdr)
-    return True if is_known_hdr_variant(filename, image_format) else None
-
-
-def _within_pair_window(left: str | None, right: str | None) -> bool:
-    if not left or not right:
-        return True
-    try:
-        difference = datetime.fromisoformat(left) - datetime.fromisoformat(right)
-    except (TypeError, ValueError):
-        return True
-    return abs(difference.total_seconds()) <= _SAME_NAME_PAIR_SECONDS
-
-
-async def _find_same_name_variant_group(fields: dict) -> int | None:
-    """Return the capture group of this file's other-range twin, if any.
-
-    ``shot.jxr`` next to ``shot.png`` (Special K, Game Bar) is one capture
-    saved in HDR and SDR. Pair them on import when the name, resolution and
-    image all match. Files with different names still go to duplicate review,
-    because a perceptual hash can't tell apart two shots differing only in
-    dialogue text.
-    """
-    perceptual_hash = fields.get("perceptual_hash")
-    width, height = fields.get("width"), fields.get("height")
-    filename = fields.get("filename") or ""
-    is_hdr = _variant_is_hdr(filename, fields.get("format"), fields.get("is_hdr"))
-    if not perceptual_hash or not width or not height or is_hdr is None:
-        return None
-
-    stem = Path(filename).stem
-    pattern = stem.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + ".%"
-    db = await get_db()
-    cursor = await db.execute(
-        """SELECT COALESCE(capture_group_id, id), filename, format, is_hdr,
-                  perceptual_hash, taken_at
-           FROM screenshots
-           WHERE game_id = ? AND width = ? AND height = ?
-             AND perceptual_hash IS NOT NULL
-             AND filename LIKE ? ESCAPE '\\'
-           ORDER BY id DESC LIMIT 20""",
-        (fields["game_id"], width, height, pattern),
-    )
-    for group_id, other_name, other_format, other_is_hdr, other_hash, other_taken in (
-        await cursor.fetchall()
-    ):
-        other_is_hdr = _variant_is_hdr(other_name, other_format, other_is_hdr)
-        if (
-            other_is_hdr is not None
-            and same_capture_name(filename, other_name)
-            and is_complementary_variant_pair(is_hdr, other_is_hdr)
-            and hash_distance(perceptual_hash, other_hash) <= LIKELY_HASH_DISTANCE
-            and _within_pair_window(fields.get("taken_at"), other_taken)
-        ):
-            return group_id
-    return None
-
 
 def _normalized_sort(sort: str) -> str:
     return sort if sort in SCREENSHOT_SORT_CLAUSES else "date_desc"
@@ -391,7 +319,8 @@ async def create_screenshot(
     }
 
     if fields.get("capture_group_id") is None:
-        group_id = await _find_same_name_variant_group(fields)
+        # Steam's JPG, Special K's JXR and PNG of one moment become one capture.
+        group_id = await find_variant_group(db, fields)
         if group_id is not None:
             fields["capture_group_id"] = group_id
 

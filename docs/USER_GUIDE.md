@@ -137,22 +137,25 @@ and every original remains available for download.
 
 ## Duplicate Review
 
-A JXR and a PNG/JPEG with the same file name (`shot.jxr` and `shot.png`, as Special K
-and Game Bar save them) are one capture. GameVault pairs them automatically when they
-also have the same resolution, a near-identical image, and capture times within five
-minutes. A paired capture shows one card with a file-count badge, and the viewer
-header gets a **JXR | PNG** toggle (or press **H**) to switch between the HDR and
-SDR files. Every original stays available for download, and **Ungroup** in the
-viewer splits a pair that shouldn't be one.
+One press of a screenshot key often saves the same moment more than once: Special K
+writes a JXR (and maybe a PNG), Steam writes a JPG, Game Bar a JXR and a PNG. GameVault
+treats those files as one capture and pairs them automatically when they are from the
+same game, are different file types, have the same shape, look nearly identical, and
+were captured within five seconds of each other. The file names don't need to match.
+A capture holds at most one file of each type, and in a quick burst each file joins
+the shot closest to it in time. A paired capture shows one card with a file-count
+badge, and the viewer header gets a toggle (for example **JXR | PNG | JPEG**, or press
+**H**) to switch between the files. Every original stays available for download, and
+**Ungroup** in the viewer splits a pair that shouldn't be one; an ungrouped file is
+never paired back automatically.
 
-The Duplicates page (`/duplicates`) handles everything else. Click **Scan library**
-to fingerprint existing screenshots, pair same-name captures imported before
-automatic pairing existed, and propose the remaining HDR/SDR matches. Progress is
-saved in the database, so an interrupted scan can resume instead of starting over.
+Upgrading to a version with this matching scans the library once in the background
+to pair captures imported earlier. The Duplicates page (`/duplicates`) shows its
+progress, and **Scan library** runs it again. The scan saves its progress in the
+database, so a restart resumes it instead of starting over.
 
-Proposals with different file names are never merged automatically, because a
-visual fingerprint can't tell apart two shots that differ only in dialogue text.
-Review the two previews:
+The scan also proposes looser HDR/SDR matches it won't pair on its own, such as a
+same-name pair captured minutes apart. Review the two previews:
 
 - **Group variants** makes them one logical capture. Game totals count the group
   once, while every original file remains available.
@@ -160,9 +163,8 @@ Review the two previews:
   A dismissed pair is never paired automatically later.
 - Use the Pending, Grouped, and Dismissed tabs to review decision history.
 
-Matching is limited to an HDR asset paired with an SDR asset from the same game,
-with equal dimensions, strong filename or capture-time evidence, and a close visual
-fingerprint. Ordinary same-format burst captures are never proposed.
+Two files of the same type are never paired, so ordinary burst captures stay
+separate.
 
 ---
 
