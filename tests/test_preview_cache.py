@@ -72,8 +72,11 @@ async def preview_library(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(settings, "thumbnail_dir", tmp_path / "cache")
     monkeypatch.setattr(settings, "preview_max_width", 1920)
     await init_db()
+    import aiosqlite
     try:
-        yield await get_db(), settings
+        async with aiosqlite.connect(str(settings.db_path)) as fixture_db:
+            await fixture_db.execute("PRAGMA foreign_keys=ON")
+            yield fixture_db, settings
     finally:
         await close_db()
 
@@ -119,8 +122,10 @@ async def test_preview_backfill_is_resumable_and_rebuilds_missing_cache(preview_
         "SELECT preview_path FROM screenshots WHERE id = ?", (screenshot_id,)
     )
     preview_path = (await cursor.fetchone())[0]
-    cached = settings.thumbnail_dir / "Preview Test" / "1920" / "wide.jpg"
-    assert preview_path == "Preview Test/thumbnails/1920/wide.jpg"
+    from backend.services.image_processor import derivative_filename
+    cache_name = derivative_filename(settings.library_dir / "Preview Test/screenshots/wide.png")
+    cached = settings.thumbnail_dir / "Preview Test" / "1920" / cache_name
+    assert preview_path == f"Preview Test/thumbnails/1920/{cache_name}"
     assert cached.exists()
     with Image.open(cached) as preview:
         assert preview.size == (1920, 1080)

@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 
 from backend.auth import require_auth
 from backend.config import settings
+from backend.upload_limits import UploadRoute
 from backend.services.game_service import get_game
 from backend.services.upload_job_service import (
     activate_staging_area,
@@ -30,7 +31,7 @@ from backend.services.upload_service import (
     process_upload,
 )
 
-router = APIRouter(prefix="/api/upload", tags=["upload"], dependencies=[Depends(require_auth)])
+router = APIRouter(prefix="/api/upload", tags=["upload"], dependencies=[Depends(require_auth)], route_class=UploadRoute)
 
 # Read uploads in 1 MB chunks so we never buffer the whole file in memory.
 _UPLOAD_CHUNK_SIZE = 1024 * 1024
@@ -38,6 +39,13 @@ _UPLOAD_CHUNK_SIZE = 1024 * 1024
 # Whitelist of characters allowed in the *display* filename (used for
 # progress events + log lines only — the actual on-disk path is a uuid).
 _DISPLAY_NAME_PATTERN = re.compile(r"[^A-Za-z0-9._\- ()]")
+
+
+@router.get("/limits")
+async def upload_limits():
+    return {"max_file_mb": settings.max_upload_size_mb,
+            "max_batch_mb": settings.max_upload_batch_size_mb,
+            "max_files": settings.max_upload_files}
 
 
 def _safe_display_name(filename: str | None) -> str:
@@ -64,43 +72,40 @@ async def _save_upload_streaming(
 
     Returns ``(display_name, on_disk_path)``. The on-disk path is built from
     a random UUID — the user-supplied filename is *never* used as part of
-    any path. Aborts with HTTP 413 as soon as the byte limit is exceeded,
-    so a malicious oversized upload doesn't get fully buffered.
+    any path. This is a second defensive cap while copying the already bounded
+    multipart spool into durable staging.
     """
     display_name = _safe_display_name(f.filename)
     temp_path = temp_dir / f"{uuid.uuid4().hex}.bin"
 
-    written = 0
-    try:
+    def copy_capped() -> bool:
+        # The multipart parser already spooled the body; copying it on a worker
+        # thread keeps multi-GB batches from stalling the event loop on slow disks.
+        f.file.seek(0)
+        written = 0
         with open(temp_path, "wb") as out:
-            while True:
-                chunk = await f.read(_UPLOAD_CHUNK_SIZE)
-                if not chunk:
-                    break
+            while chunk := f.file.read(_UPLOAD_CHUNK_SIZE):
                 written += len(chunk)
                 if written > max_bytes:
-                    out.close()
-                    try:
-                        temp_path.unlink(missing_ok=True)
-                    except OSError:
-                        pass
-                    raise HTTPException(
-                        status_code=413,
-                        detail=(
-                            f"File {display_name} exceeds max size of "
-                            f"{settings.max_upload_size_mb}MB"
-                        ),
-                    )
+                    return False
                 out.write(chunk)
-    except HTTPException:
-        raise
+        return True
+
+    try:
+        within_limit = await asyncio.to_thread(copy_capped)
     except Exception:
         # Best-effort cleanup on unexpected failure
-        try:
-            temp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        temp_path.unlink(missing_ok=True)
         raise
+    if not within_limit:
+        temp_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"File {display_name} exceeds max size of "
+                f"{settings.max_upload_size_mb}MB"
+            ),
+        )
 
     return display_name, temp_path
 
@@ -120,9 +125,7 @@ async def upload_screenshots(
     if not await get_game(game_id):
         raise HTTPException(status_code=404, detail="Game not found")
 
-    # Fast-path size pre-check: if Content-Length is known and over the limit,
-    # reject immediately without buffering. This is best-effort — the real
-    # enforcement happens in _save_upload_streaming.
+    # Defensive check for direct callers; UploadRoute already bounded parsing.
     max_bytes = settings.max_upload_size_bytes
     for f in files:
         if f.size and f.size > max_bytes:
@@ -168,10 +171,11 @@ async def upload_screenshot_sync(
     files: list[UploadFile] = [],
     game_id: int = Form(...),
     taken_at: str = Form(default=None),
+    taken_at_hint: str = Form(default=None),
 ):
     """Synchronous upload — processes files inline and returns results.
 
-    Used by the CLI sync tool which needs to know immediately if the upload
+    Used by GameVault Sync, which needs to know immediately if the upload
     succeeded (unlike the SSE-based ``POST /api/upload`` used by the web UI).
     """
     if not files:
@@ -198,16 +202,36 @@ async def upload_screenshot_sync(
             )
             temp_files.append((len(temp_files), display_name, temp_path))
     except HTTPException:
-        shutil.rmtree(str(temp_dir), ignore_errors=True)
+        await asyncio.to_thread(shutil.rmtree, str(temp_dir), True)
         raise
 
     task_id = create_task_id()
+    # Collect per-file outcomes so the sync app can tell "already in your
+    # library" from "not an image" instead of seeing a bare uploaded=0.
+    events = get_progress_queue(task_id)
 
     try:
-        results = await process_upload(task_id, game_id, temp_files, taken_at)
-        return {"uploaded": len(results), "screenshots": results}
+        results = await process_upload(
+            task_id, game_id, temp_files, taken_at, taken_at_hint=taken_at_hint
+        )
+        skipped, errors = [], []
+        while not events.empty():
+            event = events.get_nowait()
+            if event.get("type") == "file_skipped":
+                skipped.append({"filename": event.get("filename"), "reason": event.get("reason")})
+            elif event.get("type") in ("file_error", "error"):
+                errors.append({
+                    "filename": event.get("filename"),
+                    "error": event.get("error") or event.get("message"),
+                })
+        return {
+            "uploaded": len(results),
+            "screenshots": results,
+            "skipped": skipped,
+            "errors": errors,
+        }
     finally:
-        shutil.rmtree(str(temp_dir), ignore_errors=True)
+        await asyncio.to_thread(shutil.rmtree, str(temp_dir), True)
         cleanup_progress(task_id)
 
 

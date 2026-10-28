@@ -6,7 +6,9 @@ from pathlib import Path
 
 from backend.database import get_db
 from backend.services.filesystem import safe_library_path, thumbnail_cache_path
-from backend.services.image_processor import generate_preview
+from backend.services.full_render_service import full_render_rel_path, needs_full_render
+from backend.services.hdr_processor import is_hdr_source
+from backend.services.image_processor import generate_full_render, generate_thumbnails_with_hash
 
 JOB_KIND = "preview_backfill"
 BACKFILL_BATCH_SIZE = 10
@@ -85,7 +87,8 @@ async def run_backfill_job(job_id: int) -> None:
             while True:
                 job = await _get_job(job_id)
                 cursor = await db.execute(
-                    """SELECT s.id, s.file_path, s.filename, s.preview_path,
+                    """SELECT s.id, s.file_path, s.filename, s.format, s.preview_path,
+                              s.thumbnail_path_sm, s.thumbnail_path_md,
                               g.folder_name
                        FROM screenshots s
                        JOIN games g ON g.id = s.game_id
@@ -102,7 +105,9 @@ async def run_backfill_job(job_id: int) -> None:
                 for asset in assets:
                     try:
                         await _ensure_preview(asset)
+                        await db.commit()
                     except Exception as error:
+                        await db.rollback()
                         errors += 1
                         logger.warning(
                             "Preview backfill failed for screenshot %s: %s",
@@ -133,25 +138,43 @@ async def run_backfill_job(job_id: int) -> None:
             await db.commit()
 
 
+async def _ensure_full_render(asset: dict, source_path: Path) -> None:
+    """Render a JXR/TIFF capture at full size when its previews already exist."""
+    if not needs_full_render(asset):
+        return
+    target = thumbnail_cache_path(full_render_rel_path(asset))
+    if target is None or target.exists():
+        return
+    if not source_path.exists():
+        raise FileNotFoundError(source_path)
+    if not await asyncio.to_thread(generate_full_render, source_path, target):
+        raise ValueError(f"Could not render {source_path} at full size")
+
+
 async def _ensure_preview(asset: dict) -> None:
     db = await get_db()
-    existing_path = thumbnail_cache_path(asset.get("preview_path"))
-    if existing_path is not None and existing_path.exists():
+    existing_paths = [thumbnail_cache_path(asset.get(field)) for field in
+                      ("preview_path", "thumbnail_path_sm", "thumbnail_path_md")]
+    source_path = safe_library_path(asset.get("file_path"))
+    if all(path is not None and path.name.startswith("v2-") and path.exists()
+           for path in existing_paths):
+        await _ensure_full_render(asset, source_path)
         return
 
-    source_path = safe_library_path(asset.get("file_path"))
     if not source_path.exists():
         raise FileNotFoundError(source_path)
 
-    preview_path = await asyncio.to_thread(
-        generate_preview,
+    sm, md, preview_path, phash = await asyncio.to_thread(
+        generate_thumbnails_with_hash,
         source_path,
         asset["folder_name"],
         Path(asset["filename"]).stem,
     )
-    if not preview_path:
+    if not all((sm, md, preview_path)):
         raise ValueError(f"Could not generate preview for {source_path}")
+    is_hdr = await asyncio.to_thread(is_hdr_source, source_path)
     await db.execute(
-        "UPDATE screenshots SET preview_path = ?, updated_at = datetime('now') WHERE id = ?",
-        (preview_path, asset["id"]),
+        """UPDATE screenshots SET thumbnail_path_sm = ?, thumbnail_path_md = ?,
+           preview_path = ?, perceptual_hash = ?, is_hdr = ?, updated_at = datetime('now') WHERE id = ?""",
+        (sm, md, preview_path, phash, is_hdr, asset["id"]),
     )

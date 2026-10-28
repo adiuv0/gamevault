@@ -2,13 +2,16 @@
 
 import asyncio
 from datetime import datetime
-from pathlib import Path
 
-from backend.database import get_db
+from backend.database import atomic, get_db
 from backend.services import hdr_processor
 from backend.services.capture_matching import (
+    LIKELY_HASH_DISTANCE,
+    find_variant_group,
+    hash_distance,
     is_complementary_variant_pair,
     is_known_hdr_variant,
+    same_capture_name,
 )
 from backend.services.filesystem import safe_library_path
 from backend.services.game_service import update_screenshot_stats
@@ -17,13 +20,9 @@ from backend.services.image_processor import compute_perceptual_hash
 JOB_KIND = "duplicate_backfill"
 SCAN_BATCH_SIZE = 25
 MAX_HASH_DISTANCE = 8
-LIKELY_HASH_DISTANCE = 4
 
 _scan_lock = asyncio.Lock()
-
-
-def _hash_distance(left: str, right: str) -> int:
-    return (int(left, 16) ^ int(right, 16)).bit_count()
+_startup_scan: asyncio.Task | None = None
 
 
 def _capture_times_match(left: str | None, right: str | None) -> bool:
@@ -93,6 +92,33 @@ async def _get_job(job_id: int) -> dict:
     return dict(zip((d[0] for d in cursor.description), row))
 
 
+async def resume_scan_job() -> None:
+    """Continue a scan that a restart interrupted or a migration queued."""
+    global _startup_scan
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT id FROM maintenance_jobs
+           WHERE kind = ? AND status IN ('pending', 'running')
+           ORDER BY id DESC LIMIT 1""",
+        (JOB_KIND,),
+    )
+    row = await cursor.fetchone()
+    if row is not None:
+        _startup_scan = asyncio.create_task(run_scan_job(row[0]), name="gamevault-duplicate-scan")
+
+
+async def stop_scan_job() -> None:
+    """Cancel a background scan; it stays 'running' and resumes on next startup."""
+    global _startup_scan
+    task, _startup_scan = _startup_scan, None
+    if task is not None and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
 async def run_scan_job(job_id: int) -> None:
     """Resume a duplicate scan from its durable screenshot cursor."""
     if _scan_lock.locked():
@@ -124,7 +150,9 @@ async def run_scan_job(job_id: int) -> None:
                 for asset in assets:
                     try:
                         await _index_asset(asset)
+                        await db.commit()
                     except Exception:
+                        await db.rollback()
                         batch_errors += 1
 
                 last_id = assets[-1]["id"]
@@ -184,6 +212,9 @@ async def _index_asset(asset: dict) -> None:
     if not asset.get("width") or not asset.get("height"):
         return
 
+    if await _pair_variant(db, {**asset, "perceptual_hash": perceptual_hash}):
+        return
+
     cursor = await db.execute(
         """SELECT id, capture_group_id, filename, perceptual_hash, taken_at,
                   uploaded_at, is_hdr
@@ -219,10 +250,10 @@ async def _index_asset(asset: dict) -> None:
         _,
         candidate_is_hdr,
     ) in await cursor.fetchall():
-        distance = _hash_distance(perceptual_hash, candidate_hash)
+        distance = hash_distance(perceptual_hash, candidate_hash)
         if distance > MAX_HASH_DISTANCE:
             continue
-        same_stem = Path(candidate_filename).stem.casefold() == Path(asset["filename"]).stem.casefold()
+        same_stem = same_capture_name(candidate_filename, asset["filename"])
         if not is_complementary_variant_pair(bool(is_hdr), bool(candidate_is_hdr)):
             continue
         if not same_stem and not _capture_times_match(
@@ -231,13 +262,47 @@ async def _index_asset(asset: dict) -> None:
             continue
         confidence = "likely" if distance <= LIKELY_HASH_DISTANCE else "possible"
         reason = "hdr_sdr_same_name" if same_stem else "hdr_sdr_capture_time"
-        await db.execute(
+        # The same file name in HDR and SDR with a near-identical image is one
+        # capture saved twice (Special K, Game Bar): pair it without review.
+        auto_pair = same_stem and confidence == "likely"
+        cursor = await db.execute(
             """INSERT OR IGNORE INTO duplicate_candidates
                (game_id, left_screenshot_id, right_screenshot_id,
                 hash_distance, confidence, reason)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (asset["game_id"], candidate_id, asset["id"], distance, confidence, reason),
         )
+        if auto_pair and cursor.rowcount:
+            await _group_candidate(cursor.lastrowid)
+            return
+
+
+async def _pair_variant(db, asset: dict) -> bool:
+    """Join ``asset`` to the capture it is another saved copy of, if any."""
+    cursor = await db.execute(
+        "SELECT COALESCE(capture_group_id, id) FROM screenshots WHERE id = ?", (asset["id"],)
+    )
+    own_group = (await cursor.fetchone())[0]
+    other_group = await find_variant_group(db, {**asset, "capture_group_id": own_group})
+    if other_group is None:
+        return False
+    await db.execute(
+        """UPDATE screenshots SET capture_group_id = ?, updated_at = datetime('now')
+           WHERE game_id = ? AND COALESCE(capture_group_id, id) IN (?, ?)""",
+        (min(own_group, other_group), asset["game_id"], own_group, other_group),
+    )
+    left, right = sorted((asset["id"], other_group))
+    await db.execute(
+        """INSERT INTO duplicate_candidates
+           (game_id, left_screenshot_id, right_screenshot_id,
+            hash_distance, confidence, reason, status)
+           VALUES (?, ?, ?, 0, 'likely', 'same_capture', 'grouped')
+           ON CONFLICT(left_screenshot_id, right_screenshot_id)
+           DO UPDATE SET status = 'grouped', updated_at = datetime('now')""",
+        (asset["game_id"], left, right),
+    )
+    await update_screenshot_stats(asset["game_id"], commit=False)
+    return True
 
 
 async def list_candidates(
@@ -290,7 +355,12 @@ async def list_candidates(
     return [dict(zip(columns, row)) for row in await cursor.fetchall()], total
 
 
+@atomic
 async def group_candidate(candidate_id: int) -> dict:
+    return await _group_candidate(candidate_id)
+
+
+async def _group_candidate(candidate_id: int) -> dict:
     db = await get_db()
     candidate = await _get_candidate(candidate_id)
     left_group = candidate["left_group"] or candidate["left_screenshot_id"]
@@ -325,7 +395,6 @@ async def group_candidate(candidate_id: int) -> dict:
         (candidate["game_id"],),
     )
     await update_screenshot_stats(candidate["game_id"], commit=False)
-    await db.commit()
     return await _get_candidate(candidate_id)
 
 

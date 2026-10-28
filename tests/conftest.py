@@ -30,6 +30,18 @@ os.environ["GAMEVAULT_DISABLE_AUTH"] = "true"
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+async def drain_database_cleanup():
+    """Finish task-owned connection closes before pytest tears down its loop."""
+    yield
+    import asyncio
+    from backend import database
+    await asyncio.sleep(0)
+    closing = [task for task in database._closing if task.get_loop() is asyncio.get_running_loop()]
+    if closing:
+        await asyncio.gather(*closing)
+
+
 @pytest.fixture
 def fixtures_dir():
     """Return the path to the test fixtures directory."""

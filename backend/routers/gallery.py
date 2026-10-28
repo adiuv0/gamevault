@@ -17,11 +17,17 @@ from fastapi.responses import FileResponse
 from backend.database import get_db
 from backend.models.game import PublicGame, PublicGameListResponse
 from backend.models.screenshot import PublicScreenshot, PublicScreenshotListResponse
-from backend.services import game_service, screenshot_service
+from backend.services import full_render_service, game_service, screenshot_service
 from backend.services.filesystem import safe_library_path, safe_media_path
 from backend.services.media_cache_service import media_response_headers, media_version
 
 router = APIRouter(prefix="/api/gallery", tags=["gallery"])
+
+# Python's mimetypes module doesn't know JPEG XR.
+_EXTRA_MIME_TYPES = {
+    ".jxr": "image/vnd.ms-photo",
+    ".wdp": "image/vnd.ms-photo",
+}
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -39,7 +45,8 @@ async def _get_public_screenshot(screenshot_id: int) -> dict:
     """Get a screenshot, raising 404 if its game isn't public."""
     db = await get_db()
     cursor = await db.execute(
-        """SELECT s.*, g.is_public, g.folder_name
+        """SELECT s.id, s.file_path, s.thumbnail_path_sm, s.thumbnail_path_md,
+                  s.preview_path, s.format, s.updated_at, g.is_public, g.folder_name
            FROM screenshots s
            JOIN games g ON g.id = s.game_id
            WHERE s.id = ? AND g.is_public = 1""",
@@ -148,10 +155,35 @@ async def gallery_screenshot_image(screenshot_id: int, v: str | None = None):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image file not found")
 
-    media_type = mimetypes.guess_type(str(file_path))[0] or "image/jpeg"
+    media_type = (
+        _EXTRA_MIME_TYPES.get(file_path.suffix.lower())
+        or mimetypes.guess_type(str(file_path))[0]
+        or "image/jpeg"
+    )
     return FileResponse(
         file_path,
         media_type=media_type,
+        headers=media_response_headers(
+            public=True,
+            requested_version=v,
+            current_version=media_version(screenshot["updated_at"]),
+        ),
+    )
+
+
+@router.get("/screenshots/{screenshot_id}/full")
+async def gallery_screenshot_full(screenshot_id: int, v: str | None = None):
+    """Serve the full-resolution image in a browser format if its game is public."""
+    screenshot = await _get_public_screenshot(screenshot_id)
+    if not full_render_service.needs_full_render(screenshot):
+        return await gallery_screenshot_image(screenshot_id, v)
+
+    render = await full_render_service.ensure_full_render(screenshot)
+    if render is None:
+        return await gallery_screenshot_preview(screenshot_id, v)
+    return FileResponse(
+        render,
+        media_type="image/jpeg",
         headers=media_response_headers(
             public=True,
             requested_version=v,
@@ -214,7 +246,9 @@ async def gallery_screenshot_preview(screenshot_id: int, v: str | None = None):
     media_type = (
         "image/jpeg"
         if is_derivative
-        else mimetypes.guess_type(str(full_path))[0] or "image/jpeg"
+        else _EXTRA_MIME_TYPES.get(full_path.suffix.lower())
+        or mimetypes.guess_type(str(full_path))[0]
+        or "image/jpeg"
     )
     return FileResponse(
         full_path,

@@ -20,7 +20,7 @@ perspective. For deployment and configuration, see
 11. [Sharing](#sharing)
 12. [Public Gallery](#public-gallery)
 13. [Settings](#settings)
-14. [GameVault Sync (Desktop CLI)](#gamevault-sync-desktop-cli)
+14. [GameVault Sync (Desktop App)](#gamevault-sync-desktop-app)
 
 ---
 
@@ -114,7 +114,7 @@ request that never returned a task ID may need to be submitted again.
 
 **Allowed formats:** JPEG, PNG, WebP, BMP, TIFF, GIF, JXR.
 
-**Per-file limit:** 50 MB by default (configurable via
+**Per-file limit:** 512 MiB by default (configurable via
 `GAMEVAULT_MAX_UPLOAD_SIZE_MB`).
 
 **Duplicate handling.** Each file's SHA-256 hash is checked against existing
@@ -137,23 +137,34 @@ and every original remains available for download.
 
 ## Duplicate Review
 
-The Duplicates page (`/duplicates`) finds complementary HDR and SDR files that may
-be variants of one captured moment. Click **Scan library** to fingerprint existing
-screenshots and classify their source range. Progress is saved in the database, so
-an interrupted scan can resume instead of starting over.
+One press of a screenshot key often saves the same moment more than once: Special K
+writes a JXR (and maybe a PNG), Steam writes a JPG, Game Bar a JXR and a PNG. GameVault
+treats those files as one capture and pairs them automatically when they are from the
+same game, are different file types, have the same shape, look nearly identical, and
+were captured within five seconds of each other. The file names don't need to match.
+A capture holds at most one file of each type, and in a quick burst each file joins
+the shot closest to it in time. A paired capture shows one card with a file-count
+badge, and the viewer header gets a toggle (for example **JXR | PNG | JPEG**, or press
+**H**) to switch between the files. Every original stays available for download, and
+**Ungroup** in the viewer splits a pair that shouldn't be one; an ungrouped file is
+never paired back automatically.
 
-Candidates are never merged or deleted automatically. Review the two previews:
+Upgrading to a version with this matching scans the library once in the background
+to pair captures imported earlier. The Duplicates page (`/duplicates`) shows its
+progress, and **Scan library** runs it again. The scan saves its progress in the
+database, so a restart resumes it instead of starting over.
+
+The scan also proposes looser HDR/SDR matches it won't pair on its own, such as a
+same-name pair captured minutes apart. Review the two previews:
 
 - **Group variants** makes them one logical capture. Game totals count the group
-  once, while every original file remains available. The game and public galleries
-  show one card with a file-count badge; open it to switch formats in the viewer.
+  once, while every original file remains available.
 - **Not a match** dismisses the suggestion without changing either screenshot.
+  A dismissed pair is never paired automatically later.
 - Use the Pending, Grouped, and Dismissed tabs to review decision history.
 
-Matching is intentionally limited to an HDR asset paired with an SDR asset from the
-same game, with equal dimensions, strong filename or capture-time evidence, and a
-close visual fingerprint. Ordinary same-format burst captures are excluded before
-they enter the review queue. The final grouping decision remains manual.
+Two files of the same type are never paired, so ordinary burst captures stay
+separate.
 
 ---
 
@@ -383,8 +394,9 @@ at runtime.
 Game count, screenshot count, annotation count, active share count, total
 imports, and disk usage of the `library/` directory.
 
-The storage section also includes **Build previews**. Use it after upgrading an
-existing library or clearing the disposable thumbnail cache. Progress survives a
+The storage section also includes **Repair image cache**. Use it after upgrading an
+existing library or clearing the disposable thumbnail cache. It repairs thumbnails
+and previews without changing originals. Progress survives a
 restart, and missing originals are reported as errors without stopping the rest of
 the library.
 
@@ -422,9 +434,12 @@ DB values override environment variables.
   darkens, higher brightens. Affects all *future* HDR thumbnail
   generation; existing thumbnails aren't regenerated.
 
-### Sync Token
+### GameVault Sync
 
-Displays your current JWT for use with the GameVault Sync desktop CLI.
+Download links for the sync app, this server's address to paste into it, and
+the PCs signed in to it. **Sign out** next to a PC stops it uploading. You can
+also create a token here for a script or a headless install. Every token can
+only upload screenshots, and changing your password signs all of them out.
 
 ### Security
 
@@ -453,46 +468,45 @@ algorithm later only affects newly imported screenshots' thumbnails.
 
 ---
 
-## GameVault Sync (Desktop CLI)
+## GameVault Sync (Desktop App)
 
-`cli/gamevault_sync.py` is a separate Python script that runs on your
-gaming PC and uploads new screenshots to your GameVault server. It
-supports two sources, run individually or together:
+GameVault Sync is a small app for your gaming PC that uploads new screenshots
+to GameVault by itself. Install it from **Settings > GameVault Sync** (or the
+[latest release](https://github.com/adiuv0/gamevault/releases/latest)), enter
+your server's address and password once, and it keeps running in the
+notification area and starts with Windows.
 
-- **Steam** — walks `<Steam>/userdata/<id>/760/remote/<appid>/screenshots/`
-- **Special K** — walks a user-supplied root where each top-level
-  subfolder is a game (handles both `.png` SDR and `.jxr` HDR captures)
+- **Steam**: every Steam account's screenshots on the PC, including non-Steam
+  games added to Steam, found without any setup.
+- **Special K**: SDR `.png` and HDR `.jxr` captures, one folder per game under
+  Special K's `Profiles` folder, also found automatically.
+
+The first time, it shows how many screenshots aren't in GameVault yet and waits
+for you to click **Start syncing**, so you can skip games first. After that it
+checks about once a minute. It only reads files it hasn't seen, uploads each
+one once, and doesn't re-upload screenshots you delete in GameVault.
 
 Useful when:
 
 - You want non-public Steam screenshots without pasting cookies
-- You want to upload screenshots immediately after taking them
-- Your GameVault server can't reach the local filesystem (e.g. a remote
-  server) but you still want Special K imports
+- You want screenshots in GameVault shortly after taking them
+- Your GameVault server can't reach your gaming PC's files (e.g. it runs on
+  Unraid) but you still want Special K captures
 - Your GameVault server can't reach steamcommunity.com directly
 
-The CLI has both a tkinter GUI and a headless mode. See
-[../cli/README.md](../cli/README.md) for full flag reference and examples.
-
-**Mode.** The GUI has a Mode dropdown (Steam Only / Special K Only / Both)
-that toggles which path fields are required. The CLI uses
-`--mode {steam,specialk,both}` (default `steam` for backward
-compatibility).
-
-**Auth token.** Copy from Settings → Sync Token, or read it from your
-browser's `localStorage` under the `gamevault_token` key.
-
-**Server-side vs client-side Special K imports.** GameVault has two ways
-to import Special K screenshots:
+**Server-side vs. app Special K imports.** GameVault has two ways to bring in
+Special K screenshots:
 
 - The **Special K Import page** (in the web UI) reads from a path on the
-  GameVault *server* — useful when the server can see the Special K
-  folder directly (e.g. running on the same Windows machine, or with a
-  bind mount).
-- The **Sync CLI in Special K mode** reads from a path on your *local
-  PC* and uploads over HTTP — useful when GameVault runs remotely (e.g.
-  on Unraid) and can't see your gaming PC's filesystem.
+  GameVault *server*: useful when the server can see the Special K folder
+  directly (e.g. running on the same Windows machine, or with a bind mount).
+- **GameVault Sync** reads from your *gaming PC* and uploads over HTTP: useful
+  when GameVault runs elsewhere.
 
-Both produce the same library entries. The CLI matches games by name
-client-side, so a Special K folder named the same as a Steam-imported
-game merges into the same library entry.
+Both produce the same library entries. Folder names are cleaned the same way on
+both sides, so a Special K folder named like a Steam-imported game merges into
+the same library entry.
+
+Terminal options, Linux and macOS use, and building the installer are covered
+in [../desktop/README.md](../desktop/README.md). `cli/gamevault_sync.py` and its
+options still work; it now starts the app.

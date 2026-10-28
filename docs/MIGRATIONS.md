@@ -13,6 +13,8 @@ rollback procedures. Migrations run automatically when GameVault starts.
 | `1.0.0` | `1.0.3` | Applies `m012` | Automated fixture confirms the existing capture schema remains intact |
 | `1.0.1` | `1.0.3` | Applies `m012` | Automated fixture confirms the existing capture schema remains intact |
 | `1.0.2` | `1.0.3` | Applies `m012` | Automated fixture confirms the existing capture schema remains intact |
+| `1.0.3` | `1.1.0` | Applies `m013` through `m016` | Automated tests cover the `m015` backfill of existing rows and its triggers, and the `m016` sign-in table |
+| `1.1.0` | `1.2.0` | Applies `m017` | Automated fixture upgrades the shipped `1.1.0` schema; a test covers the background regroup `m017` queues |
 
 The `1.0.0` migrations add gallery indexes, logical capture groups, duplicate review,
 viewer previews, and durable import/upload jobs to Docker `0.3.1`. They do not rewrite
@@ -22,6 +24,18 @@ Versions `1.0.1` and `1.0.2` add no migrations. Version `1.0.3` adds nullable HD
 classification metadata used by duplicate review. It does not alter capture groups or
 read, rewrite, move, or delete original image files during migration; a subsequent
 duplicate scan classifies older PNG assets from their headers.
+
+Version `1.1.0` adds `m013` (game-merge redirects for in-flight uploads), `m014`
+(the `logical_captures` view), and `m015`, which stores each capture's representative
+asset in `screenshots.is_capture_primary`, backfills it once, and keeps it current with
+triggers. `m015` touches only metadata; on a large library the one-time backfill and
+index builds take a few seconds at first startup. `m016` adds the empty
+`device_tokens` table for GameVault Sync sign-ins.
+
+`m017` queues a duplicate scan that the server runs in the background after startup.
+The scan pairs saved copies of one capture (for example Steam's JPG and Special K's
+JXR) by changing only `screenshots.capture_group_id`; it never touches image files,
+and every pairing can be undone with **Ungroup** in the viewer.
 
 ## Before Upgrading
 

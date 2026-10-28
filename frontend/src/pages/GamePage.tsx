@@ -21,6 +21,8 @@ export function GamePage() {
   const gameId = Number(id);
 
   const [game, setGame] = useState<Game | null>(null);
+  // The route id the loaded game answers (merged games redirect to another id).
+  const [loadedRouteId, setLoadedRouteId] = useState<number | null>(null);
   const [screenshots, setScreenshots] = useState<ScreenshotListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +38,9 @@ export function GamePage() {
   const [fetchingMeta, setFetchingMeta] = useState(false);
   const [metaResult, setMetaResult] = useState<string | null>(null);
   const [showMergeModal, setShowMergeModal] = useState(false);
+  const metaResultTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => () => clearTimeout(metaResultTimer.current), []);
 
   const fetchData = useCallback(async () => {
     const requestVersion = ++requestVersionRef.current;
@@ -49,6 +54,7 @@ export function GamePage() {
       ]);
       if (requestVersion !== requestVersionRef.current) return;
       setGame(gameData);
+      setLoadedRouteId(gameId);
       setScreenshots(screenshotData.screenshots);
       setNextCursor(screenshotData.next_cursor);
       setLoadMoreError(false);
@@ -103,7 +109,7 @@ export function GamePage() {
     try {
       setDeleting(true);
       await deleteGame(gameId);
-      window.location.href = '/';
+      navigate('/', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete game');
       setDeleting(false);
@@ -135,11 +141,14 @@ export function GamePage() {
     } finally {
       setFetchingMeta(false);
       // Clear result message after 5 seconds
-      setTimeout(() => setMetaResult(null), 5000);
+      clearTimeout(metaResultTimer.current);
+      metaResultTimer.current = setTimeout(() => setMetaResult(null), 5000);
     }
   };
 
-  if (loading) {
+  // Only blank the page while a different game is loading. Re-sorting or
+  // refreshing after an ungroup keeps the grid (and its scroll position) mounted.
+  if (loading && (!game || loadedRouteId !== gameId)) {
     return (
       <div className="flex items-center justify-center py-24">
         <LoadingSpinner size="lg" />
@@ -173,12 +182,12 @@ export function GamePage() {
           Library
         </Link>
 
-        <div className="flex items-start justify-between">
-          <div className="flex items-start gap-4">
+        <div className="flex flex-col lg:flex-row items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-4">
             {/* Cover */}
             {game.cover_image_path ? (
               <img
-                src={getCoverUrl(game.id)}
+                src={getCoverUrl(game.id, game.updated_at)}
                 alt={game.name}
                 className="w-16 h-24 rounded-lg object-cover flex-shrink-0 hidden sm:block"
               />
@@ -188,9 +197,9 @@ export function GamePage() {
               </div>
             )}
 
-            <div>
-              <h1 className="text-2xl font-bold text-text-primary">{game.name}</h1>
-              <div className="flex items-center gap-3 mt-1 text-sm text-text-muted">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold text-text-primary break-words">{game.name}</h1>
+              <div className="flex flex-wrap items-center gap-3 mt-1 text-sm text-text-muted">
                 <span>{formatCount(game.screenshot_count)}</span>
                 {game.developer && <span>{game.developer}</span>}
                 {game.last_screenshot_date && (
@@ -200,7 +209,7 @@ export function GamePage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setShowMergeModal(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-text-secondary rounded-md text-sm hover:text-text-primary hover:border-accent-primary/50 transition-colors"
@@ -313,7 +322,7 @@ export function GamePage() {
         <>
           <ScreenshotGallery
             screenshots={screenshots}
-            onSelect={(index) => setViewerIndex(index)}
+            onSelect={setViewerIndex}
             onEndReached={nextCursor ? loadMore : undefined}
           />
 
@@ -354,6 +363,7 @@ export function GamePage() {
           currentIndex={viewerIndex}
           onClose={() => setViewerIndex(null)}
           onNavigate={setViewerIndex}
+          onGroupingChanged={() => { setViewerIndex(null); void fetchData(); }}
           onFavoriteToggle={handleFavoriteToggle}
           onAnnotationChanged={(id, has) => {
             setScreenshots((prev) =>

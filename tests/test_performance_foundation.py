@@ -12,8 +12,11 @@ async def performance_db(monkeypatch, tmp_path):
     await close_db()
     monkeypatch.setattr(settings, "db_path", tmp_path / "performance.db")
     await init_db()
+    import aiosqlite
     try:
-        yield await get_db()
+        async with aiosqlite.connect(str(settings.db_path)) as fixture_db:
+            await fixture_db.execute("PRAGMA foreign_keys=ON")
+            yield fixture_db
     finally:
         await close_db()
 
@@ -117,24 +120,25 @@ def test_thumbnail_pair_decodes_source_once(monkeypatch, tmp_path):
     original_open = image_processor._open_for_thumbnail
     calls = 0
 
-    def counted_open(path):
+    def counted_open(path, min_width=None):
         nonlocal calls
         calls += 1
-        return original_open(path)
+        return original_open(path, min_width)
 
     monkeypatch.setattr(image_processor, "_open_for_thumbnail", counted_open)
     sm, md = image_processor.generate_thumbnails(source, "Test", "shot")
 
     assert calls == 1
-    assert sm == "Test/thumbnails/300/shot.jpg"
-    assert md == "Test/thumbnails/800/shot.jpg"
-    assert (settings.thumbnail_dir / "Test" / "300" / "shot.jpg").exists()
-    assert (settings.thumbnail_dir / "Test" / "800" / "shot.jpg").exists()
+    cache_name = image_processor.derivative_filename(source)
+    assert sm == f"Test/thumbnails/300/{cache_name}"
+    assert md == f"Test/thumbnails/800/{cache_name}"
+    assert (settings.thumbnail_dir / "Test" / "300" / cache_name).exists()
+    assert (settings.thumbnail_dir / "Test" / "800" / cache_name).exists()
     assert (
         settings.thumbnail_dir
         / "Test"
         / str(settings.preview_max_width)
-        / "shot.jpg"
+        / cache_name
     ).exists()
 
 
@@ -160,6 +164,7 @@ async def test_capture_variants_share_one_game_count(performance_db):
         game_id=game_id,
         filename="capture.jxr",
         file_path="HDR Test/screenshots/capture.jxr",
+        capture_group_id=first["id"],
         source_key="specialk:capture",
         recalculate_stats=False,
     )

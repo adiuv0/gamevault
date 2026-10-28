@@ -22,6 +22,11 @@ MIGRATIONS = [
     "backend.migrations.m010_durable_import_jobs",
     "backend.migrations.m011_durable_upload_jobs",
     "backend.migrations.m012_hdr_classification",
+    "backend.migrations.m013_merge_redirects",
+    "backend.migrations.m014_logical_capture_views",
+    "backend.migrations.m015_capture_primary",
+    "backend.migrations.m016_device_tokens",
+    "backend.migrations.m017_repair_capture_variants",
 ]
 
 

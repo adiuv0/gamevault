@@ -4,79 +4,11 @@ import base64
 import binascii
 import json
 
-from backend.database import get_db
-from backend.services.capture_matching import (
-    is_complementary_variant_pair,
-    is_known_hdr_variant,
-)
+from backend.database import atomic, get_db
+from backend.services.capture_matching import find_variant_group
 from backend.services.game_service import update_screenshot_stats
 from backend.services.media_cache_service import media_version
 from backend.services.performance_diagnostics import measure_async
-
-
-def _hash_distance(left: str, right: str) -> int:
-    return (int(left, 16) ^ int(right, 16)).bit_count()
-
-
-async def _find_capture_group(fields: dict) -> int | None:
-    """Find a high-confidence logical capture match for a new asset."""
-    db = await get_db()
-    game_id = fields["game_id"]
-    source_key = fields.get("source_key")
-    if source_key:
-        cursor = await db.execute(
-            """SELECT COALESCE(capture_group_id, id) FROM screenshots
-               WHERE game_id = ? AND source_key = ? ORDER BY id LIMIT 1""",
-            (game_id, source_key),
-        )
-        row = await cursor.fetchone()
-        if row:
-            return row[0]
-
-    perceptual_hash = fields.get("perceptual_hash")
-    width = fields.get("width")
-    height = fields.get("height")
-    taken_at = fields.get("taken_at")
-    if not perceptual_hash or not width or not height or not taken_at:
-        return None
-
-    is_hdr = fields.get("is_hdr")
-    if is_hdr is None and is_known_hdr_variant(
-        fields.get("filename", ""), fields.get("format")
-    ):
-        is_hdr = True
-    if is_hdr is None:
-        return None
-
-    cursor = await db.execute(
-        """SELECT COALESCE(capture_group_id, id), perceptual_hash,
-                  filename, format, is_hdr
-           FROM screenshots
-           WHERE game_id = ? AND width = ? AND height = ?
-             AND perceptual_hash IS NOT NULL
-             AND ABS(strftime('%s', taken_at) - strftime('%s', ?)) <= 10
-           ORDER BY id DESC LIMIT 50""",
-        (game_id, width, height, taken_at),
-    )
-    for (
-        capture_group_id,
-        candidate_hash,
-        candidate_filename,
-        candidate_format,
-        candidate_is_hdr,
-    ) in await cursor.fetchall():
-        if candidate_is_hdr is None and is_known_hdr_variant(
-            candidate_filename, candidate_format
-        ):
-            candidate_is_hdr = True
-        if candidate_is_hdr is None or not is_complementary_variant_pair(
-            bool(is_hdr), bool(candidate_is_hdr)
-        ):
-            continue
-        if _hash_distance(perceptual_hash, candidate_hash) <= 4:
-            return capture_group_id
-    return None
-
 
 # GV-013: explicit allowlist for ORDER BY fragments — see game_service for
 # the rationale.
@@ -96,7 +28,6 @@ _VARIANT_PREFERENCE = """CASE
 END, s.id"""
 
 _CURSOR_VERSION = 1
-
 
 def _normalized_sort(sort: str) -> str:
     return sort if sort in SCREENSHOT_SORT_CLAUSES else "date_desc"
@@ -365,6 +296,7 @@ async def get_screenshot_media(screenshot_id: int) -> dict | None:
     return screenshot
 
 
+@atomic
 async def create_screenshot(
     game_id: int,
     filename: str,
@@ -375,6 +307,8 @@ async def create_screenshot(
 ) -> dict:
     """Create a screenshot record in the database and sync FTS index."""
     db = await get_db()
+    from backend.services.game_service import resolve_game_id
+    game_id = await resolve_game_id(game_id)
 
     fields = {
         "game_id": game_id,
@@ -384,10 +318,11 @@ async def create_screenshot(
         **{k: v for k, v in extra_fields.items() if v is not None},
     }
 
-    if "capture_group_id" not in fields:
-        capture_group_id = await _find_capture_group(fields)
-        if capture_group_id is not None:
-            fields["capture_group_id"] = capture_group_id
+    if fields.get("capture_group_id") is None:
+        # Steam's JPG, Special K's JXR and PNG of one moment become one capture.
+        group_id = await find_variant_group(db, fields)
+        if group_id is not None:
+            fields["capture_group_id"] = group_id
 
     columns = ", ".join(fields.keys())
     placeholders = ", ".join(["?"] * len(fields))
@@ -410,9 +345,50 @@ async def create_screenshot(
     if recalculate_stats:
         await update_screenshot_stats(game_id, commit=False)
 
-    await db.commit()
-
     return await get_screenshot(screenshot_id)
+
+
+@atomic
+async def ungroup_screenshot(screenshot_id: int) -> dict | None:
+    """Detach one variant without deleting any files, notes, or share links."""
+    db = await get_db()
+    identity = await _get_capture_identity(screenshot_id)
+    if not identity:
+        return None
+    game_id, group_id = identity
+    members = await _get_capture_member_ids(game_id, group_id)
+    others = [member for member in members if member != screenshot_id]
+    if others:
+        annotation = await get_annotation(screenshot_id)
+        if annotation:
+            # Both sides retain the previously shared note, including the case
+            # where the only physical annotation belonged to the detached asset.
+            for member in members:
+                await db.execute(
+                    """INSERT OR IGNORE INTO annotations (screenshot_id, content, content_html)
+                       VALUES (?, ?, ?)""",
+                    (member, annotation["content"], annotation.get("content_html")),
+                )
+        await db.execute(
+            """UPDATE screenshots SET capture_group_id = ?, updated_at = datetime('now')
+               WHERE game_id = ? AND COALESCE(capture_group_id, id) = ?""",
+            (min(others), game_id, group_id),
+        )
+        await db.execute("UPDATE screenshots SET capture_group_id = id WHERE id = ?", (screenshot_id,))
+        for other in others:
+            left, right = sorted((screenshot_id, other))
+            await db.execute(
+                """INSERT INTO duplicate_candidates
+                   (game_id, left_screenshot_id, right_screenshot_id, hash_distance, reason, confidence, status)
+                   VALUES (?, ?, ?, 0, 'manual_ungroup', 'likely', 'dismissed')
+                   ON CONFLICT(left_screenshot_id, right_screenshot_id)
+                   DO UPDATE SET status = 'dismissed', updated_at = datetime('now')""",
+                (game_id, left, right),
+            )
+        for member in members:
+            await _sync_fts(member, commit=False)
+        await update_screenshot_stats(game_id, commit=False)
+    return await get_capture_details(screenshot_id)
 
 
 async def update_screenshot(screenshot_id: int, **fields) -> dict | None:
@@ -441,8 +417,9 @@ async def update_screenshot(screenshot_id: int, **fields) -> dict | None:
     return await get_screenshot(screenshot_id)
 
 
+@atomic
 async def delete_screenshot(screenshot_id: int) -> bool:
-    """Delete a screenshot record (FTS cleanup handled by cascade)."""
+    """Delete a screenshot record, its search entry and its game stats together."""
     db = await get_db()
 
     screenshot = await get_screenshot(screenshot_id)
@@ -459,10 +436,7 @@ async def delete_screenshot(screenshot_id: int) -> bool:
 
     # Remove screenshot
     await db.execute("DELETE FROM screenshots WHERE id = ?", (screenshot_id,))
-    await db.commit()
-
-    # Update game stats
-    await update_screenshot_stats(game_id)
+    await update_screenshot_stats(game_id, commit=False)
 
     return True
 
@@ -489,6 +463,7 @@ async def _get_capture_member_ids(game_id: int, capture_group_id: int) -> list[i
     return [row[0] for row in await cursor.fetchall()]
 
 
+@atomic
 async def toggle_favorite(screenshot_id: int) -> bool:
     """Toggle favorite status for the logical capture."""
     db = await get_db()
@@ -508,7 +483,6 @@ async def toggle_favorite(screenshot_id: int) -> bool:
            WHERE game_id = ? AND COALESCE(capture_group_id, id) = ?""",
         (new_value, game_id, capture_group_id),
     )
-    await db.commit()
     return bool(new_value)
 
 
@@ -592,6 +566,7 @@ async def get_screenshot_by_source_key(game_id: int, source_key: str) -> dict | 
     return await get_screenshot(row[0]) if row else None
 
 
+@atomic
 async def save_annotation(screenshot_id: int, content: str, content_html: str | None = None) -> dict:
     """Create or update the annotation for a logical capture."""
     db = await get_db()
@@ -621,11 +596,11 @@ async def save_annotation(screenshot_id: int, content: str, content_html: str | 
     # Re-sync every physical member so stale pre-group annotations disappear.
     for member_id in member_ids:
         await _sync_fts(member_id, commit=False)
-    await db.commit()
 
     return await get_annotation(screenshot_id)
 
 
+@atomic
 async def delete_annotation(screenshot_id: int) -> bool:
     """Delete every annotation attached to a logical capture."""
     db = await get_db()
@@ -641,7 +616,6 @@ async def delete_annotation(screenshot_id: int) -> bool:
     # Re-sync FTS without annotation
     for member_id in member_ids:
         await _sync_fts(member_id, commit=False)
-    await db.commit()
 
     return cursor.rowcount > 0
 

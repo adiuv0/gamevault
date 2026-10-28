@@ -1,0 +1,7 @@
+# Pinned for the Windows build; `pip install ./desktop` uses the ranges in pyproject.toml.
+httpx==0.28.1
+keyring==25.7.0
+pillow==13.0.0
+pystray==0.19.5
+sv-ttk==2.6.1
+truststore==0.10.4

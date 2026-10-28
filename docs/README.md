@@ -8,7 +8,7 @@ Reference documentation for GameVault, organized by audience.
 here if you've just deployed GameVault and want to know what each page
 does. Covers authentication, library, uploads, both importers (Steam +
 Special K), timeline, search, annotations, sharing, public gallery,
-settings, and the desktop sync CLI.
+settings, and the GameVault Sync desktop app.
 
 ## For deployers and operators
 
@@ -38,9 +38,8 @@ services/routers split, the image pipeline (with HDR specifics), Steam
 scraping mechanics, SSE patterns, frontend structure, Docker build, and
 known constraints. Read this before forking or contributing.
 
-[**RELEASING.md**](RELEASING.md) — cheat sheet for cutting a release:
-version bump, git tag, Docker build, Docker Hub push (single-arch and
-multi-arch with buildx), and rollback procedure.
+[**REVIEW_FIXES_2026-09-21.md**](REVIEW_FIXES_2026-09-21.md) — review fixes,
+upload limits, preservation-first merges, and cache repair notes.
 
 [**MIGRATIONS.md**](MIGRATIONS.md) — supported database upgrade paths,
 verified live state backups, full-original backup boundaries, restoration,
@@ -61,4 +60,4 @@ The relevant sections across the docs:
 
 - [Main README](../README.md) — installation, quick start, Docker / Unraid
   setup
-- [`cli/README.md`](../cli/README.md) — GameVault Sync desktop CLI
+- [`desktop/README.md`](../desktop/README.md) — GameVault Sync, the gaming-PC app

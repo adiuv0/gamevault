@@ -96,6 +96,42 @@ ALLOWED_IMAGE_DOMAINS = (
 )
 
 
+# Responses worth retrying: rate limiting and transient server failures.
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+MAX_RETRIES = 3
+MAX_RETRY_AFTER_SECONDS = 30.0
+MAX_IMAGE_BYTES = 256 * 1024 * 1024
+MAX_REDIRECTS = 5
+
+
+class SteamFetchError(RuntimeError):
+    """A Steam page could not be fetched after retries; results would be incomplete."""
+
+
+def _is_allowed_image_host(url: str) -> bool:
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    return parsed.scheme == "https" and any(host.endswith(d) for d in ALLOWED_IMAGE_DOMAINS)
+
+
+def _looks_like_image(data: bytes) -> bool:
+    return (
+        data[:8] == b"\x89PNG\r\n\x1a\n"
+        or data[:3] == b"\xff\xd8\xff"
+        or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+        or data[:2] == b"BM"
+        or data[:6] in (b"GIF87a", b"GIF89a")
+    )
+
+
+def _retry_delay(resp: httpx.Response | None, attempt: int) -> float:
+    if resp is not None:
+        retry_after = resp.headers.get("retry-after", "")
+        if retry_after.isdigit():
+            return min(float(retry_after), MAX_RETRY_AFTER_SECONDS)
+    return min(2.0 ** attempt, MAX_RETRY_AFTER_SECONDS)
+
+
 # ── Helper Functions ─────────────────────────────────────────────────────────
 
 def _build_cookies(steam_login_secure: str = "", session_id: str = "") -> dict:
@@ -164,6 +200,10 @@ class SteamScraper:
         self.api_key = api_key
         self.rate_limit_ms = settings.import_rate_limit_ms
         self._client: httpx.AsyncClient | None = None
+        # Concurrent import workers share one pace so the configured delay
+        # between Steam page requests still holds.
+        self._pace_lock = asyncio.Lock()
+        self._last_paced_request = 0.0
 
         # Resolved Steam64 numeric ID (set during validate_profile)
         self._steam64_id: str | None = user_id if self.is_numeric else None
@@ -181,12 +221,38 @@ class SteamScraper:
         if self._client:
             await self._client.aclose()
 
+    async def _pace(self) -> None:
+        if self.rate_limit_ms <= 0:
+            return
+        async with self._pace_lock:
+            loop = asyncio.get_running_loop()
+            wait = self._last_paced_request + self.rate_limit_ms / 1000 - loop.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_paced_request = loop.time()
+
     async def _get(self, url: str, rate_limit: bool = True) -> httpx.Response:
-        """Make a GET request, optionally rate-limited."""
-        resp = await self._client.get(url)
-        if rate_limit and self.rate_limit_ms > 0:
-            await asyncio.sleep(self.rate_limit_ms / 1000)
-        return resp
+        """GET with pacing and retries for rate limiting and transient failures.
+
+        The final response is returned even when unsuccessful so callers can
+        distinguish "not found" from "Steam is refusing us right now".
+        """
+        for attempt in range(MAX_RETRIES + 1):
+            if rate_limit:
+                await self._pace()
+            try:
+                resp = await self._client.get(url)
+            except httpx.TransportError:
+                if attempt == MAX_RETRIES:
+                    raise
+                await asyncio.sleep(_retry_delay(None, attempt))
+                continue
+            if resp.status_code not in RETRYABLE_STATUS or attempt == MAX_RETRIES:
+                return resp
+            delay = _retry_delay(resp, attempt)
+            logger.warning("Steam returned HTTP %d; retrying in %.0fs", resp.status_code, delay)
+            await asyncio.sleep(delay)
+        raise AssertionError("unreachable")
 
     @property
     def has_api_key(self) -> bool:
@@ -466,21 +532,29 @@ class SteamScraper:
                 f"&page={page}"
             )
 
+            # Page 1 failures fall back to HTML scraping (None). A later page
+            # failing would silently drop screenshots, so it fails the game.
             try:
                 resp = await self._get(url, rate_limit=True)
             except Exception as e:
                 logger.error("API request failed for app %d page %d: %s", app_id, page, e)
-                return None if page == 1 else all_screenshots
+                if page == 1:
+                    return None
+                raise SteamFetchError(f"Steam API page {page} failed: {e}") from e
 
             if resp.status_code != 200:
                 logger.error("API returned HTTP %d for app %d page %d", resp.status_code, app_id, page)
-                return None if page == 1 else all_screenshots
+                if page == 1:
+                    return None
+                raise SteamFetchError(f"Steam API page {page} returned HTTP {resp.status_code}")
 
             try:
                 data = resp.json()
-            except Exception:
+            except Exception as e:
                 logger.error("API returned invalid JSON for app %d page %d", app_id, page)
-                return None if page == 1 else all_screenshots
+                if page == 1:
+                    return None
+                raise SteamFetchError(f"Steam API page {page} returned invalid JSON") from e
 
             response = data.get("response", {})
             files = response.get("publishedfiledetails", [])
@@ -590,6 +664,11 @@ class SteamScraper:
             )
 
             resp = await self._get(url)
+            if resp.status_code in RETRYABLE_STATUS or (resp.status_code != 200 and page > 1):
+                # Stopping here would mark the game complete with screenshots missing.
+                raise SteamFetchError(
+                    f"Steam screenshot page {page} returned HTTP {resp.status_code}"
+                )
             if resp.status_code != 200:
                 break
 
@@ -738,39 +817,72 @@ class SteamScraper:
     # ── Image Download ───────────────────────────────────────────────────
 
     async def download_image(self, url: str) -> bytes | None:
-        """Download a screenshot image from Akamai / Steam CDN."""
+        """Download a screenshot image from the Steam CDN.
+
+        Redirects are followed manually so every hop is checked against the CDN
+        allowlist (the client's automatic redirects would bypass it). The body
+        is size-capped while streaming and must start with a known image header.
+        """
         if not url:
             logger.warning("download_image: empty URL")
             return None
 
-        # SSRF defense: only allow known Steam CDN domains
-        parsed_host = urlparse(url).hostname or ""
-        if not any(parsed_host.endswith(d) for d in ALLOWED_IMAGE_DOMAINS):
-            logger.warning(
-                "download_image: blocked URL with disallowed domain %s",
-                parsed_host,
-            )
-            return None
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                result = await self._download_once(url)
+            except httpx.TransportError as e:
+                logger.warning("download_image: %s for %s", e, url[:100])
+                result = "retry"
+            if result != "retry":
+                return result
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(_retry_delay(None, attempt))
+        return None
 
-        try:
-            resp = await self._client.get(url, timeout=60.0)
-            if resp.status_code == 200:
-                content_type = resp.headers.get("content-type", "")
-                if "image" in content_type or len(resp.content) > 1000:
-                    logger.info(
-                        "download_image: success, %d bytes, type=%s",
-                        len(resp.content), content_type,
-                    )
-                    return resp.content
-                else:
-                    logger.warning(
-                        "download_image: unexpected content — type=%s, size=%d",
-                        content_type, len(resp.content),
-                    )
-            else:
+    async def _download_once(self, url: str) -> bytes | None | str:
+        current = url
+        for _ in range(MAX_REDIRECTS + 1):
+            # SSRF defense: only allow known Steam CDN domains, on every hop.
+            if not _is_allowed_image_host(current):
                 logger.warning(
-                    "download_image: HTTP %d for %s", resp.status_code, url[:100],
+                    "download_image: blocked URL with disallowed host %s",
+                    urlparse(current).hostname,
                 )
-        except Exception as e:
-            logger.error("download_image: exception for %s: %s", url[:100], e)
+                return None
+            async with self._client.stream(
+                "GET", current, timeout=60.0, follow_redirects=False
+            ) as resp:
+                if resp.is_redirect:
+                    location = resp.headers.get("location")
+                    if not location:
+                        return None
+                    current = str(resp.url.join(location))
+                    continue
+                if resp.status_code in RETRYABLE_STATUS:
+                    return "retry"
+                if resp.status_code != 200:
+                    logger.warning(
+                        "download_image: HTTP %d for %s", resp.status_code, current[:100]
+                    )
+                    return None
+                declared = resp.headers.get("content-length", "")
+                if declared.isdigit() and int(declared) > MAX_IMAGE_BYTES:
+                    logger.warning("download_image: %s bytes exceeds the cap", declared)
+                    return None
+                chunks = []
+                received = 0
+                async for chunk in resp.aiter_bytes():
+                    received += len(chunk)
+                    if received > MAX_IMAGE_BYTES:
+                        logger.warning("download_image: body exceeds the size cap")
+                        return None
+                    chunks.append(chunk)
+            data = b"".join(chunks)
+            if not _looks_like_image(data):
+                logger.warning(
+                    "download_image: response from %s is not an image", current[:100]
+                )
+                return None
+            return data
+        logger.warning("download_image: too many redirects for %s", url[:100])
         return None

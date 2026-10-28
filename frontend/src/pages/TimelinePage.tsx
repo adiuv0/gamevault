@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Clock, Calendar, ChevronDown, Loader2, Heart, MessageSquare,
@@ -43,8 +43,13 @@ export function TimelinePage() {
     getTimelineStats().then(setStats).catch(() => {});
   }, []);
 
+  // Changing the game filter while a page is in flight must not let the old
+  // filter's response land last.
+  const requestVersion = useRef(0);
+
   // Load timeline data
   const loadTimeline = useCallback(async (pageNum: number, append = false) => {
+    const version = append ? requestVersion.current : ++requestVersion.current;
     if (pageNum === 1) setLoading(true);
     else setLoadingMore(true);
 
@@ -54,6 +59,7 @@ export function TimelinePage() {
         page: pageNum,
         limit: 20,
       });
+      if (version !== requestVersion.current) return;
 
       if (append) {
         setDays(prev => [...prev, ...result.days]);
@@ -66,8 +72,10 @@ export function TimelinePage() {
     } catch {
       // ignore
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (version === requestVersion.current) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   }, [gameId]);
 
@@ -293,9 +301,10 @@ function TimelineDayCard({
             className="group relative aspect-video rounded-md overflow-hidden bg-bg-tertiary hover:ring-2 hover:ring-accent-primary transition-all"
           >
             <img
-              src={getThumbnailUrl(screenshot.id, 'sm')}
+              src={getThumbnailUrl(screenshot.id, 'sm', screenshot.media_version)}
               alt={screenshot.filename}
               loading="lazy"
+              decoding="async"
               className="w-full h-full object-cover"
             />
 
@@ -304,12 +313,12 @@ function TimelineDayCard({
 
             {/* Badges */}
             <div className="absolute top-1 right-1 flex gap-1">
-              {screenshot.is_favorite && (
+              {Boolean(screenshot.is_favorite) && (
                 <span className="bg-black/60 rounded-full p-0.5">
                   <Heart className="h-2.5 w-2.5 text-accent-danger fill-accent-danger" />
                 </span>
               )}
-              {screenshot.has_annotation && (
+              {Boolean(screenshot.has_annotation) && (
                 <span className="bg-black/60 rounded-full p-0.5">
                   <MessageSquare className="h-2.5 w-2.5 text-accent-primary" />
                 </span>

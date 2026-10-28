@@ -50,7 +50,7 @@ export function UploadItem({ item }: UploadItemProps) {
       {/* Preview thumbnail or icon */}
       <div className="w-10 h-10 rounded overflow-hidden bg-bg-tertiary flex-shrink-0 flex items-center justify-center">
         {item.preview ? (
-          <img src={item.preview} alt="" className="w-full h-full object-cover" />
+          <img src={item.preview} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
         ) : (
           <Image className="h-5 w-5 text-text-muted" />
         )}

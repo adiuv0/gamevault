@@ -62,6 +62,11 @@ export function galleryImageUrl(screenshotId: number, mediaVersion?: string): st
   return `${GALLERY_BASE}/screenshots/${screenshotId}/image${versionQuery(mediaVersion)}`;
 }
 
+/** Full resolution in a browser format: JXR/TIFF originals come back as a JPEG render. */
+export function galleryFullUrl(screenshotId: number, mediaVersion?: string): string {
+  return `${GALLERY_BASE}/screenshots/${screenshotId}/full${versionQuery(mediaVersion)}`;
+}
+
 export function galleryPreviewUrl(screenshotId: number, mediaVersion?: string): string {
   return `${GALLERY_BASE}/screenshots/${screenshotId}/preview${versionQuery(mediaVersion)}`;
 }

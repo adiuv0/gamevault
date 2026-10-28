@@ -1,10 +1,11 @@
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Search, Filter, Heart, MessageSquare, X, Loader2, Image } from 'lucide-react';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { search } from '@/api/search';
 import { listGames } from '@/api/games';
+import { getThumbnailUrl } from '@/api/screenshots';
 import { formatDate } from '@/lib/formatters';
 import type { SearchResult } from '@/api/search';
 import type { Game } from '@/lib/types';
@@ -30,7 +31,12 @@ export function SearchPage() {
   // Game list for filter dropdown
   const [games, setGames] = useState<Game[]>([]);
 
+  // Each filter change starts a new search; only the newest response may land,
+  // and "Load more" only appends to results from the same filters.
+  const requestVersion = useRef(0);
+
   const performSearch = useCallback(async (pageNum: number) => {
+    const version = pageNum === 1 ? ++requestVersion.current : requestVersion.current;
     try {
       setLoading(true);
       const data = await search({
@@ -43,6 +49,7 @@ export function SearchPage() {
         page: pageNum,
         limit: 50,
       });
+      if (version !== requestVersion.current) return;
       if (pageNum === 1) {
         setResults(data.results);
       } else {
@@ -54,7 +61,7 @@ export function SearchPage() {
     } catch {
       // ignore
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
   }, [dateFrom, dateTo, favoritesOnly, query, selectedGameId, sortBy]);
 
@@ -74,6 +81,7 @@ export function SearchPage() {
     if (query) {
       void performSearch(1);
     } else {
+      requestVersion.current += 1;
       setResults([]);
       setTotal(0);
     }
@@ -281,9 +289,14 @@ export function SearchPage() {
 }
 
 function SearchResultCard({ result }: { result: SearchResult }) {
+  // Thumbnails need the auth token and media version like every other grid;
+  // without the token they all returned 401 when login is enabled.
   const thumbnailUrl = result.screenshot_id
-    ? `/api/screenshots/${result.screenshot_id}/thumb/md`
+    ? getThumbnailUrl(result.screenshot_id, 'sm', result.media_version)
     : null;
+  const thumbnailSrcSet = result.screenshot_id
+    ? `${thumbnailUrl} 300w, ${getThumbnailUrl(result.screenshot_id, 'md', result.media_version)} 800w`
+    : undefined;
 
   return (
     <Link
@@ -295,9 +308,12 @@ function SearchResultCard({ result }: { result: SearchResult }) {
         {thumbnailUrl ? (
           <img
             src={thumbnailUrl}
+            srcSet={thumbnailSrcSet}
+            sizes="(min-width: 1280px) 25vw, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
             alt={result.filename}
             className="w-full h-full object-cover group-hover:brightness-110 transition-all duration-200"
             loading="lazy"
+            decoding="async"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
@@ -307,12 +323,12 @@ function SearchResultCard({ result }: { result: SearchResult }) {
 
         {/* Badges */}
         <div className="absolute top-2 right-2 flex items-center gap-1">
-          {result.is_favorite && (
+          {Boolean(result.is_favorite) && (
             <div className="bg-black/70 backdrop-blur-sm rounded-full p-1">
               <Heart className="h-3 w-3 text-red-400 fill-red-400" />
             </div>
           )}
-          {result.has_annotation && (
+          {Boolean(result.has_annotation) && (
             <div className="bg-black/70 backdrop-blur-sm rounded-full p-1">
               <MessageSquare className="h-3 w-3 text-accent-primary" />
             </div>

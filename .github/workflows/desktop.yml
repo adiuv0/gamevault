@@ -1,0 +1,112 @@
+name: Desktop app
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: desktop/requirements.txt
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pip-audit==2.10.1
+      - run: pip-audit --requirement desktop/requirements.txt --strict
+
+  windows-build:
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write # attach the programs to a release on version tags
+    defaults:
+      run:
+        working-directory: desktop
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: desktop/requirements.txt
+      - run: pip install -r requirements.txt pyinstaller==6.22.3
+      - name: Work out the version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(python -c 'import gamevault_sync as g; print(g.__version__)')" >> "$GITHUB_OUTPUT"
+          fi
+      - run: python packaging/build.py --version "${{ steps.version.outputs.version }}"
+      - name: Check the built programs start and have their parts
+        # A windowed program that hits an error could otherwise sit on a dialog nobody clicks.
+        timeout-minutes: 5
+        run: |
+          for exe in dist/portable/GameVaultSync.exe dist/app/GameVaultSync/GameVaultSync.exe; do
+            code=0
+            "./$exe" --self-test > self-test.txt 2>&1 || code=$?
+            cat self-test.txt
+            if [ "$code" -ne 0 ]; then echo "::error::$exe --self-test failed ($code)"; exit "$code"; fi
+          done
+      - name: Build the installer
+        shell: pwsh
+        timeout-minutes: 10
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          choco install innosetup --no-progress -y
+          # Wherever this Inno Setup version installed itself (the folder name has its major version).
+          $iscc = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "${env:ProgramFiles}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $iscc) { Write-Error "ISCC.exe not found after installing Inno Setup"; exit 1 }
+          & $iscc.FullName "/DAppVersion=$env:VERSION" packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GameVaultSync-windows
+          path: |
+            desktop/dist/GameVaultSync-Setup.exe
+            desktop/dist/portable/GameVaultSync.exe
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+          gh release upload "$GITHUB_REF_NAME" dist/GameVaultSync-Setup.exe dist/portable/GameVaultSync.exe --clobber

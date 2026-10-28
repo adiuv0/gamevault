@@ -69,6 +69,39 @@ when exceeded).
 
 Body: `{ "current_password": "...", "new_password": "..." }`. New password
 must be at least 6 chars.
+Changing the password also signs out every sync device.
+
+### `POST /api/auth/devices/pair` — *public*
+
+Used by GameVault Sync on first launch. Body:
+`{ "password": "...", "name": "Gaming PC", "install_id": "..." }` (`install_id` optional).
+Returns `{ token, device: { id, name, created_at, last_used_at } }`. The token starts with
+`gvd_`, does not expire, and is shown only in this response. Signing in again with the same
+`install_id` (a random id the app keeps per install) replaces that install's previous token;
+two PCs that share a name each keep their own. Shares the login rate limit.
+
+Device tokens are accepted only in the `Authorization: Bearer` header and only on the
+endpoints the sync app needs: `GET /api/auth/verify`, `POST /api/screenshots/check-hashes`,
+`POST /api/games/by-name`, `GET /api/games/by-steam-appid/{id}`, `POST /api/upload/sync`
+and `DELETE /api/auth/devices/current`. Anything else returns 403.
+
+### `GET /api/auth/devices` — *auth required*
+
+Lists paired devices: `{ devices: [{ id, name, created_at, last_used_at }] }`.
+
+### `POST /api/auth/devices` — *auth required*
+
+Body: `{ "name": "..." }`. Creates a device token from a signed-in browser session, for
+scripts or a headless sync install. Same response shape as pairing.
+
+### `DELETE /api/auth/devices/current` — *device token*
+
+Signs the calling device out (the sync app's **Sign out**). Returns `{ revoked: id }`;
+400 when called with a browser session.
+
+### `DELETE /api/auth/devices/{id}` — *auth required*
+
+Revokes one device. Its next request gets 401 and the app asks to sign in again.
 
 ---
 
@@ -76,7 +109,10 @@ must be at least 6 chars.
 
 ### `GET /api/health` — *public*
 
-Returns `{ "status": "ok", "version": "1.0.3" }`. Used by Docker
+Returns `{ "status": "ok", "version": "1.2.0" }`, plus `instance`, a random id
+created once per database. GameVault Sync uses it to tell servers apart: the
+same server under another address keeps the app's memory of what it uploaded,
+and a different server at the same address starts fresh. Used by Docker
 HEALTHCHECK.
 
 ### `GET /api/settings/health` — *auth required*
@@ -133,8 +169,9 @@ updated).
 
 Get-or-create by Steam app ID. If the game doesn't exist, fetches the real
 name from the Steam Store API and creates the record. If it exists with a
-placeholder name (`App {id}`), tries to upgrade the name. Used by the Sync
-CLI for the Steam workflow.
+placeholder name (`App {id}`), tries to upgrade the name. Optional `?name=` is
+the name the caller knows locally; it's used instead of the placeholder when the
+store can't be reached. Used by GameVault Sync for Steam games.
 
 ### `POST /api/games/by-name`
 
@@ -194,6 +231,14 @@ Falls back to the full image if no thumbnail exists.
 Serves the configured bounded JPEG viewer preview. While backfill is incomplete or a
 cache entry is missing, it falls back to the 800px thumbnail and then the original.
 
+### `GET /api/screenshots/{id}/full`
+
+Serves the full-resolution image in a format browsers can display; the viewer uses it
+for JPEG XR and TIFF captures. Browser-native originals are served exactly like
+`/image`. JPEG XR and TIFF originals are tone-mapped (with the HDR settings) to a
+full-size JPEG cached under `thumbnail_dir/<game>/full/`, made at import (and by
+the preview-cache repair job for older captures) or on first request if missing. If the original can't be decoded, the preview is served.
+
 ### `POST /api/screenshots/{id}/favorite`
 
 Toggle favorite state for every variant in the logical capture. Returns
@@ -217,7 +262,7 @@ updated.
 ### `POST /api/screenshots/check-hashes`
 
 Bulk hash existence check. Body: `{ "hashes": ["sha256...", ...] }`.
-Returns `{ "existing": [...], "new": [...] }`. Used by the Sync CLI to
+Returns `{ "existing": [...], "new": [...] }`. Used by GameVault Sync to
 avoid uploading duplicates.
 
 ### `POST /api/screenshots/{id}/share`
@@ -259,6 +304,12 @@ game's logical screenshot count. Every original file remains intact.
 Marks a candidate as not matching. The assets and their capture groups are
 unchanged.
 
+### `POST /api/screenshots/{id}/ungroup`
+
+Detaches the selected physical variant from its logical capture and returns its
+updated capture details. Originals, notes, favorites, and share links are retained.
+The separated pairs are marked dismissed so subsequent scans do not suggest them again.
+
 ---
 
 ## Upload
@@ -280,7 +331,12 @@ application restart without duplicating committed screenshots. Staging lives und
 `GAMEVAULT_DATA_DIR/upload-staging` and is removed when the job reaches a terminal
 state.
 
-Rejects files larger than `GAMEVAULT_MAX_UPLOAD_SIZE_MB` with HTTP 413.
+Authentication is checked before parsing. Each file is limited by
+`GAMEVAULT_MAX_UPLOAD_SIZE_MB` (default 512 MiB); the entire multipart request is
+limited independently by `GAMEVAULT_MAX_UPLOAD_BATCH_SIZE_MB` (default 8192 MiB).
+Exceeding either limit returns HTTP 413, including for chunked requests.
+`GAMEVAULT_MAX_UPLOAD_FILES` defaults to 200. `GET /api/upload/limits` returns
+`max_file_mb`, `max_batch_mb`, and `max_files` for the upload UI.
 
 **Format whitelist** (matched against magic bytes, not extension): JPEG,
 PNG, WebP, BMP, TIFF, GIF, JXR.
@@ -288,9 +344,11 @@ PNG, WebP, BMP, TIFF, GIF, JXR.
 ### `POST /api/upload/sync`
 
 Same shape as `POST /api/upload` but processes inline and returns the
-final result synchronously: `{ "uploaded": N, "screenshots": [...] }`.
-Used by the Sync CLI which needs to know each upload's outcome
-immediately. No SSE. This endpoint is request-bound; callers can safely retry
+final result synchronously:
+`{ "uploaded": N, "screenshots": [...], "skipped": [{filename, reason}], "errors": [{filename, error}] }`.
+Used by GameVault Sync, which needs to know each upload's outcome
+immediately. No SSE. An optional `taken_at_hint` (ISO 8601) dates files whose
+EXIF has no capture date; unlike `taken_at`, it never overrides EXIF. This endpoint is request-bound; callers can safely retry
 after a connection failure because duplicate content hashes are skipped.
 
 ### `GET /api/upload/jobs/{task_id}`
@@ -638,10 +696,11 @@ Renders the share page (full-size image, game info, annotation,
 OpenGraph + Twitter Card meta tags). Increments view count. 404 if the
 token is unknown or expired.
 
-### `GET /share/{token}/image` — *public, redirect*
+### `GET /share/{token}/image` — *public*
 
-Redirects to `/api/screenshots/{id}/image` so OpenGraph crawlers can
-fetch the image directly.
+Serves the shared image directly, authorized by the token alone, so
+OpenGraph crawlers can fetch it. JPEG XR and TIFF captures are served as
+the same full-size JPEG render as `/api/screenshots/{id}/full`.
 
 ---
 
@@ -671,6 +730,11 @@ cache it.
 ### `GET /api/gallery/screenshots/{id}/image`
 
 Full image — only if the game is public. Same caching headers as cover.
+
+### `GET /api/gallery/screenshots/{id}/full`
+
+Full resolution in a browser format, as `/api/screenshots/{id}/full` — only if the
+game is public.
 
 ### `GET /api/gallery/screenshots/{id}`
 

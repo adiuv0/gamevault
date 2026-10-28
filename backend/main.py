@@ -5,7 +5,7 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
 # Configure logging so our INFO messages appear in container logs
 logging.basicConfig(
@@ -18,10 +18,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.datastructures import MutableHeaders
 
 from backend.config import DEFAULT_SECRET_SENTINEL, settings
-from backend.database import close_db, init_db
+from backend.database import close_db, database_session, init_db
+from backend.services.duplicate_service import resume_scan_job, stop_scan_job
 from backend.services.import_job_service import start_import_worker, stop_import_worker
 from backend.services.performance_diagnostics import MediaTimingMiddleware
 from backend.version import APP_VERSION
@@ -66,7 +67,7 @@ _CSP_SPA = (
 )
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+class SecurityHeadersMiddleware:
     """Apply standard security response headers across the whole app.
 
     Closes GV-009 from the audit. Notes on the design:
@@ -75,30 +76,36 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         ``default-src 'none'``), we don't override it.
       * CSP is route-aware: the public ``/share/`` pages get a stricter
         policy than the SPA + admin pages.
+      * Pure ASGI rather than ``BaseHTTPMiddleware``: only the response start
+        message is touched, so streamed originals pass through untouched
+        instead of being relayed chunk by chunk through an extra task.
     """
 
-    async def dispatch(self, request, call_next):
-        response = await call_next(request)
-        path = request.url.path
+    def __init__(self, app):
+        self.app = app
 
-        # Set if absent — never clobber stricter route-level headers.
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("X-Frame-Options", "DENY")
-        response.headers.setdefault(
-            "Referrer-Policy", "strict-origin-when-cross-origin"
-        )
-        response.headers.setdefault(
-            "Permissions-Policy",
-            "camera=(), microphone=(), geolocation=()",
-        )
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        csp = _CSP_SHARE if scope.get("path", "").startswith("/share/") else _CSP_SPA
 
-        if "Content-Security-Policy" not in response.headers:
-            if path.startswith("/share/"):
-                response.headers["Content-Security-Policy"] = _CSP_SHARE
-            else:
-                response.headers["Content-Security-Policy"] = _CSP_SPA
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                # Set if absent — never clobber stricter route-level headers.
+                for name, value in (
+                    ("X-Content-Type-Options", "nosniff"),
+                    ("X-Frame-Options", "DENY"),
+                    ("Referrer-Policy", "strict-origin-when-cross-origin"),
+                    ("Permissions-Policy", "camera=(), microphone=(), geolocation=()"),
+                    ("Content-Security-Policy", csp),
+                ):
+                    if name not in headers:
+                        headers[name] = value
+            await send(message)
 
-        return response
+        await self.app(scope, receive, send_with_headers)
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +157,7 @@ async def lifespan(app: FastAPI):
     _ensure_secret_key()
     await init_db()
     await start_import_worker()
+    await resume_scan_job()
 
     if settings.disable_auth:
         logger.warning(
@@ -163,6 +171,7 @@ async def lifespan(app: FastAPI):
     finally:
         # Stop the worker before closing SQLite. Running jobs are requeued on startup.
         await stop_import_worker()
+        await stop_scan_job()
         await close_db()
 
 
@@ -171,6 +180,7 @@ app = FastAPI(
     description="Self-hosted game screenshot manager",
     version=APP_VERSION,
     lifespan=lifespan,
+    dependencies=[Depends(database_session)],
 )
 
 # CORS — localhost defaults plus any extra origins from GAMEVAULT_CORS_ORIGINS
@@ -210,29 +220,39 @@ app.include_router(duplicates.router)
 # Health check (public, no auth)
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "version": APP_VERSION}
+    from backend.services.instance_service import get_instance_id
+
+    body = {"status": "ok", "version": APP_VERSION}
+    # Lets GameVault Sync tell this server from another one at the same address.
+    instance = await get_instance_id()
+    if instance:
+        body["instance"] = instance
+    return body
 
 
-# Serve frontend static files (production build)
-frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
-if frontend_dist.exists():
-    # Serve static assets
-    app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
-
-    # Serve index.html for all non-API, non-share routes (SPA fallback)
+def mount_frontend(application: FastAPI, frontend_dist: Path) -> None:
+    """Mount the production SPA without exposing files outside its build."""
+    from fastapi import HTTPException
     from fastapi.responses import FileResponse
 
-    @app.get("/{full_path:path}")
+    root = frontend_dist.resolve()
+    application.mount("/assets", StaticFiles(directory=root / "assets"), name="assets")
+
+    @application.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        """Serve the SPA for all non-API routes."""
-        # Don't intercept API or share routes
-        if full_path.startswith("api/") or full_path.startswith("share/"):
-            return {"detail": "Not found"}
-
-        # Try to serve a static file first
-        static_path = frontend_dist / full_path
-        if static_path.is_file() and not full_path == "":
+        if full_path.split("/", 1)[0] in {"api", "share"}:
+            raise HTTPException(404, "Not found")
+        static_path = (root / full_path).resolve()
+        if not static_path.is_relative_to(root):
+            raise HTTPException(404, "Not found")
+        if static_path.is_file() and full_path:
             return FileResponse(static_path)
+        index_path = (root / "index.html").resolve()
+        if not index_path.is_relative_to(root):
+            raise HTTPException(404, "Not found")
+        return FileResponse(index_path)
 
-        # Fall back to index.html for SPA routing
-        return FileResponse(frontend_dist / "index.html")
+
+frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
+if frontend_dist.exists():
+    mount_frontend(app, frontend_dist)

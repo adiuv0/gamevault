@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Gamepad2, Plus, Loader2, RefreshCw, CheckCircle2, Trash2 } from 'lucide-react';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
@@ -20,17 +20,34 @@ export function LibraryPage() {
   const [fixingMeta, setFixingMeta] = useState(false);
   const [metaResult, setMetaResult] = useState<string | null>(null);
   const [cleaningUp, setCleaningUp] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const metaResultTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => () => clearTimeout(metaResultTimer.current), []);
+
+  // One timer for the banner, so an older message's timeout can't clear a newer one.
+  const hideMetaResultAfter = (ms: number) => {
+    clearTimeout(metaResultTimer.current);
+    metaResultTimer.current = setTimeout(() => setMetaResult(null), ms);
+  };
+
+  const requestVersion = useRef(0);
 
   const fetchGames = useCallback(async () => {
+    // With the grid kept on screen, rapid sort changes could otherwise land out of order.
+    const version = ++requestVersion.current;
     try {
       setLoading(true);
       setError(null);
       const data = await listGames(sortBy);
+      if (version !== requestVersion.current) return;
       setGames(data.games);
+      setLoaded(true);
     } catch (err) {
+      if (version !== requestVersion.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load games');
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
   }, [sortBy]);
 
@@ -71,7 +88,7 @@ export function LibraryPage() {
       setMetaResult(err instanceof Error ? err.message : 'Failed to fix metadata');
     } finally {
       setFixingMeta(false);
-      setTimeout(() => setMetaResult(null), 8000);
+      hideMetaResultAfter(8000);
     }
   };
 
@@ -79,7 +96,7 @@ export function LibraryPage() {
     const emptyGames = games.filter(g => (g.screenshot_count ?? 0) === 0);
     if (emptyGames.length === 0) {
       setMetaResult('No empty games to clean up');
-      setTimeout(() => setMetaResult(null), 4000);
+      hideMetaResultAfter(4000);
       return;
     }
     if (!window.confirm(`Delete ${emptyGames.length} games with 0 screenshots?`)) return;
@@ -94,11 +111,12 @@ export function LibraryPage() {
       setMetaResult(err instanceof Error ? err.message : 'Cleanup failed');
     } finally {
       setCleaningUp(false);
-      setTimeout(() => setMetaResult(null), 8000);
+      hideMetaResultAfter(8000);
     }
   };
 
-  if (loading) {
+  // Refreshes after a metadata fix or cleanup keep the grid on screen.
+  if (loading && !loaded) {
     return (
       <div className="flex items-center justify-center py-24">
         <LoadingSpinner size="lg" />

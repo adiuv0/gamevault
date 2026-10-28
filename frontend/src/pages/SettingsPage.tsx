@@ -43,6 +43,9 @@ import type {
   ToneMapAlgorithm,
 } from '@/api/settings';
 import { Save, Trash2, Sparkles } from 'lucide-react';
+import { createDeviceToken, listDevices, revokeDevice, SYNC_APP_DOWNLOADS } from '@/api/devices';
+import type { SyncDevice } from '@/api/devices';
+import { timeAgo } from '@/lib/formatters';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 
 export function SettingsPage() {
@@ -102,7 +105,8 @@ export function SettingsPage() {
     try {
       setPwChanging(true);
       setPwResult(null);
-      await changePassword(currentPassword, newPassword);
+      const { token } = await changePassword(currentPassword, newPassword);
+      localStorage.setItem('gamevault_token', token);
       setPwResult({ ok: true, message: 'Password changed successfully' });
       setCurrentPassword('');
       setNewPassword('');
@@ -219,12 +223,12 @@ export function SettingsPage() {
               ) : (
                 <Monitor className="h-4 w-4" />
               )}
-              Build previews
+              Repair image cache
             </button>
             {previewJob && (
               <span className="text-xs text-text-muted">
                 {previewJob.status === 'completed'
-                  ? `${previewJob.processed.toLocaleString()} previews checked`
+                  ? `${previewJob.processed.toLocaleString()} images checked`
                   : `${previewJob.processed.toLocaleString()} / ${previewJob.total.toLocaleString()}`}
                 {previewJob.errors > 0 ? ` · ${previewJob.errors.toLocaleString()} errors` : ''}
               </span>
@@ -313,8 +317,8 @@ export function SettingsPage() {
         {/* Special K + HDR */}
         <SpecialKSection settings={settings} onSaved={loadSettings} />
 
-        {/* Sync Token */}
-        <SyncTokenSection />
+        {/* Sync app */}
+        <SyncAppSection authDisabled={settings.auth_disabled} />
 
         {/* Password Change */}
         {!settings.auth_disabled && (
@@ -764,80 +768,211 @@ function SpecialKSection({
   );
 }
 
-function SyncTokenSection() {
-  const [copied, setCopied] = useState(false);
+async function copyText(text: string): Promise<boolean> {
+  try {
+    // The clipboard API needs HTTPS or localhost; plain-HTTP home servers use the fallback.
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    return true;
+  } catch {
+    window.prompt('Copy this:', text);
+    return false;
+  }
+}
 
-  const handleCopy = async () => {
-    const token = localStorage.getItem('gamevault_token');
-    if (!token) return;
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        if (await copyText(text)) {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        }
+      }}
+      className="flex items-center gap-1.5 px-3 py-2 bg-bg-tertiary border border-border text-text-primary rounded-md text-sm hover:bg-border transition-colors flex-shrink-0"
+    >
+      {copied ? <Check className="h-4 w-4 text-accent-success" /> : <Copy className="h-4 w-4" />}
+      {copied ? 'Copied' : label}
+    </button>
+  );
+}
+
+function SyncAppSection({ authDisabled }: { authDisabled: boolean }) {
+  const [devices, setDevices] = useState<SyncDevice[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [scriptName, setScriptName] = useState('');
+  const [newToken, setNewToken] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const serverAddress = window.location.origin;
+
+  const load = useCallback(async () => {
     try {
-      // Try modern clipboard API first (requires HTTPS or localhost)
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(token);
-      } else {
-        // Fallback: hidden textarea + execCommand for plain HTTP
-        const ta = document.createElement('textarea');
-        ta.value = token;
-        ta.style.position = 'fixed';
-        ta.style.left = '-9999px';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-      }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Last resort: prompt user to copy manually
-      window.prompt('Copy this token:', token);
+      setDevices(await listDevices());
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load signed-in PCs');
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleRevoke = async (device: SyncDevice) => {
+    if (!window.confirm(`Sign out "${device.name}"? It stops uploading until someone signs it in again.`)) {
+      return;
+    }
+    try {
+      await revokeDevice(device.id);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not sign that PC out');
     }
   };
 
-  const token = localStorage.getItem('gamevault_token');
+  const handleCreate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!scriptName.trim()) return;
+    setCreating(true);
+    try {
+      const { token } = await createDeviceToken(scriptName.trim());
+      setNewToken(token);
+      setScriptName('');
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not create a token');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   return (
     <section className="bg-bg-secondary border border-border rounded-lg p-6">
       <div className="flex items-center gap-2 mb-4">
         <Monitor className="h-5 w-5 text-accent-primary" />
-        <h2 className="text-lg font-medium text-text-primary">Sync Token</h2>
+        <h2 className="text-lg font-medium text-text-primary">GameVault Sync</h2>
       </div>
-      <p className="text-sm text-text-secondary mb-3">
-        Use this auth token with the{' '}
-        <span className="font-medium text-text-primary">GameVault Sync</span>{' '}
-        CLI tool to upload local Steam screenshots from your PC.
+      <p className="text-sm text-text-secondary mb-4">
+        The GameVault Sync app backs up new Steam and Special K screenshots from your gaming PC on its
+        own. Install it, enter this server&apos;s address
+        {authDisabled ? '' : ' and your password'}, and it keeps running in the tray.
       </p>
 
-      {token ? (
-        <div className="flex items-center gap-3">
-          <code className="flex-1 bg-bg-primary border border-border rounded-md px-3 py-2 text-xs font-mono text-text-muted truncate select-all">
-            {token.slice(0, 20)}{'...'}
-            {token.slice(-10)}
-          </code>
-          <button
-            onClick={handleCopy}
-            className="flex items-center gap-1.5 px-3 py-2 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors flex-shrink-0"
-          >
-            {copied ? (
-              <>
-                <Check className="h-4 w-4" />
-                Copied!
-              </>
-            ) : (
-              <>
-                <Copy className="h-4 w-4" />
-                Copy Token
-              </>
-            )}
-          </button>
-        </div>
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        <a
+          href={SYNC_APP_DOWNLOADS.installer}
+          className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors"
+        >
+          <Download className="h-4 w-4" />
+          Download for Windows
+        </a>
+        <a
+          href={SYNC_APP_DOWNLOADS.portable}
+          className="text-sm text-text-secondary hover:text-text-primary underline-offset-2 hover:underline"
+        >
+          Portable .exe
+        </a>
+        <a
+          href={SYNC_APP_DOWNLOADS.readme}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-1 text-sm text-text-secondary hover:text-text-primary underline-offset-2 hover:underline"
+        >
+          Linux, macOS and scripts <ExternalLink className="h-3.5 w-3.5" />
+        </a>
+      </div>
+
+      <label className="block text-sm text-text-secondary mb-1.5">Server address for the app</label>
+      <div className="flex items-center gap-3 mb-6">
+        <code className="flex-1 bg-bg-primary border border-border rounded-md px-3 py-2 text-sm font-mono text-text-primary truncate select-all">
+          {serverAddress}
+        </code>
+        <CopyButton text={serverAddress} label="Copy" />
+      </div>
+
+      <h3 className="text-sm font-medium text-text-primary mb-2">Signed-in PCs</h3>
+      {error && <p className="text-sm text-accent-danger mb-2">{error}</p>}
+      {devices === null && !error ? (
+        <p className="text-sm text-text-muted">Loading…</p>
+      ) : devices && devices.length > 0 ? (
+        <ul className="divide-y divide-border border border-border rounded-md mb-3">
+          {devices.map((device) => (
+            <li key={device.id} className="flex items-center gap-3 px-3 py-2.5">
+              <Monitor className="h-4 w-4 text-text-muted flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-text-primary truncate">{device.name}</p>
+                <p className="text-xs text-text-muted">
+                  {device.last_used_at
+                    ? `Last synced ${timeAgo(device.last_used_at)}`
+                    : `Signed in ${timeAgo(device.created_at)}, not used yet`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleRevoke(device)}
+                className="px-3 py-1.5 text-sm text-accent-danger border border-accent-danger/30 rounded-md hover:bg-accent-danger/10 transition-colors"
+              >
+                Sign out
+              </button>
+            </li>
+          ))}
+        </ul>
       ) : (
-        <p className="text-sm text-text-muted">No token found. Please log in first.</p>
+        <p className="text-sm text-text-muted mb-3">No PCs signed in yet.</p>
       )}
-
-      <p className="mt-3 text-xs text-text-muted">
-        Paste this into the Sync tool's "Auth Token" field or pass via{' '}
-        <code className="bg-bg-primary px-1 rounded">--token</code> flag.
+      <p className="text-xs text-text-muted mb-5">
+        A PC stays signed in until you sign it out here{authDisabled ? '' : ' or change your password'}. Its
+        sign-in can only upload screenshots; it can&apos;t view or delete anything.
       </p>
+
+      <details className="group">
+        <summary className="text-sm text-text-secondary cursor-pointer hover:text-text-primary">
+          Create a token for a script or a headless install
+        </summary>
+        <form onSubmit={handleCreate} className="flex items-center gap-3 mt-3">
+          <input
+            type="text"
+            value={scriptName}
+            onChange={(e) => setScriptName(e.target.value)}
+            placeholder="Name, e.g. Steam Deck"
+            maxLength={80}
+            className="flex-1 bg-bg-primary border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-primary"
+          />
+          <button
+            type="submit"
+            disabled={creating || !scriptName.trim()}
+            className="px-3 py-2 bg-bg-tertiary border border-border text-text-primary rounded-md text-sm hover:bg-border transition-colors disabled:opacity-50"
+          >
+            {creating ? 'Creating…' : 'Create'}
+          </button>
+        </form>
+        {newToken && (
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center gap-3">
+              <code className="flex-1 bg-bg-primary border border-border rounded-md px-3 py-2 text-xs font-mono text-text-primary truncate select-all">
+                {newToken}
+              </code>
+              <CopyButton text={newToken} label="Copy token" />
+            </div>
+            <p className="text-xs text-accent-warning">
+              This is shown once. Use it with{' '}
+              <code className="bg-bg-primary px-1 rounded">gamevault-sync --server {serverAddress} --token …</code>
+            </p>
+          </div>
+        )}
+      </details>
     </section>
   );
 }
