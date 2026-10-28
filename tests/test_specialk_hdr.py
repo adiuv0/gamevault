@@ -31,7 +31,7 @@ class TestHdrProcessor:
 
         # Build a 16-bit grayscale PNG ("I;16") — Pillow handles this natively
         arr = np.full((10, 10), 50000, dtype=np.uint16)
-        img = Image.fromarray(arr, mode="I;16")
+        img = Image.fromarray(arr)  # uint16 -> "I;16"
         png_path = tmp_path / "hdr.png"
         img.save(png_path)
         assert hdr_processor.is_hdr_png(png_path) is True
