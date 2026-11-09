@@ -391,32 +391,6 @@ async def ungroup_screenshot(screenshot_id: int) -> dict | None:
     return await get_capture_details(screenshot_id)
 
 
-async def update_screenshot(screenshot_id: int, **fields) -> dict | None:
-    """Update screenshot fields."""
-    db = await get_db()
-
-    updates = {k: v for k, v in fields.items() if v is not None}
-    if not updates:
-        return await get_screenshot(screenshot_id)
-
-    set_clauses = []
-    values = []
-    for key, value in updates.items():
-        set_clauses.append(f"{key} = ?")
-        values.append(value)
-
-    set_clauses.append("updated_at = datetime('now')")
-    values.append(screenshot_id)
-
-    await db.execute(
-        f"UPDATE screenshots SET {', '.join(set_clauses)} WHERE id = ?",
-        values,
-    )
-    await db.commit()
-
-    return await get_screenshot(screenshot_id)
-
-
 @atomic
 async def delete_screenshot(screenshot_id: int) -> bool:
     """Delete a screenshot record, its search entry and its game stats together."""

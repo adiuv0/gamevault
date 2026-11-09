@@ -9,7 +9,7 @@ class GameCreate(BaseModel):
 
 
 class GameUpdate(BaseModel):
-    name: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=255)
     steam_app_id: int | None = None
     developer: str | None = None
     publisher: str | None = None

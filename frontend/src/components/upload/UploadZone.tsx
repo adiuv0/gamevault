@@ -8,8 +8,10 @@ interface UploadZoneProps {
   disabled?: boolean;
 }
 
-const ACCEPTED_EXTENSIONS = Object.values(ACCEPTED_IMAGE_TYPES).flat();
-const ACCEPTED_MIME = Object.keys(ACCEPTED_IMAGE_TYPES).join(',');
+const ACCEPTED_EXTENSIONS: string[] = Object.values(ACCEPTED_IMAGE_TYPES).flat();
+// Extensions are listed as well as MIME types: Windows has no MIME type for
+// .jxr, so a picker filtered on types alone hides HDR captures.
+const ACCEPT_ATTRIBUTE = [...Object.keys(ACCEPTED_IMAGE_TYPES), ...ACCEPTED_EXTENSIONS].join(',');
 
 export function UploadZone({ onFilesSelected, disabled = false }: UploadZoneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
@@ -78,7 +80,7 @@ export function UploadZone({ onFilesSelected, disabled = false }: UploadZoneProp
         ref={inputRef}
         type="file"
         multiple
-        accept={ACCEPTED_MIME}
+        accept={ACCEPT_ATTRIBUTE}
         onChange={handleInputChange}
         className="hidden"
       />
@@ -97,7 +99,7 @@ export function UploadZone({ onFilesSelected, disabled = false }: UploadZoneProp
               : 'Drag and drop screenshots here, or click to browse'}
           </p>
           <p className="text-xs text-text-muted mt-1">
-            JPG, PNG, WebP, BMP, TIFF, JXR
+            JPG, PNG, WebP, BMP, TIFF, GIF, JXR
             {limits && ` · ${limits.max_file_mb} MiB per file · ${limits.max_batch_mb} MiB / ${limits.max_files} files per batch`}
           </p>
         </div>

@@ -72,11 +72,6 @@ class ScreenshotListResponse(BaseModel):
     next_cursor: str | None = None
 
 
-class ScreenshotUpdate(BaseModel):
-    taken_at: str | None = None
-    is_favorite: bool | None = None
-
-
 # ── Public-gallery response shapes ────────────────────────────────────────────
 # These project away internal fields (file_path, sha256_hash, exif_data,
 # steam_screenshot_id, source, ...) so the unauthenticated /api/gallery

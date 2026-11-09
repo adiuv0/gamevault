@@ -12,7 +12,6 @@ user can download the true HDR asset.
 from __future__ import annotations
 
 import logging
-from io import BytesIO
 from pathlib import Path
 from typing import Literal
 

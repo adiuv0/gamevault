@@ -1,5 +1,8 @@
 """Game management routes."""
 
+import logging
+import mimetypes
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -10,6 +13,8 @@ from backend.models.screenshot import ScreenshotListResponse
 from backend.services import game_service
 from backend.services.filesystem import safe_library_path
 from backend.services.screenshot_service import list_screenshots, list_screenshots_cursor
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/games", tags=["games"], dependencies=[Depends(require_auth)])
 
@@ -127,7 +132,13 @@ async def get_or_create_by_steam_appid(
             except Exception:
                 better = fallback
             if better:
-                await game_service.update_game(existing["id"], name=better)
+                try:
+                    await game_service.update_game(existing["id"], name=better)
+                except game_service.GameNameConflictError:
+                    # Another game already has the real name (usually a Special K
+                    # import). Keep the placeholder; the two can be merged from
+                    # the game page.
+                    logger.warning("Game %d keeps its placeholder name: '%s' is taken", existing["id"], better)
                 existing = await game_service.get_game(existing["id"])
         return existing
 
@@ -162,17 +173,23 @@ async def get_game(game_id: int):
 @router.put("/{game_id}", response_model=GameResponse)
 async def update_game(game_id: int, data: GameUpdate):
     """Update game metadata."""
-    game = await game_service.update_game(
-        game_id,
-        name=data.name,
-        steam_app_id=data.steam_app_id,
-        developer=data.developer,
-        publisher=data.publisher,
-        release_date=data.release_date,
-        genres=data.genres,
-        description=data.description,
-        is_public=data.is_public,
-    )
+    name = data.name.strip() if data.name is not None else None
+    if name == "":
+        raise HTTPException(status_code=422, detail="Name cannot be empty")
+    try:
+        game = await game_service.update_game(
+            game_id,
+            name=name,
+            steam_app_id=data.steam_app_id,
+            developer=data.developer,
+            publisher=data.publisher,
+            release_date=data.release_date,
+            genres=data.genres,
+            description=data.description,
+            is_public=data.is_public,
+        )
+    except game_service.GameNameConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
     return game
@@ -203,7 +220,8 @@ async def get_cover(game_id: int):
 
     return FileResponse(
         cover_path,
-        media_type="image/jpeg",
+        # Covers are saved as fetched: .jpg, .png or .webp.
+        media_type=mimetypes.guess_type(cover_path.name)[0] or "image/jpeg",
         headers={"Cache-Control": "private, max-age=86400"},
     )
 

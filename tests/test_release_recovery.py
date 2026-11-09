@@ -29,6 +29,7 @@ SUPPORTED_RELEASE_SCHEMAS = {
     "1.0.2": MIGRATIONS[:11],
     "1.0.3": MIGRATIONS[:12],
     "1.1.0": MIGRATIONS[:16],
+    "1.2.0": MIGRATIONS[:17],
 }
 
 
@@ -377,5 +378,8 @@ async def test_release_version_surfaces_stay_synchronized():
     assert app.version == APP_VERSION
     body = await health()
     assert body["status"] == "ok" and body["version"] == APP_VERSION
-    assert f"GameVault v{APP_VERSION}" in sidebar
+    # The sidebar shows package.json's version (checked above), injected at build time.
+    vite_config = (root / "frontend/vite.config.ts").read_text(encoding="utf-8")
+    assert "__APP_VERSION__: JSON.stringify(version)" in vite_config
+    assert "GameVault v{__APP_VERSION__}" in sidebar
     assert f'"version": "{APP_VERSION}"' in api_reference

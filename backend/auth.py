@@ -35,6 +35,7 @@ _QUERY_TOKEN_ALLOWED_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Image / thumbnail / cover serves used as <img src=...>
     re.compile(r"^/api/screenshots/\d+/image$"),
     re.compile(r"^/api/screenshots/\d+/preview$"),
+    re.compile(r"^/api/screenshots/\d+/full$"),
     re.compile(r"^/api/screenshots/\d+/thumb/(sm|md)$"),
     re.compile(r"^/api/games/\d+/cover$"),
 )

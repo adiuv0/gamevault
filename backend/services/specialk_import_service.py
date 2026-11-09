@@ -87,17 +87,6 @@ def is_cancelled(session_id: int) -> bool:
 # ── Session DB helpers ───────────────────────────────────────────────────────
 
 
-async def create_import_session(scan_path: str) -> int:
-    db = await get_db()
-    cursor = await db.execute(
-        """INSERT INTO specialk_import_sessions (scan_path, status)
-           VALUES (?, 'pending')""",
-        (scan_path,),
-    )
-    await db.commit()
-    return cursor.lastrowid
-
-
 async def get_import_session(session_id: int) -> dict | None:
     db = await get_db()
     cursor = await db.execute(
