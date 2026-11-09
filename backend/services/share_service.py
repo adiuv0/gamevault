@@ -1,11 +1,16 @@
 """Share link service: create, validate, and manage shareable screenshot links."""
 
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from backend.config import settings
 from backend.database import get_db
 from backend.services.screenshot_service import get_screenshot
+
+
+def _utcnow() -> datetime:
+    """Naive UTC, the form ``expires_at`` has always been stored in."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 async def create_share_link(
@@ -30,7 +35,7 @@ async def create_share_link(
 
     expires_at = None
     if expires_in_days:
-        expires_at = (datetime.utcnow() + timedelta(days=expires_in_days)).isoformat()
+        expires_at = (_utcnow() + timedelta(days=expires_in_days)).isoformat()
 
     cursor = await db.execute(
         """INSERT INTO share_links (screenshot_id, token, expires_at)
@@ -73,7 +78,7 @@ async def get_share_link_by_token(token: str) -> dict | None:
 
     # Check expiration
     if link.get("expires_at"):
-        if datetime.fromisoformat(link["expires_at"]) < datetime.utcnow():
+        if datetime.fromisoformat(link["expires_at"]) < _utcnow():
             # Mark as inactive
             await db.execute(
                 "UPDATE share_links SET is_active = 0 WHERE id = ?",
@@ -104,7 +109,7 @@ async def get_active_share_link(screenshot_id: int) -> dict | None:
 
     # Check expiration
     if link.get("expires_at"):
-        if datetime.fromisoformat(link["expires_at"]) < datetime.utcnow():
+        if datetime.fromisoformat(link["expires_at"]) < _utcnow():
             await db.execute(
                 "UPDATE share_links SET is_active = 0 WHERE id = ?",
                 (link["id"],),
@@ -140,14 +145,13 @@ async def increment_view_count(link_id: int) -> None:
 async def get_shared_screenshot_data(token: str) -> dict | None:
     """Get the full data needed to render a shared screenshot page.
 
-    Returns screenshot + game info + annotation, or None if invalid.
+    Returns screenshot + game info + annotation, or None if invalid. Reading
+    is not a view: the share page counts one itself, so the image request that
+    follows every page load doesn't count a second.
     """
     link = await get_share_link_by_token(token)
     if not link:
         return None
-
-    # Increment view count
-    await increment_view_count(link["id"])
 
     # Get screenshot
     screenshot = await get_screenshot(link["screenshot_id"])

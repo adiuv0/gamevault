@@ -1,8 +1,9 @@
 """Share routes: create/manage share links (authenticated) + public view (unauthenticated)."""
 
 import mimetypes
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 
 from backend.auth import require_auth
@@ -14,6 +15,7 @@ from backend.services.share_service import (
     get_active_share_link,
     deactivate_share_link,
     get_shared_screenshot_data,
+    increment_view_count,
 )
 
 # JXR isn't recognized by stdlib ``mimetypes`` — provide an explicit fallback.
@@ -28,7 +30,10 @@ router = APIRouter(tags=["share"])
 # ── Authenticated share management ───────────────────────────────────────────
 
 @router.post("/api/screenshots/{screenshot_id}/share", dependencies=[Depends(require_auth)])
-async def create_share(screenshot_id: int, expires_in_days: int | None = None):
+async def create_share(
+    screenshot_id: int,
+    expires_in_days: Annotated[int | None, Query(ge=0, le=36500)] = None,
+):
     """Create or get a share link for a screenshot."""
     try:
         link = await create_share_link(screenshot_id, expires_in_days)
@@ -68,6 +73,8 @@ async def public_share_page(token: str):
                                        "This share link is invalid or has expired."),
             status_code=404,
         )
+
+    await increment_view_count(data["share_link"]["id"])
 
     screenshot = data["screenshot"]
     game = data["game"]
@@ -168,6 +175,14 @@ def _render_share_page(
     if screenshot.get("width") and screenshot.get("height"):
         dims = f"{screenshot['width']} x {screenshot['height']}"
 
+    # Link previews use the size to lay out the card; leave it out when unknown.
+    og_size = ""
+    if screenshot.get("width") and screenshot.get("height"):
+        og_size = (
+            f'<meta property="og:image:width" content="{int(screenshot["width"])}">\n'
+            f'    <meta property="og:image:height" content="{int(screenshot["height"])}">'
+        )
+
     annotation_html = ""
     if annotation and annotation.get("content_html"):
         annotation_html = f'<div class="annotation">{annotation["content_html"]}</div>'
@@ -186,8 +201,7 @@ def _render_share_page(
     <meta property="og:title" content="{_esc(title)}">
     <meta property="og:description" content="{_esc(description)}">
     <meta property="og:image" content="{image_url}">
-    <meta property="og:image:width" content="{screenshot.get('width', '')}">
-    <meta property="og:image:height" content="{screenshot.get('height', '')}">
+    {og_size}
     <meta property="og:url" content="{page_url}">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="GameVault">
@@ -234,7 +248,7 @@ def _render_share_page(
         {annotation_html}
 
         <div class="footer">
-            <p>Powered by <a href="https://github.com/gamevault">GameVault</a></p>
+            <p>Powered by <a href="https://github.com/adiuv0/gamevault">GameVault</a></p>
         </div>
     </div>
 </body>

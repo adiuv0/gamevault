@@ -480,10 +480,12 @@ const PERFORMANCE_LABELS: Record<string, string> = {
   browser_file: 'Browser upload file',
   'private.thumbnail': 'Private thumbnails',
   'private.preview': 'Private previews',
+  'private.full': 'Private full-size renders',
   'private.original': 'Private originals',
   'private.cover': 'Private covers',
   'public.thumbnail': 'Public thumbnails',
   'public.preview': 'Public previews',
+  'public.full': 'Public full-size renders',
   'public.original': 'Public originals',
   'public.cover': 'Public covers',
 };
@@ -689,7 +691,9 @@ function SpecialKSection({
       <p className="text-sm text-text-secondary mb-4">
         Configure the path Special K writes screenshots to, and how HDR captures
         (.jxr / 16-bit .png) are tone-mapped to SDR for the gallery view. The
-        original file is always preserved on disk for download.
+        original file is always preserved on disk for download. Tone-map changes
+        apply to screenshots imported from now on; ones already in the library
+        keep the look they were imported with.
       </p>
 
       <div className="space-y-4">

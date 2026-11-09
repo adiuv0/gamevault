@@ -105,7 +105,6 @@ class App:
         self._told_about_tray = False
         self._showing_error = False
         self._last_version = -1
-        self._last_report_id: int | None = None
         self._icons: dict[str | None, tk.PhotoImage] = {}
 
         self.root = tk.Tk(className="GameVaultSync")

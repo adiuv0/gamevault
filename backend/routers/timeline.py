@@ -1,6 +1,8 @@
 """Timeline routes: screenshots grouped by date."""
 
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
 
 from backend.auth import require_auth
 from backend.services.timeline_service import get_timeline, get_timeline_stats
@@ -13,8 +15,8 @@ async def timeline(
     game_id: int | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
-    page: int = 1,
-    limit: int = 30,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1)] = 30,
 ):
     """Get screenshots grouped by date, paginated by days."""
     return await get_timeline(
@@ -22,7 +24,7 @@ async def timeline(
         start_date=start_date,
         end_date=end_date,
         page=page,
-        limit=limit,
+        limit=min(limit, 100),
     )
 
 

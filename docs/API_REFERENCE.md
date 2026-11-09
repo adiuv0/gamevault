@@ -109,7 +109,7 @@ Revokes one device. Its next request gets 401 and the app asks to sign in again.
 
 ### `GET /api/health` — *public*
 
-Returns `{ "status": "ok", "version": "1.2.0" }`, plus `instance`, a random id
+Returns `{ "status": "ok", "version": "1.2.1" }`, plus `instance`, a random id
 created once per database. GameVault Sync uses it to tell servers apart: the
 same server under another address keeps the app's memory of what it uploaded,
 and a different server at the same address starts fresh. Used by Docker
@@ -142,10 +142,25 @@ Update game fields. All fields optional — only non-null values are
 applied. Body fields: `name`, `steam_app_id`, `developer`, `publisher`,
 `release_date`, `genres`, `description`, `is_public`.
 
+A new `name` is trimmed and also replaces the game's name in the search
+index. `409` if another game already has the name (compared without regard to
+case); `422` if it is empty.
+
 ### `DELETE /api/games/{id}`
 
-Remove a game record from the database. Files on disk are **not** deleted —
-that's a manual step for safety.
+Remove a game from the database with its screenshots, annotations, share
+links and search entries. Files on disk are **not** deleted — that's a manual
+step for safety.
+
+### `POST /api/games/{source_id}/merge`
+
+Body: `{ "target_id": N }`. Moves every screenshot of `source_id` to
+`target_id` and deletes the source game; annotations and share links travel
+with their screenshots, the target takes the source's cover if it has none,
+and the old id keeps resolving to the target for uploads already in flight.
+Files stay where they are on disk. Returns `{ moved, had_collisions,
+source_id, target_id, target_name }`. `400` when both ids are the same, `404`
+when either game is missing.
 
 ### `GET /api/games/{id}/cover`
 
@@ -505,8 +520,8 @@ FTS5 full-text search. Query parameters:
 | `date_to` | ISO date | — | "" |
 | `favorites_only` | bool | `false` | "" |
 | `sort` | enum | `relevance` | `relevance` \| `date_desc` \| `date_asc` |
-| `page` | int | 1 | |
-| `limit` | int | 50 | hard-capped at 100 |
+| `page` | int | 1 | minimum 1 |
+| `limit` | int | 50 | minimum 1, capped at 100 |
 
 Returns `{ results, total, page, limit, has_more }`. Each result includes
 `screenshot_id`, `game_id`, `game_name`, `filename`, `file_path`,
@@ -533,8 +548,8 @@ Screenshots grouped by day, paginated by days. Query parameters:
 | `game_id` | — | filter to one game |
 | `start_date` | — | `YYYY-MM-DD`, inclusive |
 | `end_date` | — | `YYYY-MM-DD`, inclusive |
-| `page` | 1 | |
-| `limit` | 30 | days per page |
+| `page` | 1 | minimum 1 |
+| `limit` | 30 | days per page; minimum 1, capped at 100 |
 
 Returns:
 
@@ -645,6 +660,12 @@ required):
 
 Setting `specialk_path` to an empty string clears the preference.
 
+### `POST /api/settings/thumbnail-cache/migrate`
+
+Moves thumbnails that releases before the cache split stored inside the
+library folder into the thumbnail cache (**Settings > Migrate thumbnails**).
+Safe to run again; a library that never had them reports nothing to move.
+
 ### `GET /api/settings/preview-cache/backfill`
 
 Returns the latest durable preview-cache audit, or `null` before the first run. The
@@ -680,7 +701,7 @@ Create or get an active share link. Returns
 `{ id, screenshot_id, token, is_active, expires_at, view_count, created_at,
 url }`. If a link already exists for the screenshot, the existing one is
 returned (no new token generated). `expires_in_days` is optional — omit
-for no expiration.
+it (or send `0`) for no expiration; negative values are rejected with `422`.
 
 ### `GET /api/screenshots/{id}/share`
 
@@ -693,8 +714,8 @@ Deactivate the link. Returns 404 if there's no active link.
 ### `GET /share/{token}` — *public, returns HTML*
 
 Renders the share page (full-size image, game info, annotation,
-OpenGraph + Twitter Card meta tags). Increments view count. 404 if the
-token is unknown or expired.
+OpenGraph + Twitter Card meta tags). Adds one to the view count; the image
+request below does not. 404 if the token is unknown or expired.
 
 ### `GET /share/{token}/image` — *public*
 

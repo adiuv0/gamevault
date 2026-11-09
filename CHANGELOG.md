@@ -7,6 +7,78 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-09
+
+A cleanup release from a full read-through of the project. No database
+migration.
+
+### Fixed
+
+- With a password set, JPEG XR and TIFF screenshots stayed on the 1920px
+  preview: the full-size view added in 1.2.0 (`/api/screenshots/{id}/full`) was
+  missing from the list of image routes that accept the sign-in token in the
+  address, so the viewer's request was refused and it fell back without saying
+  so. Servers with `GAMEVAULT_DISABLE_AUTH=true` were not affected.
+- Renaming a game (which GameVault does by itself when a Steam placeholder like
+  "App 367520" gets its real name) left search matching the old name and missing
+  the new one. The rename now updates the search index in the same step.
+- Renaming a game to a name another game already has returned a server error;
+  it now answers `409`. When a Steam placeholder's real name is already taken
+  (usually by a Special K import of the same game) the placeholder keeps its
+  name, instead of GameVault Sync's request for that game failing every time.
+  An empty name is rejected instead of saved.
+- Deleting a game left its screenshots' entries in the search index.
+- Opening a share link counted two views, one for the page and one for its
+  image. The page counts one.
+- The share page's "Powered by GameVault" link pointed at a GitHub account that
+  isn't this project, and its link-preview tags could carry the size "None".
+- Dropping `.jxr` files on the upload page did nothing and the file picker hid
+  them, although the page lists JXR and the server accepts it. GIF likewise.
+- "Upload" on a game's page now opens the upload page with that game selected.
+- A Steam or Special K import that failed or was cancelled showed "0 imported,
+  0 skipped, 0 failed" on its summary whatever had been imported. An import
+  that couldn't start now says why on the selection step instead of nothing.
+- Adding a game with a name that is taken shows the error in the dialog instead
+  of replacing the library with an error page. Failed actions on the library and
+  game pages no longer show a green check mark.
+- PNG and WebP covers were sent labelled as JPEG.
+- `/api/timeline` and `/api/search` accepted zero and negative `page` and
+  `limit` values; `/api/timeline` had no upper limit.
+- The import count in Settings ignored Special K imports.
+- Keyboard shortcuts in the public gallery viewer no longer fire together with
+  Ctrl, Alt or Cmd (Ctrl+H cycled the file type under the browser's History).
+- The Unraid template set the per-file upload limit to 50 MB, below the server's
+  own default of 512 MB and below many HDR captures. **If you installed from
+  the template, change "Max Upload Size (MB)" on your container by hand**; a
+  template update doesn't touch an existing container. The template's icon
+  was the Vite logo as an SVG and is now a GameVault PNG.
+
+### Added
+
+- A **Sort** menu on the library (name, latest screenshot, most screenshots).
+  The user guide described it and the page already remembered the choice, but
+  nothing on screen set it.
+- A browser tab title ("GameVault" instead of "frontend") and icon.
+- Full-size renders have their own rows under **Settings > Performance**.
+
+### Changed
+
+- The game delete dialog says what it does: records go, image files stay on disk.
+- Settings notes that tone-map changes apply to future imports only.
+- The frontend builds with Node 22 (Node 20 is past end of life).
+- CI runs the two older standalone test scripts (118 checks) that pytest skips.
+- The README, user guide, architecture notes and API reference were corrected
+  where they described controls that don't exist (game rename, screenshot
+  delete, timeline date range, share expiry), named React 18 or stale
+  counts, or missed `POST /api/games/{id}/merge`.
+
+### Removed
+
+- Unused code: the Jinja2 and piexif dependencies and two never-rendered HTML
+  templates, four image helpers, two model modules, a frontend store and
+  validators module, and stale constants.
+
+
 ## [1.2.0] - 2026-10-28
 
 ### Fixed

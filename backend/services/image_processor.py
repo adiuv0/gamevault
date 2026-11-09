@@ -6,7 +6,6 @@ original file is always preserved on disk for download.
 """
 
 import hashlib
-import json
 import logging
 import os
 import tempfile
@@ -173,39 +172,6 @@ def analyze_image(
         info["perceptual_hash"],
     ) = generate_thumbnails_with_hash(file_path, game_folder, filename_stem)
     return info
-
-
-def extract_exif(file_path: Path) -> dict:
-    """Extract EXIF metadata from an image file.
-
-    Returns a dict with human-readable keys and string values. JXR files
-    return an empty dict — Pillow can't read their IFD metadata and
-    imagecodecs doesn't expose it.
-    """
-    if hdr_processor.is_jxr(file_path):
-        return {}
-    try:
-        with Image.open(file_path) as img:
-            exif_data = img.getexif()
-            return _exif_to_dict(exif_data) if exif_data else {}
-    except Exception:
-        return {}
-
-
-def extract_date_taken(file_path: Path) -> datetime | None:
-    """Try to extract the date a photo was taken from EXIF data.
-
-    Checks DateTimeOriginal, DateTimeDigitized, then DateTime.
-    Returns None for JXR (no EXIF accessible).
-    """
-    if hdr_processor.is_jxr(file_path):
-        return None
-    try:
-        with Image.open(file_path) as img:
-            exif_data = img.getexif()
-            return _exif_date(exif_data) if exif_data else None
-    except Exception:
-        return None
 
 
 # ── Tone-map settings lookup ─────────────────────────────────────────────────
@@ -452,26 +418,6 @@ def generate_thumbnails_with_hash(
     return sm_rel, md_rel, preview_rel, perceptual_hash
 
 
-@measure_sync("image", "preview", threshold_ms=2000)
-def generate_preview(
-    source_path: Path,
-    game_folder: str,
-    filename_stem: str,
-) -> str | None:
-    """Generate only the disposable large preview for an existing asset."""
-    from backend.services.filesystem import get_thumbnails_dir
-
-    preview_width = settings.preview_max_width
-    thumb_filename = derivative_filename(source_path)
-    preview_path = (
-        get_thumbnails_dir(game_folder, str(preview_width))
-        / thumb_filename
-    )
-    if not generate_thumbnail(source_path, preview_path, preview_width):
-        return None
-    return f"{game_folder}/thumbnails/{preview_width}/{thumb_filename}"
-
-
 BROWSER_INCOMPATIBLE_SUFFIXES = {".jxr", ".wdp", ".tif", ".tiff"}
 
 
@@ -539,30 +485,3 @@ def validate_image(file_path: Path) -> bool:
         return True
     except Exception:
         return False
-
-
-def process_image(file_path: Path, game_folder: str, filename_stem: str) -> dict:
-    """Full image processing pipeline.
-
-    Returns a dict with all extracted/generated metadata:
-    - width, height, format, file_size
-    - sha256_hash, exif_data (JSON string)
-    - taken_at (ISO string or None)
-    - thumbnail_path_sm, thumbnail_path_md, preview_path
-    """
-    sha256 = compute_sha256(file_path)
-    info = analyze_image(file_path, game_folder, filename_stem)
-    result = {
-        "format": info["format"],
-        "file_size": info["file_size"],
-        "sha256_hash": sha256,
-        "exif_data": json.dumps(info["exif"]) if info["exif"] else None,
-        "taken_at": info["taken_at"].isoformat() if info["taken_at"] else None,
-        "thumbnail_path_sm": info["thumbnail_path_sm"],
-        "thumbnail_path_md": info["thumbnail_path_md"],
-        "preview_path": info["preview_path"],
-        "perceptual_hash": info["perceptual_hash"],
-    }
-    if info["width"] is not None:
-        result["width"], result["height"] = info["width"], info["height"]
-    return result

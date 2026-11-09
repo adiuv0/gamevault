@@ -34,9 +34,6 @@ _PREFERENCE_KEYS = {
 _VALID_TONE_MAP_ALGORITHMS = {"reinhard", "aces", "clip"}
 
 
-# Backwards-compat alias for any old code paths.
-_ALLOWED_KEYS = _SECRET_KEYS | _PREFERENCE_KEYS
-
 
 async def get_effective_key(key_name: str) -> str:
     """Get a key value: DB overrides env var (env var only used for secrets)."""
@@ -82,7 +79,9 @@ async def get_settings():
     cursor = await db.execute("SELECT COUNT(*) FROM share_links WHERE is_active = 1")
     active_share_count = (await cursor.fetchone())[0]
 
-    cursor = await db.execute("SELECT COUNT(*) FROM steam_import_sessions")
+    cursor = await db.execute(
+        "SELECT (SELECT COUNT(*) FROM steam_import_sessions) + (SELECT COUNT(*) FROM specialk_import_sessions)"
+    )
     import_session_count = (await cursor.fetchone())[0]
 
     # Check effective API key status (DB overrides env vars)
