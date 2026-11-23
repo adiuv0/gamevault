@@ -288,9 +288,13 @@ def test_vanity_names_are_url_encoded():
 
 
 def test_rate_limiter_forgets_ips_with_no_recent_failures():
+    import time
+
     from backend.routers import auth
 
-    bucket: dict[str, list[float]] = {"10.0.0.1": [0.0]}  # long expired
+    # monotonic() can be small on a freshly booted CI machine, so 0.0 isn't old.
+    expired = time.monotonic() - auth._RATE_LIMIT_WINDOW - 1
+    bucket: dict[str, list[float]] = {"10.0.0.1": [expired]}
     auth._check_rate_limit(bucket, "10.0.0.1", "login")
     auth._check_rate_limit(bucket, "10.0.0.2", "login")
     assert bucket == {}
