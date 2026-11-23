@@ -139,6 +139,7 @@ class TestScopedQueryToken:
         "/api/specialk/import/42/progress",
         "/api/screenshots/1/image",
         "/api/screenshots/1/preview",
+        "/api/screenshots/1/full",
         "/api/screenshots/1/thumb/sm",
         "/api/screenshots/1/thumb/md",
         "/api/games/7/cover",

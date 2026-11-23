@@ -6,7 +6,7 @@
 # Update both together when bumping a dep.
 #
 # For full hash-checked reproducibility, generate a lockfile with
-# pip-compile and pass `--require-hashes` to pip. See docs/RELEASING.md.
+# pip-compile and pass `--require-hashes` to pip.
 
 fastapi==0.141.1
 starlette==1.6.0
@@ -18,7 +18,6 @@ beautifulsoup4==4.14.3
 lxml==6.1.2
 Pillow==13.0.0
 dhash==1.4
-piexif==1.1.3
 imagecodecs==2024.6.1
 numpy==1.26.4
 PyJWT==2.15.1
@@ -28,4 +27,3 @@ pydantic==2.12.5
 pydantic-settings==2.15.0
 markdown-it-py==4.0.0
 nh3==0.3.5
-Jinja2==3.1.6

@@ -67,8 +67,21 @@ export function SpecialKImportPage() {
   const [currentGameName, setCurrentGameName] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   const eventSourceRef = useRef<EventSource | null>(null);
+  // The progress stream keeps the first handleSSEEvent it was given, so the
+  // events that end an import read the running totals from here, not from the
+  // state of the render that opened the stream (which is all zeros).
+  const totalsRef = useRef({ completed: 0, skipped: 0, failed: 0, games: 0 });
+  useEffect(() => {
+    totalsRef.current = {
+      completed: overallCompleted,
+      skipped: overallSkipped,
+      failed: overallFailed,
+      games: gameProgress.size,
+    };
+  }, [overallCompleted, overallSkipped, overallFailed, gameProgress.size]);
 
   useEffect(() => {
     return () => {
@@ -131,6 +144,7 @@ export function SpecialKImportPage() {
   const handleStartImport = async () => {
     if (selectedFolders.size === 0 || !scanResult) return;
 
+    setStartError(null);
     try {
       const result = await startSpecialKImport({
         path: scanResult.path,
@@ -157,7 +171,8 @@ export function SpecialKImportPage() {
       const es = connectSpecialKProgress(result.session_id, handleSSEEvent);
       eventSourceRef.current = es;
     } catch (e) {
-      setStatusMessage(`Failed to start import: ${e}`);
+      // Still on the selection step, where the progress line isn't shown.
+      setStartError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -272,10 +287,10 @@ export function SpecialKImportPage() {
 
       case 'import_error':
         setImportResult({
-          completed: overallCompleted,
-          skipped: overallSkipped,
-          failed: overallFailed,
-          totalGames: gameProgress.size,
+          completed: (d.completed as number | undefined) ?? totalsRef.current.completed,
+          skipped: (d.skipped as number | undefined) ?? totalsRef.current.skipped,
+          failed: (d.failed as number | undefined) ?? totalsRef.current.failed,
+          totalGames: (d.total_games as number | undefined) ?? totalsRef.current.games,
           status: 'failed',
           error: d.error as string,
         });
@@ -285,10 +300,10 @@ export function SpecialKImportPage() {
 
       case 'import_cancelled':
         setImportResult({
-          completed: overallCompleted,
-          skipped: overallSkipped,
-          failed: overallFailed,
-          totalGames: gameProgress.size,
+          completed: (d.completed as number | undefined) ?? totalsRef.current.completed,
+          skipped: (d.skipped as number | undefined) ?? totalsRef.current.skipped,
+          failed: (d.failed as number | undefined) ?? totalsRef.current.failed,
+          totalGames: (d.total_games as number | undefined) ?? totalsRef.current.games,
           status: 'cancelled',
         });
         setStep('done');
@@ -300,7 +315,7 @@ export function SpecialKImportPage() {
         eventSourceRef.current = null;
         break;
     }
-  }, [overallCompleted, overallSkipped, overallFailed, gameProgress.size]);
+  }, []);
 
   const handleCancel = async () => {
     if (!sessionId) return;
@@ -328,6 +343,7 @@ export function SpecialKImportPage() {
     setCurrentGameName(null);
     setImportResult(null);
     setCancelling(false);
+    setStartError(null);
   };
 
   const filteredGames = scanResult?.games.filter((g) =>
@@ -530,6 +546,9 @@ export function SpecialKImportPage() {
             </div>
           </div>
 
+          {startError && (
+            <p role="alert" className="text-sm text-accent-danger">Couldn't start the import: {startError}</p>
+          )}
           <div className="flex items-center gap-3">
             <button
               onClick={handleStartImport}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Upload, CheckCircle } from 'lucide-react';
 import { UploadZone } from '@/components/upload/UploadZone';
 import { UploadQueue } from '@/components/upload/UploadQueue';
@@ -24,7 +25,12 @@ interface SSEEvent {
 }
 
 export function UploadPage() {
-  const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
+  // "Upload" on a game page links here as /upload?game=<id>.
+  const [searchParams] = useSearchParams();
+  const [selectedGameId, setSelectedGameId] = useState<number | null>(() => {
+    const id = Number(searchParams.get('game'));
+    return Number.isInteger(id) && id > 0 ? id : null;
+  });
   const [uploadItems, setUploadItems] = useState<UploadFileStatus[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   // Object URLs pin each selected file in memory until revoked, and an open

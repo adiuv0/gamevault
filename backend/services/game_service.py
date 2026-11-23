@@ -1,8 +1,8 @@
 """Game management service: CRUD operations and folder management."""
 
 import logging
+import sqlite3
 
-from backend.config import settings
 from backend.database import get_db
 from backend.services.filesystem import (
     ensure_game_directories,
@@ -133,31 +133,51 @@ async def create_game(
     return await get_game(cursor.lastrowid)
 
 
+class GameNameConflictError(ValueError):
+    """Another game already uses the requested name."""
+
+
 async def update_game(game_id: int, **fields) -> dict | None:
-    """Update game fields. Only non-None values are updated."""
+    """Update game fields. Only non-None values are updated.
+
+    A rename also rewrites the game's name in the search index, in the same
+    commit. Raises ``GameNameConflictError`` when another game has the name.
+    """
     db = await get_db()
 
     updates = {k: v for k, v in fields.items() if v is not None}
     if not updates:
         return await get_game(game_id)
 
-    updates["updated_at"] = "datetime('now')"
+    new_name = updates.get("name")
+    if new_name is not None:
+        # Names match case-insensitively everywhere else (importers, sync app),
+        # so two games that differ only by case would be ambiguous.
+        other = await get_game_by_name(new_name)
+        if other and other["id"] != game_id:
+            raise GameNameConflictError(f"A game named '{other['name']}' already exists")
 
-    set_clauses = []
-    values = []
-    for key, value in updates.items():
-        if value == "datetime('now')":
-            set_clauses.append(f"{key} = datetime('now')")
-        else:
-            set_clauses.append(f"{key} = ?")
-            values.append(value)
-
-    values.append(game_id)
-    await db.execute(
-        f"UPDATE games SET {', '.join(set_clauses)} WHERE id = ?",
-        values,
-    )
-    await db.commit()
+    set_clauses = [f"{key} = ?" for key in updates]
+    set_clauses.append("updated_at = datetime('now')")
+    try:
+        await db.execute(
+            f"UPDATE games SET {', '.join(set_clauses)} WHERE id = ?",
+            [*updates.values(), game_id],
+        )
+        if new_name is not None:
+            # Search matches on the game name stored per screenshot.
+            await db.execute(
+                """UPDATE screenshots_fts_content SET game_name = ?
+                   WHERE game_name IS NOT ?
+                     AND rowid IN (SELECT id FROM screenshots WHERE game_id = ?)""",
+                (new_name, new_name, game_id),
+            )
+        await db.commit()
+    except sqlite3.IntegrityError as exc:
+        await db.rollback()
+        if "games.name" in str(exc):
+            raise GameNameConflictError(f"A game named '{new_name}' already exists") from exc
+        raise
 
     return await get_game(game_id)
 
@@ -173,6 +193,12 @@ async def delete_game(game_id: int) -> bool:
     if game is None:
         return False
 
+    # Screenshots go with the game (foreign key), but their search entries live
+    # in a table without one and would otherwise be left behind.
+    await db.execute(
+        "DELETE FROM screenshots_fts_content WHERE rowid IN (SELECT id FROM screenshots WHERE game_id = ?)",
+        (game_id,),
+    )
     await db.execute("DELETE FROM games WHERE id = ?", (game_id,))
     await db.commit()
     return True

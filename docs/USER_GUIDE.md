@@ -58,8 +58,9 @@ date of the most recent screenshot.
 **Views.** Toggle between grid (default) and list views via the top bar. The
 choice is remembered per browser.
 
-**Sorting.** Sort by name, date of newest screenshot, or screenshot count.
-Like the view mode, this preference is saved locally.
+**Sorting.** The **Sort** menu next to "Add Game" orders games by name, by
+latest screenshot, or by screenshot count. Like the view mode, the choice is
+remembered per browser.
 
 **Add Game.** "Add Game" creates an empty game record so you can upload to
 it. Games are also created automatically by the Steam and Special K
@@ -82,22 +83,31 @@ deleting.
 Click any game tile to open its page. You'll see:
 
 - **Cover and metadata** — name, developer, release date, genres, description
-- **Screenshot grid** — all screenshots for the game, paginated (50 per page)
-- **Sort options** — newest first (default), oldest first, by filename
+- **Screenshot grid** — all captures for the game; more load as you scroll
+- **Sort options** — newest first (default) or oldest first
 - **Refresh metadata** — re-fetches from Steam / SteamGridDB / IGDB if you
   added an API key after the game was first imported
-- **Edit** — change the game's name, developer, publisher, release date,
-  genres, or description manually
+- **Public / Private** — whether the game appears in the public gallery at
+  `/gallery`, which needs no password. New games start **Public**
+- **Merge** — fold this game into another one, for example a Special K
+  import that landed beside the Steam copy of the same game
+- **Delete** — removes the game with its screenshots, notes and share links
+  from GameVault. The image files stay in the library folder on disk
+
+There is no rename in the web UI yet; `PUT /api/games/{id}` changes a game's
+name and other details.
 
 Click any screenshot thumbnail to open the gallery viewer. From there you
 can:
 
 - Page through screenshots with arrow keys
-- Toggle favorite (star icon)
+- Toggle favorite (heart icon)
 - Open the annotation editor (note icon)
 - Generate or copy a share link
 - Download the original file (handy for HDR JXR/PNG)
-- Delete the screenshot
+
+Single screenshots can't be deleted from the web UI yet;
+`DELETE /api/screenshots/{id}` does it.
 
 ---
 
@@ -129,9 +139,11 @@ accessible EXIF, so the file's mtime is used.
 **Display images.** Three JPEG derivatives are generated per upload: 300px and
 800px thumbnails for grids, plus a bounded 1920px browser-compatibility preview.
 Opening a browser-compatible screenshot loads the untouched full-resolution original.
-Formats browsers cannot display, including JXR and TIFF, use the generated preview in
-the viewer. HDR sources are tone-mapped to SDR before their derivatives are generated,
-and every original remains available for download.
+Formats browsers cannot display, including JXR and TIFF, show the preview at once and
+then swap in a full-size JPEG render made at import (captures imported before 1.2.0
+get theirs from **Settings > Repair image cache**, or on first view). HDR sources are
+tone-mapped to SDR before their derivatives are generated, and every original remains
+available for download.
 
 ---
 
@@ -288,11 +300,11 @@ will be picked up. You can keep this as a periodic sync workflow.
 The Timeline page (`/timeline`) shows your screenshots grouped by day,
 newest first, with each day expanded into a strip of thumbnails.
 
-**Filters.** Date range (start/end) and per-game. The stats panel at the
-top shows totals — earliest/latest screenshot, total days with activity,
-total games.
+**Filters.** Per-game. The stats panel at the top shows totals —
+earliest/latest screenshot, total days with activity, total games. (The API
+also takes a date range; the page has no control for it yet.)
 
-**Pagination.** Loads 30 days at a time; "Load more" fetches the next
+**Pagination.** Loads 20 days at a time; "Load more" fetches the next
 batch.
 
 This view is great for "what did I play last weekend" or for browsing a
@@ -319,7 +331,7 @@ Hyphens are tokenizer separators.
 
 **Sort.** Relevance (default, BM25-weighted), newest first, oldest first.
 
-The results page shows a thumbnail, game, filename, taken-at date, and a
+Each result shows a thumbnail, the game, the date taken, and a
 ~150-character preview of the annotation if one exists.
 
 ---
@@ -346,8 +358,12 @@ the Delete button).
 Every screenshot can have a public share link. From the gallery viewer:
 
 1. Click **Share**
-2. Optionally set an expiration in days (no expiration by default)
-3. Copy the URL — it's of the form `https://your-server/share/<token>`
+2. Copy the URL — it's of the form `https://your-server/share/<token>`
+
+Links made here don't expire. The API can set an expiry
+(`POST /api/screenshots/{id}/share?expires_in_days=7`); the viewer shows it but
+has no field for it yet. The address in the link comes from `GAMEVAULT_BASE_URL`,
+so set that to the address other people reach your server at.
 
 The share page is a self-contained HTML page with:
 
@@ -361,10 +377,10 @@ Share pages do **not** require authentication — anyone with the link can
 view.
 
 **Revoking.** Click **Share** again on a screenshot with an active link and
-choose **Revoke**. The link becomes inactive immediately; reusing the same
-URL after revocation returns a 404.
+choose **Deactivate Link**. The link becomes inactive immediately; reusing the
+same URL afterwards returns a 404.
 
-**Tracking.** Each view increments the link's view count.
+**Tracking.** Each visit to the share page adds one to the link's view count.
 
 ---
 

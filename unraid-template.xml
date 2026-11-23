@@ -18,7 +18,7 @@
   <Category>MediaApp:Photos MediaServer:Photos GameServers</Category>
   <WebUI>http://[IP]:[PORT:8080]</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/adiuv0/gamevault/main/unraid-template.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/adiuv0/gamevault/main/frontend/public/vite.svg</Icon>
+  <Icon>https://raw.githubusercontent.com/adiuv0/gamevault/main/frontend/public/icon.png</Icon>
   <ExtraParams>--restart unless-stopped</ExtraParams>
   <Description>
     Self-hosted game screenshot manager. Import screenshots from Steam, upload manually, annotate with rich text, full-text search, timeline view, and share with OpenGraph-powered link previews. Dark gaming-themed UI built with React.
@@ -78,7 +78,7 @@
     Name="Base URL"
     Target="GAMEVAULT_BASE_URL"
     Default="http://localhost:8080"
-    Description="Public URL for GameVault. Used for share links. Example: https://screenshots.yourdomain.com or http://192.168.1.100:8080"
+    Description="The address people use to open GameVault, including the host port you mapped above. Share links are built from it, so they break if it is wrong. Example: https://screenshots.yourdomain.com or http://192.168.1.100:8080"
     Type="Variable"
     Display="always"
     Required="true"
@@ -157,13 +157,13 @@
   <Config
     Name="Max Upload Size (MB)"
     Target="GAMEVAULT_MAX_UPLOAD_SIZE_MB"
-    Default="50"
-    Description="Maximum file size for manual screenshot uploads."
+    Default="512"
+    Description="Largest single file accepted from the browser or GameVault Sync. HDR captures (JXR, 16-bit PNG) are often 30-100 MB each."
     Type="Variable"
     Display="advanced"
     Required="false"
     Mask="false"
-  >50</Config>
+  >512</Config>
 
   <Config
     Name="Thumbnail Quality"

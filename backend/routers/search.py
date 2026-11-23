@@ -1,6 +1,8 @@
 """Search routes with FTS5 full-text search."""
 
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
 
 from backend.auth import require_auth
 from backend.services.search_service import search_screenshots
@@ -16,8 +18,8 @@ async def search(
     date_to: str | None = None,
     favorites_only: bool = False,
     sort: str = "relevance",
-    page: int = 1,
-    limit: int = 50,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1)] = 50,
 ):
     """Full-text search across screenshots and annotations.
 

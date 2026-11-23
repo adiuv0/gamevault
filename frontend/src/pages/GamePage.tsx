@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Upload, Image, Trash2, Loader2, RefreshCw, CheckCircle2, Globe, Lock, GitMerge, Search } from 'lucide-react';
+import { ArrowLeft, Upload, Image, Trash2, Loader2, RefreshCw, CheckCircle2, AlertCircle, Globe, Lock, GitMerge, Search } from 'lucide-react';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { ScreenshotGallery } from '@/components/screenshots/ScreenshotGallery';
@@ -37,6 +37,7 @@ export function GamePage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [fetchingMeta, setFetchingMeta] = useState(false);
   const [metaResult, setMetaResult] = useState<string | null>(null);
+  const [metaFailed, setMetaFailed] = useState(false);
   const [showMergeModal, setShowMergeModal] = useState(false);
   const metaResultTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -121,6 +122,7 @@ export function GamePage() {
     try {
       setFetchingMeta(true);
       setMetaResult(null);
+      setMetaFailed(false);
       const result = await fetchGameMetadata(gameId);
       const fields = result.fields_updated;
       if (fields.length > 0 || result.cover_downloaded) {
@@ -137,6 +139,7 @@ export function GamePage() {
           : 'No metadata sources available (add API keys in Settings)');
       }
     } catch {
+      setMetaFailed(true);
       setMetaResult('Failed to fetch metadata');
     } finally {
       setFetchingMeta(false);
@@ -220,8 +223,16 @@ export function GamePage() {
             </button>
             <button
               onClick={async () => {
-                const updated = await updateGame(gameId, { is_public: !game.is_public });
-                setGame(updated);
+                try {
+                  const updated = await updateGame(gameId, { is_public: !game.is_public });
+                  setGame(updated);
+                } catch {
+                  // The button keeps showing the old state; say why it didn't change.
+                  setMetaFailed(true);
+                  setMetaResult("Couldn't change who can see this game");
+                  clearTimeout(metaResultTimer.current);
+                  metaResultTimer.current = setTimeout(() => setMetaResult(null), 5000);
+                }
               }}
               className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-text-secondary rounded-md text-sm hover:text-text-primary hover:border-accent-primary/50 transition-colors"
               title={game.is_public ? 'Visible in public gallery' : 'Hidden from public gallery'}
@@ -267,7 +278,11 @@ export function GamePage() {
       {/* Metadata result toast */}
       {metaResult && (
         <div className="mb-4 flex items-center gap-2 px-3 py-2 bg-bg-secondary border border-border rounded-md text-sm text-text-secondary">
-          <CheckCircle2 className="h-4 w-4 text-accent-success flex-shrink-0" />
+          {metaFailed ? (
+            <AlertCircle className="h-4 w-4 text-accent-danger flex-shrink-0" />
+          ) : (
+            <CheckCircle2 className="h-4 w-4 text-accent-success flex-shrink-0" />
+          )}
           {metaResult}
         </div>
       )}
@@ -397,7 +412,7 @@ export function GamePage() {
           <div className="relative bg-bg-secondary border border-border rounded-lg p-6 w-full max-w-sm shadow-xl">
             <h2 className="text-lg font-semibold text-text-primary mb-2">Delete Game</h2>
             <p className="text-sm text-text-secondary mb-4">
-              Are you sure you want to delete <strong>{game.name}</strong> and all its screenshots? This cannot be undone.
+Delete <strong>{game.name}</strong> and all its screenshots, notes and share links from GameVault? This cannot be undone. The image files themselves stay in the library folder on disk.
             </p>
             <div className="flex justify-end gap-3">
               <button

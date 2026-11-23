@@ -4,7 +4,6 @@ services:
     # For production where you want bit-exact reproducibility, pin to an
     # immutable digest instead, e.g.:
     #     image: adiuv0/gamevault@sha256:abcd1234...
-    # Pin an image digest for reproducible deployments.
     image: adiuv0/gamevault:latest
     # To build from source instead, comment out 'image' and uncomment:
     # build: .

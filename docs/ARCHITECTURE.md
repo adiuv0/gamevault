@@ -17,11 +17,11 @@ configuration, see [CONFIGURATION.md](CONFIGURATION.md).
 | HTTP client | httpx (async) |
 | HTML parsing | BeautifulSoup + lxml |
 | Auth | bcrypt + PyJWT |
-| Frontend | React 18 + TypeScript + Vite |
+| Frontend | React 19 + TypeScript + Vite |
 | Styling | Tailwind CSS v4 |
-| State | Zustand stores + TanStack Query |
+| State | Zustand stores |
 | Routing | react-router-dom |
-| Container | Multi-stage Docker (node:20-alpine + python:3.12-slim) |
+| Container | Multi-stage Docker (node:22-alpine + python:3.12-slim) |
 
 ---
 
@@ -37,8 +37,7 @@ gamevault/
 │   ├── migrations/             # Schema migrations + runner
 │   ├── models/                 # Pydantic request/response models
 │   ├── routers/                # FastAPI routers (one per feature)
-│   ├── services/               # Domain logic — DB writes, file I/O, external APIs
-│   └── templates/              # Jinja templates (currently only share page)
+│   └── services/               # Domain logic — DB writes, file I/O, external APIs
 ├── frontend/                   # React SPA
 │   ├── src/
 │   │   ├── App.tsx             # Routes
@@ -184,7 +183,7 @@ Source (upload / Steam / Special K)
 [validate_image]  ← magic-byte check; for JXR uses imagecodecs decode
         │
         ▼
-[get_image_format] [get_image_dimensions] [compute_sha256] [extract_exif]
+[describe_image: format, dimensions, EXIF]  [compute_sha256]
         │
         ▼
    check_duplicate_hash  ← skip if already stored
@@ -351,18 +350,14 @@ if no password has been created.
 
 ### State management
 
-Three Zustand stores in [`stores/`](../frontend/src/stores):
+Two Zustand stores in [`stores/`](../frontend/src/stores):
 
 - `authStore` — current JWT, login state. Token mirrors `localStorage`.
 - `viewStore` — UI preferences (grid vs list, sort order). Mirrors
   `localStorage`.
-- `importStore` — global import progress (used by the top bar to show a
-  small badge during long imports).
 
-Server data is mostly fetched ad-hoc with `useEffect` + `useState`;
-TanStack Query is set up but used only by parts of the gallery flow that
-need cache + revalidation. Adding TanStack Query elsewhere is a
-non-breaking change if you want it.
+Server data is fetched with `useEffect` + `useState`; there is no
+client-side query cache.
 
 ### Gallery delivery
 
@@ -397,7 +392,7 @@ header. The shared `client.ts` provides:
 | `/games/:id` | [`GamePage`](../frontend/src/pages/GamePage.tsx) | One game's screenshots + metadata |
 | `/timeline` | [`TimelinePage`](../frontend/src/pages/TimelinePage.tsx) | Day-grouped chronological view |
 | `/upload` | [`UploadPage`](../frontend/src/pages/UploadPage.tsx) | Drag-and-drop with SSE progress |
-| `/import/steam` | [`SteamImportPage`](../frontend/src/pages/SteamImportPage.tsx) | 4-step wizard |
+| `/import/steam` | [`SteamImportPage`](../frontend/src/pages/SteamImportPage.tsx) | 3-step wizard |
 | `/import/specialk` | [`SpecialKImportPage`](../frontend/src/pages/SpecialKImportPage.tsx) | 3-step filesystem importer |
 | `/search` | [`SearchPage`](../frontend/src/pages/SearchPage.tsx) | FTS5 search + filters |
 | `/settings` | [`SettingsPage`](../frontend/src/pages/SettingsPage.tsx) | All runtime config |
@@ -526,7 +521,7 @@ suites (118 tests combined).
 
 Multi-stage:
 
-1. **`frontend-builder`** — `node:20-alpine`, runs `npm ci` then `npm run
+1. **`frontend-builder`** — `node:22-alpine`, runs `npm ci` then `npm run
    build`, leaves the built SPA in `frontend/dist/`.
 2. **Production image** — `python:3.12-slim`, installs system libs
    (`libjpeg62-turbo`, `libpng-dev`, `libwebp-dev`, `libxml2-dev`,

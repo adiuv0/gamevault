@@ -218,6 +218,8 @@ def _media_operation(path: str) -> str:
         kind = "thumbnail"
     elif path.endswith("/preview"):
         kind = "preview"
+    elif path.endswith("/full"):
+        kind = "full"
     elif path.endswith("/cover") or "/cover" in path:
         kind = "cover"
     else:
@@ -228,7 +230,7 @@ def _media_operation(path: str) -> str:
 def _is_media_path(path: str) -> bool:
     return (
         "/thumb/" in path
-        or path.endswith(("/preview", "/image", "/cover"))
+        or path.endswith(("/preview", "/full", "/image", "/cover"))
     )
 
 

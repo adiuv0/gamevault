@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Gamepad2, Plus, Loader2, RefreshCw, CheckCircle2, Trash2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Gamepad2, Plus, Loader2, RefreshCw, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { GameGrid } from '@/components/games/GameGrid';
@@ -7,18 +8,20 @@ import { GameList } from '@/components/games/GameList';
 import { useViewStore } from '@/stores/viewStore';
 import { listGames, createGame, cleanupEmptyGames } from '@/api/games';
 import { fetchAllMetadata } from '@/api/metadata';
-import type { Game } from '@/lib/types';
+import type { Game, SortOption } from '@/lib/types';
 
 export function LibraryPage() {
-  const { viewMode, sortBy } = useViewStore();
+  const { viewMode, sortBy, setSortBy } = useViewStore();
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newGameName, setNewGameName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [fixingMeta, setFixingMeta] = useState(false);
   const [metaResult, setMetaResult] = useState<string | null>(null);
+  const [metaFailed, setMetaFailed] = useState(false);
   const [cleaningUp, setCleaningUp] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const metaResultTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -61,12 +64,14 @@ export function LibraryPage() {
 
     try {
       setCreating(true);
+      setCreateError(null);
       await createGame({ name: newGameName.trim() });
       setNewGameName('');
       setShowCreateModal(false);
       await fetchGames();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create game');
+      // Shown in the dialog: a taken name shouldn't replace the whole library with an error page.
+      setCreateError(err instanceof Error ? err.message : 'Failed to create game');
     } finally {
       setCreating(false);
     }
@@ -76,6 +81,7 @@ export function LibraryPage() {
     try {
       setFixingMeta(true);
       setMetaResult(null);
+      setMetaFailed(false);
       const result = await fetchAllMetadata();
       const parts = [];
       if (result.updated > 0) parts.push(`${result.updated} updated`);
@@ -85,6 +91,7 @@ export function LibraryPage() {
       // Refresh game list to show new names/covers
       await fetchGames();
     } catch (err) {
+      setMetaFailed(true);
       setMetaResult(err instanceof Error ? err.message : 'Failed to fix metadata');
     } finally {
       setFixingMeta(false);
@@ -95,6 +102,7 @@ export function LibraryPage() {
   const handleCleanupEmpty = async () => {
     const emptyGames = games.filter(g => (g.screenshot_count ?? 0) === 0);
     if (emptyGames.length === 0) {
+      setMetaFailed(false);
       setMetaResult('No empty games to clean up');
       hideMetaResultAfter(4000);
       return;
@@ -104,10 +112,12 @@ export function LibraryPage() {
     try {
       setCleaningUp(true);
       setMetaResult(null);
+      setMetaFailed(false);
       const result = await cleanupEmptyGames();
       setMetaResult(`Cleaned up ${result.deleted_count} empty games`);
       await fetchGames();
     } catch (err) {
+      setMetaFailed(true);
       setMetaResult(err instanceof Error ? err.message : 'Cleanup failed');
     } finally {
       setCleaningUp(false);
@@ -152,6 +162,19 @@ export function LibraryPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {games.length > 1 && (
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              aria-label="Sort games"
+              title="Sort games"
+              className="px-2 py-1.5 bg-bg-secondary border border-border text-text-secondary rounded-md text-sm hover:border-accent-primary/50 focus:outline-none focus:border-accent-primary transition-colors"
+            >
+              <option value="name">Sort: Name</option>
+              <option value="date">Sort: Latest screenshot</option>
+              <option value="count">Sort: Most screenshots</option>
+            </select>
+          )}
           {games.some(g => (g.screenshot_count ?? 0) === 0) && (
             <button
               onClick={handleCleanupEmpty}
@@ -181,7 +204,7 @@ export function LibraryPage() {
             {fixingMeta ? 'Fixing...' : 'Fix Metadata'}
           </button>
           <button
-            onClick={() => setShowCreateModal(true)}
+            onClick={() => { setCreateError(null); setShowCreateModal(true); }}
             className="flex items-center gap-2 px-3 py-1.5 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors"
           >
             <Plus className="h-4 w-4" />
@@ -193,7 +216,11 @@ export function LibraryPage() {
       {/* Metadata result toast */}
       {metaResult && (
         <div className="mb-4 flex items-center gap-2 px-3 py-2 bg-bg-secondary border border-border rounded-md text-sm text-text-secondary">
-          <CheckCircle2 className="h-4 w-4 text-accent-success flex-shrink-0" />
+          {metaFailed ? (
+            <AlertCircle className="h-4 w-4 text-accent-danger flex-shrink-0" />
+          ) : (
+            <CheckCircle2 className="h-4 w-4 text-accent-success flex-shrink-0" />
+          )}
           {metaResult}
         </div>
       )}
@@ -206,18 +233,18 @@ export function LibraryPage() {
           description="Upload screenshots or import from Steam to get started."
           action={
             <div className="flex gap-3">
-              <a
-                href="/upload"
+              <Link
+                to="/upload"
                 className="px-4 py-2 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors no-underline"
               >
                 Upload Screenshots
-              </a>
-              <a
-                href="/import/steam"
+              </Link>
+              <Link
+                to="/import/steam"
                 className="px-4 py-2 bg-bg-tertiary text-text-primary rounded-md text-sm font-medium hover:bg-bg-tertiary/80 transition-colors border border-border no-underline"
               >
                 Import from Steam
-              </a>
+              </Link>
             </div>
           }
         />
@@ -245,6 +272,9 @@ export function LibraryPage() {
                 className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-text-primary placeholder-text-muted focus:outline-none focus:border-accent-primary text-sm mb-4"
                 autoFocus
               />
+              {createError && (
+                <p role="alert" className="text-sm text-accent-danger -mt-2 mb-4">{createError}</p>
+              )}
               <div className="flex justify-end gap-3">
                 <button
                   type="button"

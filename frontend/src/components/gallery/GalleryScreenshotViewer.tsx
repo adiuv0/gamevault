@@ -126,6 +126,8 @@ export function GalleryScreenshotViewer({
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      // Leave browser shortcuts alone (Ctrl+H is History, Alt+Left is Back).
+      if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
       switch (e.key) {
         case 'Escape':
           onClose();

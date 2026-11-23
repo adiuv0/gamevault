@@ -6,7 +6,6 @@ Falls through providers in priority order: Steam API -> SteamGridDB -> IGDB.
 
 import logging
 import time
-from pathlib import Path
 from urllib.parse import quote
 
 import httpx

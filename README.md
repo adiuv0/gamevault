@@ -4,14 +4,17 @@ Self-hosted game screenshot manager. Import your Steam screenshots, upload manua
 
 ## Features
 
-- **Steam Import** — 4-step wizard to bulk-import screenshots from your Steam Community profile with live progress tracking
+- **Steam Import** — bulk-import screenshots from your Steam Community profile with live progress tracking
+- **Special K & HDR** — imports Special K captures, and shows JPEG XR and 16-bit PNG HDR screenshots through tone-mapped thumbnails, previews and full-size renders
+- **One capture, several files** — Steam's JPG and Special K's JXR/PNG of the same moment are kept together as one capture, with a review queue for possible duplicates
 - **Manual Upload** — drag-and-drop upload with automatic thumbnail generation and EXIF metadata extraction
 - **GameVault Sync** — a Windows tray app that backs up new Steam and Special K screenshots from your gaming PC on its own; sign in once with your password ([desktop/README.md](desktop/README.md))
 - **Game Library** — grid and list views, cover art, per-game screenshot counts, and metadata from Steam/SteamGridDB/IGDB
 - **Annotations** — rich text editor (Markdown) for adding notes to any screenshot
 - **Full-Text Search** — FTS5-powered search across game names, filenames, descriptions, and annotations with BM25 ranking
-- **Timeline View** — browse screenshots chronologically, grouped by day, with stats and date filters
+- **Timeline View** — browse screenshots chronologically, grouped by day, with stats and a game filter
 - **Share Links** — generate public links with OpenGraph and Twitter Card meta tags for rich previews on Discord, Slack, etc.
+- **Public Gallery** — a read-only `/gallery` for visitors, showing the games you leave marked public (new games start public)
 - **Single-User Auth** — JWT-based authentication with password setup, change, and optional disable for LAN-only setups
 - **Metadata Cascade** — automatic game metadata fetching from Steam Store API, SteamGridDB, and IGDB
 
@@ -20,8 +23,8 @@ Self-hosted game screenshot manager. Import your Steam screenshots, upload manua
 | Layer | Technology |
 |-------|-----------|
 | Backend | Python 3.12, FastAPI, aiosqlite (SQLite + WAL + FTS5) |
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS v4, Zustand |
-| Image Processing | Pillow, piexif |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS v4, Zustand |
+| Image Processing | Pillow, imagecodecs (JPEG XR), NumPy |
 | Steam Scraping | httpx, BeautifulSoup4, lxml |
 | Auth | bcrypt, PyJWT |
 | Container | Multi-stage Docker (Node alpine + Python slim) |
@@ -139,12 +142,11 @@ All API keys and tuning parameters are available as fields in the Unraid Docker 
 
 ## Steam Import
 
-The Steam Import wizard walks you through 4 steps:
+The Steam Import wizard walks you through 3 steps:
 
-1. **Profile URL** — enter your Steam Community profile URL
-2. **Cookies** — paste your `steamLoginSecure` and `sessionid` cookies (needed because Steam doesn't have a public screenshots API)
-3. **Game Selection** — pick which games to import
-4. **Import** — watch live progress with per-game and overall progress bars
+1. **Account** — enter your Steam ID or profile URL. A Steam Web API key saved in Settings makes the import faster and more reliable; without one GameVault reads your screenshot pages instead. The `steamLoginSecure` and `sessionid` cookies are optional and only needed to reach private screenshots
+2. **Game Selection** — pick which games to import
+3. **Import** — watch live progress with per-game and overall progress bars
 
 The importer handles:
 - Rate limiting (configurable, default 1 req/sec)
@@ -192,7 +194,8 @@ docker build -t gamevault .
 
 # Or run locally for development
 cd frontend && npm install && npm run dev &
-cd .. && pip install -e ".[dev]" && uvicorn backend.main:app --reload
+# (the dev server proxies /api to port 8080, so run the backend there)
+cd .. && pip install -e ".[dev]" && uvicorn backend.main:app --reload --port 8080
 ```
 
 ## Publishing
@@ -209,7 +212,7 @@ pulls the new image.
 ```bash
 pip install -e ".[dev]"
 
-# Main test suite (106 tests)
+# Main test suite
 python -m pytest tests/ -v
 
 # Legacy standalone tests

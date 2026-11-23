@@ -20,6 +20,9 @@ os.environ["GAMEVAULT_DISABLE_AUTH"] = "true"
 _tmp = tempfile.mkdtemp(prefix="gv_test5_")
 os.environ["GAMEVAULT_DATA_DIR"] = _tmp
 os.environ["GAMEVAULT_LIBRARY_DIR"] = str(Path(_tmp) / "library")
+# Without this, thumbnails go to the default /data/cache/thumbnails, which only
+# root can create: the script passed in a root shell and failed everywhere else.
+os.environ["GAMEVAULT_THUMBNAIL_DIR"] = str(Path(_tmp) / "cache" / "thumbnails")
 os.environ["GAMEVAULT_DB_PATH"] = str(Path(_tmp) / "test5.db")
 
 from backend.config import Settings

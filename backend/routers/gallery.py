@@ -124,7 +124,8 @@ async def gallery_cover(game_id: int):
 
     return FileResponse(
         cover_path,
-        media_type="image/jpeg",
+        # Covers are saved as fetched: .jpg, .png or .webp.
+        media_type=mimetypes.guess_type(cover_path.name)[0] or "image/jpeg",
         headers={
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "default-src 'none'",
