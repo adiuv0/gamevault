@@ -1,6 +1,10 @@
 """Pydantic models for games."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from backend.services.media_cache_service import media_version
 
 
 class GameCreate(BaseModel):
@@ -67,6 +71,17 @@ class PublicGame(BaseModel):
     screenshot_count: int = 0
     first_screenshot_date: str | None = None
     last_screenshot_date: str | None = None
+    # Opaque cover revision: present only when the game has a cover, and
+    # changes when the game is updated, so replaced covers aren't served stale.
+    cover_version: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_cover_version(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "cover_version" not in data:
+            if data.get("cover_image_path"):
+                data = {**data, "cover_version": media_version(str(data.get("updated_at") or ""))}
+        return data
 
 
 class PublicGameListResponse(BaseModel):

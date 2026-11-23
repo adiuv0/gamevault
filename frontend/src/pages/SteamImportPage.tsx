@@ -237,7 +237,9 @@ export function SteamImportPage() {
         break;
 
       case 'screenshot_complete':
-        setOverallCompleted(d.overall_progress as number || 0);
+        // overall_progress also counts this game's skips, which overallSkipped already
+        // holds (the bar went past 100%). game_complete resyncs the real totals.
+        setOverallCompleted(prev => prev + 1);
         setGameProgress(prev => {
           const next = new Map(prev);
           const appId = _findAppIdByName(next, d.game_name as string);

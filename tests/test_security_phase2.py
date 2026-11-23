@@ -274,13 +274,13 @@ class TestPublicGalleryShapes:
         slim = PublicScreenshot.model_validate(full).model_dump()
 
         # Allowed fields present
-        for k in ("id", "game_id", "filename", "thumbnail_path_sm",
-                   "thumbnail_path_md", "width", "height", "taken_at",
+        for k in ("id", "game_id", "filename", "width", "height", "taken_at",
                    "uploaded_at", "media_version"):
             assert k in slim
 
-        # Sensitive fields dropped
-        for k in ("file_path", "preview_path", "sha256_hash", "exif_data",
+        # Sensitive fields dropped (thumbnail paths embed folder + SHA-256)
+        for k in ("thumbnail_path_sm", "thumbnail_path_md",
+                  "file_path", "preview_path", "sha256_hash", "exif_data",
                   "steam_screenshot_id", "steam_description", "source",
                   "is_favorite", "view_count", "format", "file_size",
                   "created_at", "updated_at"):
@@ -325,6 +325,10 @@ class TestPublicGalleryShapes:
                   "igdb_id", "steamgriddb_id", "is_public", "created_at",
                   "updated_at"):
             assert k not in slim, f"PublicGame leaked internal field {k!r}"
+        # The cover is exposed only as an opaque revision for cache-busting.
+        assert slim["cover_version"] and "cover" not in slim["cover_version"]
+        no_cover = PublicGame.model_validate({**full, "cover_image_path": None})
+        assert no_cover.cover_version is None
 
 
 # ── GV-007: share template OG meta + image route ────────────────────────────

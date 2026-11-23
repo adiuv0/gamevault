@@ -58,7 +58,12 @@ def compute_sha256(file_path: Path) -> str:
             h.update(chunk)
     digest = h.hexdigest()
     if len(_hash_cache) >= _HASH_CACHE_LIMIT:
-        _hash_cache.pop(next(iter(_hash_cache)))
+        # Import workers hash in parallel threads: two can pick the same oldest
+        # key, or the dict can change under iter(). Either is harmless here.
+        try:
+            _hash_cache.pop(next(iter(_hash_cache)), None)
+        except (RuntimeError, StopIteration):
+            pass
     _hash_cache[key] = digest
     return digest
 
@@ -474,8 +479,15 @@ def compute_perceptual_hash(file_path: Path) -> str | None:
 def validate_image(file_path: Path) -> bool:
     """Validate that a file is a supported image (including JXR via hdr_processor)."""
     if hdr_processor.is_jxr(file_path):
+        # The header is enough here: thumbnail generation decodes the whole file
+        # right after, and callers treat a failed HDR decode as an invalid image.
+        # A full decode here doubled the CPU and peak memory of every JXR import.
+        dims = hdr_processor.read_jxr_header_dimensions(file_path)
+        if dims:
+            width, height = dims
+            return 0 < width * height <= (Image.MAX_IMAGE_PIXELS or width * height)
         try:
-            hdr_processor.decode_jxr(file_path)
+            hdr_processor.decode_jxr(file_path)  # unusual container layout
             return True
         except Exception:
             return False

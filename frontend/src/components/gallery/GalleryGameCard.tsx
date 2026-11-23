@@ -16,9 +16,9 @@ export function GalleryGameCard({ game }: GalleryGameCardProps) {
     >
       {/* Cover image */}
       <div className="relative aspect-[2/3] bg-bg-tertiary overflow-hidden">
-        {game.cover_image_path ? (
+        {game.cover_version ? (
           <img
-            src={galleryCoverUrl(game.id)}
+            src={galleryCoverUrl(game.id, game.cover_version)}
             alt={game.name}
             className="w-full h-full object-cover group-hover:brightness-110 transition-all duration-200"
             loading="lazy"

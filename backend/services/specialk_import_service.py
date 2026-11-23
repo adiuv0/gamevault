@@ -25,7 +25,6 @@ import asyncio
 import json
 import logging
 import re
-import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -37,6 +36,7 @@ from backend.services.game_service import (
     get_or_create_game,
     update_screenshot_stats,
 )
+from backend.services.hdr_processor import is_jxr
 from backend.services.image_processor import (
     analyze_image,
     compute_sha256,
@@ -45,9 +45,10 @@ from backend.services.image_processor import (
 from backend.services.metadata_service import fetch_and_apply_metadata
 from backend.services.performance_diagnostics import measure_async
 from backend.services.screenshot_service import (
-    check_duplicate_hash,
+    claim_unless_duplicate,
     create_screenshot,
 )
+from backend.services.upload_service import _copy_exclusive
 
 logger = logging.getLogger(__name__)
 
@@ -118,17 +119,14 @@ async def update_import_session(session_id: int, **fields) -> None:
 
 
 async def append_error_log(session_id: int, error_msg: str) -> None:
+    # One statement, so concurrent workers can't drop each other's messages
+    # (a read-then-write could also fail with SQLITE_BUSY under WAL).
     db = await get_db()
-    cursor = await db.execute(
-        "SELECT error_log FROM specialk_import_sessions WHERE id = ?",
-        (session_id,),
-    )
-    row = await cursor.fetchone()
-    existing = json.loads(row[0]) if row and row[0] else []
-    existing.append(error_msg)
     await db.execute(
-        "UPDATE specialk_import_sessions SET error_log = ? WHERE id = ?",
-        (json.dumps(existing), session_id),
+        """UPDATE specialk_import_sessions
+           SET error_log = json_insert(COALESCE(NULLIF(error_log, ''), '[]'), '$[#]', ?)
+           WHERE id = ?""",
+        (error_msg, session_id),
     )
     await db.commit()
 
@@ -505,7 +503,7 @@ async def _import_single_file(
 
     sha256 = await asyncio.to_thread(compute_sha256, src_path)
     in_flight = in_flight_hashes if in_flight_hashes is not None else set()
-    if sha256 in in_flight or await check_duplicate_hash(sha256):
+    if await claim_unless_duplicate(sha256, sha256, in_flight):
         await emit_progress(session_id, "screenshot_skipped", {
             "filename": src_path.name,
             "game_name": game_name,
@@ -516,7 +514,6 @@ async def _import_single_file(
             "total_screenshots": total_screenshots,
         })
         return "skipped"
-    in_flight.add(sha256)
     try:
         return await _store_single_file(
             session_id, src_path, sha256, game_id, game_folder, game_name,
@@ -549,20 +546,39 @@ async def _store_single_file(
     filename = f"{base_stem}{ext}"
     dest_path = dest_dir / filename
     counter = 1
-    while dest_path.exists():
-        existing_hash = await asyncio.to_thread(compute_sha256, dest_path)
-        if existing_hash == sha256:
-            break
+    copied = False
+    while True:
+        if dest_path.exists():
+            existing_hash = await asyncio.to_thread(compute_sha256, dest_path)
+            if existing_hash == sha256:
+                break
+        else:
+            # Workers run concurrently: two files with the same stem and mtime
+            # second (HDR/ and SDR/ folders) could both pick this free name, and
+            # copy2 would let the second silently overwrite the first.
+            try:
+                await asyncio.to_thread(_copy_exclusive, src_path, dest_path, allow_link=False)
+                copied = True
+                break
+            except FileExistsError:
+                continue  # another worker claimed it first; re-check its hash
         filename = f"{base_stem} ({counter}){ext}"
         dest_path = dest_dir / filename
         counter += 1
 
-    if not dest_path.exists():
-        await asyncio.to_thread(shutil.copy2, str(src_path), str(dest_path))
-
     # Image metadata + thumbnails (HDR-aware) in one thread hop and one header read.
     filename_stem = Path(filename).stem
     info = await asyncio.to_thread(analyze_image, dest_path, game_folder, filename_stem)
+    if info["thumbnail_path_sm"] is None and is_jxr(dest_path):
+        # validate_image only reads a JXR's header; this was the full decode.
+        if copied:
+            dest_path.unlink(missing_ok=True)
+        await emit_progress(session_id, "screenshot_failed", {
+            "filename": src_path.name,
+            "game_name": game_name,
+            "error": "Not a valid image",
+        })
+        return "failed"
     taken_at = (info["taken_at"] or mtime).isoformat()
 
     rel_path = f"{game_folder}/screenshots/{filename}"

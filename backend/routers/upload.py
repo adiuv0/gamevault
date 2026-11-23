@@ -201,7 +201,7 @@ async def upload_screenshot_sync(
                 f, temp_dir, max_bytes
             )
             temp_files.append((len(temp_files), display_name, temp_path))
-    except HTTPException:
+    except BaseException:  # a full disk (OSError) must not leak the staging folder either
         await asyncio.to_thread(shutil.rmtree, str(temp_dir), True)
         raise
 

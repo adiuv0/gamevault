@@ -473,6 +473,26 @@ async def check_duplicate_hash(sha256_hash: str) -> dict | None:
     return None
 
 
+async def claim_unless_duplicate(key: str, sha256: str, claimed: set[str]) -> bool:
+    """Check the in-flight claims and the library; claim ``key`` if it's new.
+
+    The claim is taken before awaiting the database: claiming after the await
+    let two workers holding identical files both miss the check and both import.
+    The caller releases a claim returned as ``False`` when it's done.
+    """
+    if key in claimed:
+        return True
+    claimed.add(key)
+    try:
+        duplicate = await check_duplicate_hash(sha256) is not None
+    except BaseException:
+        claimed.discard(key)
+        raise
+    if duplicate:
+        claimed.discard(key)
+    return duplicate
+
+
 async def check_duplicate_steam_id(steam_id: str) -> bool:
     """Check if a screenshot with this Steam ID already exists."""
     db = await get_db()

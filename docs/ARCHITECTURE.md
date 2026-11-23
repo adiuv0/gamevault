@@ -134,14 +134,15 @@ sufficient for single-instance deployments.
 
 ### Database
 
-A single global aiosqlite connection (`backend/database.py:_db`). The
-connection is opened at startup, runs migrations, then is reused for the
-process lifetime. WAL mode enables concurrent readers; the busy timeout
-is 5 seconds.
-
-**Why one connection?** SQLite serializes writes anyway, and aiosqlite
-serializes calls per-connection. A connection pool would only help reads,
-which are rarely the bottleneck here. Simplicity wins.
+Connections are task-owned (`backend/database.py`). Each asyncio task
+(a request, an import worker) borrows one connection for its lifetime, so
+one task's commit or rollback never touches another's work. When the task
+ends, uncommitted work is rolled back and the connection goes back to a
+small idle pool (8), so requests skip opening a connection and warming
+SQLite's page cache. WAL mode lets readers run beside the single writer;
+the busy timeout is 5 seconds. Writes that read before they write use
+`transaction()` / `@atomic`, which take the writer lock up front with
+`BEGIN IMMEDIATE`.
 
 **FTS5.** The schema includes:
 
@@ -512,8 +513,8 @@ Test files:
   detection, tone-map algorithms, sRGB encoding, name cleaning, scanner
   behaviour
 
-Total: **135 pytest-collected tests** plus the legacy phase4/5 standalone
-suites (118 tests combined).
+Run `pytest -q` for the current count (about 400 as of 1.2.2), plus the
+legacy phase4/5 standalone scripts, which CI runs separately.
 
 ---
 

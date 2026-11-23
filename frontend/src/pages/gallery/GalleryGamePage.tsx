@@ -131,9 +131,9 @@ export function GalleryGamePage() {
 
         <div className="flex items-start gap-4">
           {/* Cover */}
-          {game.cover_image_path ? (
+          {game.cover_version ? (
             <img
-              src={galleryCoverUrl(game.id)}
+              src={galleryCoverUrl(game.id, game.cover_version)}
               alt={game.name}
               className="w-16 h-24 rounded-lg object-cover flex-shrink-0 hidden sm:block"
             />
