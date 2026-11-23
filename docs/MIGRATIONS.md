@@ -16,6 +16,8 @@ rollback procedures. Migrations run automatically when GameVault starts.
 | `1.0.3` | `1.1.0` | Applies `m013` through `m016` | Automated tests cover the `m015` backfill of existing rows and its triggers, and the `m016` sign-in table |
 | `1.1.0` | `1.2.0` | Applies `m017` | Automated fixture upgrades the shipped `1.1.0` schema; a test covers the background regroup `m017` queues |
 | `1.2.0` | `1.2.1` | None | No schema change; the automated fixture confirms the `1.2.0` schema opens unchanged |
+| `1.2.1` | `1.2.2` | None | No schema change |
+| `1.2.2` | `1.2.3` | Applies `m018` | Automated fixture upgrades the shipped `1.2.2` schema; tests cover the new column and the background repair `m018` queues |
 
 The `1.0.0` migrations add gallery indexes, logical capture groups, duplicate review,
 viewer previews, and durable import/upload jobs to Docker `0.3.1`. They do not rewrite
@@ -37,6 +39,15 @@ index builds take a few seconds at first startup. `m016` adds the empty
 The scan pairs saved copies of one capture (for example Steam's JPG and Special K's
 JXR) by changing only `screenshots.capture_group_id`; it never touches image files,
 and every pairing can be undone with **Ungroup** in the viewer.
+
+`m018` adds the nullable `screenshots.steam_posted_at` and queues a background repair
+of Steam imports, which until `1.2.3` stored the time Steam posted a screenshot as the
+time it was taken. After startup the server asks Steam's image servers for each
+imported screenshot's original file name, which holds the capture time, using the
+profile of the last Steam import. It changes only `screenshots.taken_at`, moves the
+previous value into `steam_posted_at`, and downloads no images. Without internet
+access, or for screenshots Steam does not list publicly, nothing changes; running a
+Steam import again repairs those.
 
 ## Before Upgrading
 

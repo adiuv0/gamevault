@@ -248,8 +248,24 @@ Tests that don't decode JXR don't pay the import cost.
   with the full-res CDN link. Using `filetype=5` (the response-only
   `EWorkshopFileType` enum) returns results but with empty `file_url`.
 
-Per-screenshot metadata (description, taken date) is parsed from
+Per-screenshot metadata (description, posted date) is parsed from
 detail-page HTML when not available via API.
+
+- **Capture time** — neither the API (`time_created`) nor the page
+  ("Posted") says when a screenshot was taken, only when Steam posted it,
+  and Steam posts a session or several days of them as one batch. The
+  image CDN's `Content-Disposition` carries the original file name
+  (`<appid>_screenshots_YYYYMMDDHHMMSS_N.jpg`, local time of the capturing
+  PC; thumbnails are separate uploads with the same stamp), which
+  `capture_time_from_name` turns into `taken_at`. The posted time is kept
+  in `screenshots.steam_posted_at`; NULL there marks a row whose capture
+  time has not been looked up.
+  [`steam_capture_times.py`](../backend/services/steam_capture_times.py)
+  looks those up with name-only requests, both in the background job
+  `m018` queues and when an import meets a screenshot it already has.
+- **Grid thumbnails** — the current grid serves a separate 200px file with
+  no resize parameters, so only a thumbnail URL *with* parameters is
+  turned into the full image's address; otherwise the detail page is read.
 
 ### SSE progress
 
@@ -513,7 +529,7 @@ Test files:
   detection, tone-map algorithms, sRGB encoding, name cleaning, scanner
   behaviour
 
-Run `pytest -q` for the current count (about 400 as of 1.2.2), plus the
+Run `pytest -q` for the current count (about 440 as of 1.2.3), plus the
 legacy phase4/5 standalone scripts, which CI runs separately.
 
 ---

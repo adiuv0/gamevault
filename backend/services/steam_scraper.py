@@ -9,8 +9,8 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from urllib.parse import quote, urlparse
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote, unquote, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -39,13 +39,24 @@ class SteamScreenshot:
     full_image_url: str | None = None
     title: str = ""
     description: str = ""
+    # When Steam says the screenshot was posted. Steam posts a whole play session
+    # (or several days of them) as one batch, so this is not when it was taken.
     date_taken: str | None = None
     file_size: int | None = None
     width: int | None = None
     height: int | None = None
+    # The file's name on the PC that took it, when Steam passes it along.
+    original_name: str | None = None
 
     # Legacy field kept for compatibility; not used by API path
     detail_url: str = ""
+
+
+@dataclass
+class SteamDownload:
+    data: bytes
+    # What the CDN calls the file; for screenshots it carries the capture time.
+    original_name: str | None = None
 
 
 @dataclass
@@ -102,6 +113,10 @@ MAX_RETRIES = 3
 MAX_RETRY_AFTER_SECONDS = 30.0
 MAX_IMAGE_BYTES = 256 * 1024 * 1024
 MAX_REDIRECTS = 5
+
+
+# Marks a response worth another attempt; a file name could be any string.
+_RETRY = object()
 
 
 class SteamFetchError(RuntimeError):
@@ -165,6 +180,65 @@ def _parse_steam_date(date_str: str) -> datetime | None:
         except ValueError:
             continue
     return None
+
+
+# Steam names a screenshot after the moment it was taken, in the local time of
+# the PC that took it: 20240310025516_1.jpg. An upload keeps that name behind an
+# app prefix (620_screenshots_20240310025516_1.jpg); thumbnails add
+# "_thumbnails".
+_CAPTURE_NAME = re.compile(r"(?<!\d)(\d{14})_\d+(?!\d)")
+# The furthest a local clock runs ahead of UTC, with slack for a skewed clock.
+_MAX_LOCAL_LEAD = timedelta(hours=14, minutes=10)
+_EARLIEST_CAPTURE_YEAR = 2003
+
+
+def filename_from_content_disposition(value: str | None) -> str | None:
+    """The name a download would be saved under, if the server gives one."""
+    if not value:
+        return None
+    extended = re.search(r"filename\*\s*=\s*[\w-]*'[^']*'([^;]+)", value, re.IGNORECASE)
+    if extended:
+        return unquote(extended.group(1).strip().strip('"')) or None
+    plain = re.search(r'filename\s*=\s*"([^"]*)"', value, re.IGNORECASE) or re.search(
+        r"filename\s*=\s*([^;]+)", value, re.IGNORECASE
+    )
+    return (plain.group(1).strip() or None) if plain else None
+
+
+def _as_utc(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def capture_time_from_name(name: str | None, posted_at: str | None = None) -> datetime | None:
+    """When a Steam screenshot was taken, read from its original file name.
+
+    The result is naive local time, the convention GameVault Sync uses too. A
+    name that is not Steam's, or a time later than the screenshot was posted,
+    gives None so the caller keeps the posted time.
+    """
+    if not isinstance(name, str):
+        return None
+    match = _CAPTURE_NAME.search(name)
+    if not match:
+        return None
+    try:
+        captured = datetime.strptime(match.group(1), "%Y%m%d%H%M%S")
+    except ValueError:
+        return None
+    if captured.year < _EARLIEST_CAPTURE_YEAR:
+        return None
+    latest = _as_utc(posted_at) or datetime.now(timezone.utc).replace(tzinfo=None)
+    if captured > latest + _MAX_LOCAL_LEAD:
+        return None
+    return captured
 
 
 def _extract_full_image_url(thumbnail_url: str) -> str:
@@ -629,6 +703,7 @@ class SteamScraper:
                     file_size=int(file_size) if file_size else None,
                     width=int(img_width) if img_width else None,
                     height=int(img_height) if img_height else None,
+                    original_name=f.get("filename") or None,
                 )
 
                 all_screenshots.append(screenshot)
@@ -727,15 +802,18 @@ class SteamScraper:
                 bg_match = re.search(r"background-image:\s*url\(['\"]?([^'\")\s]+)", style)
                 if bg_match:
                     thumbnail_url = bg_match.group(1)
-                    full_url = _extract_full_image_url(thumbnail_url)
 
             # Fallback: <img> tag
             if not thumbnail_url:
                 img = item.select_one("img")
                 if img:
                     thumbnail_url = img.get("src", "") or img.get("data-src", "")
-                    if thumbnail_url:
-                        full_url = _extract_full_image_url(thumbnail_url)
+
+            # A thumbnail with resize parameters is the full image scaled down,
+            # so dropping them gives the original. Without any, Steam is serving
+            # a separate 200px file; the detail page has the real one.
+            if urlparse(thumbnail_url).query:
+                full_url = _extract_full_image_url(thumbnail_url)
 
             screenshots.append(SteamScreenshot(
                 screenshot_id=screenshot_id,
@@ -784,25 +862,23 @@ class SteamScraper:
                 if "akamaihd.net" in href or "ugc" in href:
                     screenshot.full_image_url = _extract_full_image_url(href)
 
-        # Description
+        # Description. The stats column (size, posted date, dimensions) is not
+        # one: falling back to it captioned screenshots "1.25 MB".
         desc_elem = soup.select_one(
             ".screenshotDescription, "
-            ".nonSelectedScreenshotDescription, "
-            ".detailsStatRight"
+            ".nonSelectedScreenshotDescription"
         )
         if desc_elem:
             screenshot.description = desc_elem.get_text(strip=True)
 
-        # Date
-        date_elem = soup.select_one(
-            ".detailsStatsContainerRight .detailsStatRight, "
-            ".screenshotDate"
-        )
-        if date_elem:
-            date_str = date_elem.get_text(strip=True)
-            parsed = _parse_steam_date(date_str)
+        # Posted date: whichever stat reads as one, since their order varies.
+        for date_elem in soup.select(
+            ".detailsStatsContainerRight .detailsStatRight, .screenshotDate"
+        ):
+            parsed = _parse_steam_date(date_elem.get_text(strip=True))
             if parsed:
                 screenshot.date_taken = parsed.isoformat()
+                break
 
         # File size
         stats = soup.select(".detailsStatRight")
@@ -823,7 +899,12 @@ class SteamScraper:
     # ── Image Download ───────────────────────────────────────────────────
 
     async def download_image(self, url: str) -> bytes | None:
-        """Download a screenshot image from the Steam CDN.
+        """Download a screenshot image from the Steam CDN."""
+        download = await self.download_file(url)
+        return download.data if download else None
+
+    async def download_file(self, url: str) -> SteamDownload | None:
+        """Download a screenshot and the name the Steam CDN has for it.
 
         Redirects are followed manually so every hop is checked against the CDN
         allowlist (the client's automatic redirects would bypass it). The body
@@ -838,14 +919,14 @@ class SteamScraper:
                 result = await self._download_once(url)
             except httpx.TransportError as e:
                 logger.warning("download_image: %s for %s", e, url[:100])
-                result = "retry"
-            if result != "retry":
+                result = _RETRY
+            if result is not _RETRY:
                 return result
             if attempt < MAX_RETRIES:
                 await asyncio.sleep(_retry_delay(None, attempt))
         return None
 
-    async def _download_once(self, url: str) -> bytes | None | str:
+    async def _download_once(self, url: str) -> SteamDownload | None | object:
         current = url
         for _ in range(MAX_REDIRECTS + 1):
             # SSRF defense: only allow known Steam CDN domains, on every hop.
@@ -865,7 +946,7 @@ class SteamScraper:
                     current = str(resp.url.join(location))
                     continue
                 if resp.status_code in RETRYABLE_STATUS:
-                    return "retry"
+                    return _RETRY
                 if resp.status_code != 200:
                     logger.warning(
                         "download_image: HTTP %d for %s", resp.status_code, current[:100]
@@ -875,6 +956,9 @@ class SteamScraper:
                 if declared.isdigit() and int(declared) > MAX_IMAGE_BYTES:
                     logger.warning("download_image: %s bytes exceeds the cap", declared)
                     return None
+                original_name = filename_from_content_disposition(
+                    resp.headers.get("content-disposition")
+                )
                 chunks = []
                 received = 0
                 async for chunk in resp.aiter_bytes():
@@ -889,6 +973,63 @@ class SteamScraper:
                     "download_image: response from %s is not an image", current[:100]
                 )
                 return None
-            return data
+            return SteamDownload(data=data, original_name=original_name)
         logger.warning("download_image: too many redirects for %s", url[:100])
+        return None
+
+    async def fetch_original_name(self, url: str) -> str | None:
+        """Ask the Steam CDN what a file is called, without downloading it.
+
+        Returns None when the CDN answers but has no name for the file. Raises
+        SteamFetchError when it could not be asked, so a caller can tell "there
+        is nothing to learn" from "try again later".
+        """
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                result = await self._name_once(url)
+            except httpx.TransportError as e:
+                logger.warning("fetch_original_name: %s for %s", e, url[:100])
+                result = _RETRY
+            if result is not _RETRY:
+                return result
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(_retry_delay(None, attempt))
+        raise SteamFetchError("The Steam CDN did not answer")
+
+    async def _name_once(self, url: str) -> str | None | object:
+        current = url
+        method = "HEAD"
+        for _ in range(MAX_REDIRECTS + 2):
+            if not _is_allowed_image_host(current):
+                logger.warning(
+                    "fetch_original_name: blocked URL with disallowed host %s",
+                    urlparse(current).hostname,
+                )
+                return None
+            # The response is closed as soon as its headers arrive, so the GET
+            # used where HEAD is refused never transfers the image.
+            async with self._client.stream(
+                method, current, timeout=30.0, follow_redirects=False
+            ) as resp:
+                if resp.is_redirect:
+                    location = resp.headers.get("location")
+                    if not location:
+                        return None
+                    current = str(resp.url.join(location))
+                    continue
+                if resp.status_code in RETRYABLE_STATUS:
+                    return _RETRY
+                if method == "HEAD" and resp.status_code in (403, 405, 501):
+                    method = "GET"
+                    continue
+                if resp.status_code != 200:
+                    return None
+                name = filename_from_content_disposition(
+                    resp.headers.get("content-disposition")
+                )
+                if name is None and method == "HEAD":
+                    # Some edges answer HEAD with fewer headers than GET.
+                    method = "GET"
+                    continue
+                return name
         return None

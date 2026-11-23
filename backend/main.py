@@ -25,6 +25,7 @@ from backend.database import close_db, database_session, init_db
 from backend.services.duplicate_service import resume_scan_job, stop_scan_job
 from backend.services.import_job_service import start_import_worker, stop_import_worker
 from backend.services.performance_diagnostics import MediaTimingMiddleware
+from backend.services.steam_capture_times import resume_repair_job, stop_repair_job
 from backend.version import APP_VERSION
 
 # ── Per-context Content-Security-Policy strings ──────────────────────────────
@@ -158,6 +159,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     await start_import_worker()
     await resume_scan_job()
+    await resume_repair_job()
 
     if settings.disable_auth:
         logger.warning(
@@ -172,6 +174,7 @@ async def lifespan(app: FastAPI):
         # Stop the worker before closing SQLite. Running jobs are requeued on startup.
         await stop_import_worker()
         await stop_scan_job()
+        await stop_repair_job()
         await close_db()
 
 

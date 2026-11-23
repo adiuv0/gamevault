@@ -7,6 +7,40 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-11-23
+
+Steam imports are now dated by when a screenshot was taken. Includes a database
+migration (`m018`): back up before updating.
+
+### Fixed
+
+- Steam imports used the time Steam *posted* a screenshot as the time it was
+  taken. Steam posts a play session, or several days of them, as one batch a
+  couple of seconds apart, so those screenshots all sat on the upload day:
+  several days of play under one date, with the timeline and game page
+  following the upload instead of the play. The importer now reads the real
+  capture time from the file name Steam keeps for each upload
+  (`YYYYMMDDHHMMSS_N.jpg`, in the local time of the PC that took it). It
+  falls back to the posted time only when Steam has no such name.
+- Libraries imported earlier are repaired without a click. After the update
+  the server asks Steam for the capture time of every screenshot it imported
+  before, in the background, for the profile of your last Steam import. Only
+  file names are requested; no image is downloaded again. Screenshots Steam
+  does not list publicly are repaired by running a Steam import again with
+  cookies: it now corrects the date of screenshots it already has and says
+  how many it corrected.
+- Without a Steam API key, the importer saved Steam's 200-pixel grid
+  thumbnail instead of the screenshot. Steam's current grid serves thumbnails
+  as separate files, and the importer took that address for the full image.
+  It now reads the screenshot's page for the real one, as it did for older
+  layouts. Thumbnails imported this way are not replaced automatically:
+  delete them and import again.
+
+### Changed
+
+- `screenshots.steam_posted_at` keeps the time Steam reported, so nothing is
+  lost when `taken_at` becomes the capture time.
+
 ## [1.2.2] - 2026-11-23
 
 Fixes for bugs found by an outside review of the code. No database migration.
