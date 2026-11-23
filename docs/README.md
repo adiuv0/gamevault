@@ -38,12 +38,21 @@ services/routers split, the image pipeline (with HDR specifics), Steam
 scraping mechanics, SSE patterns, frontend structure, Docker build, and
 known constraints. Read this before forking or contributing.
 
-[**REVIEW_FIXES_2026-09-21.md**](REVIEW_FIXES_2026-09-21.md) — review fixes,
-upload limits, preservation-first merges, and cache repair notes.
-
 [**MIGRATIONS.md**](MIGRATIONS.md) — supported database upgrade paths,
 verified live state backups, full-original backup boundaries, restoration,
 and conservative release rollback.
+
+## Dated records
+
+These describe the code as it was on the date in their name and are kept for
+history; the changelog and the docs above are current.
+
+[**REVIEW_FIXES_2026-09-21.md**](REVIEW_FIXES_2026-09-21.md) — review fixes,
+upload limits, preservation-first merges, and cache repair notes.
+
+[**SECURITY_AUDIT_2026-04-27.md**](SECURITY_AUDIT_2026-04-27.md) — the
+April 2026 security audit and its `GV-0xx` findings, referenced from code
+comments.
 
 ## For Special K users specifically
 
@@ -59,5 +68,6 @@ The relevant sections across the docs:
 ## Other resources
 
 - [Main README](../README.md) — installation, quick start, Docker / Unraid
-  setup
+  setup, updating
+- [CHANGELOG](../CHANGELOG.md) — what changed in each release
 - [`desktop/README.md`](../desktop/README.md) — GameVault Sync, the gaming-PC app

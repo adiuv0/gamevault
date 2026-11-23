@@ -1,10 +1,15 @@
 # GameVault
 
-Self-hosted game screenshot manager. Import your Steam screenshots, upload manually, annotate, search, and share — all from a dark, gaming-themed web UI built for Unraid.
+[![CI](https://github.com/adiuv0/gamevault/actions/workflows/ci.yml/badge.svg)](https://github.com/adiuv0/gamevault/actions/workflows/ci.yml)
+[![Docker Hub](https://img.shields.io/docker/v/adiuv0/gamevault?sort=semver&label=docker)](https://hub.docker.com/r/adiuv0/gamevault)
+
+Self-hosted game screenshot manager. Import your Steam screenshots, back up Steam and Special K captures from your gaming PC automatically, upload manually, annotate, search, and share — all from a dark, gaming-themed web UI built for Unraid.
+
+The current release is **1.2.3** ([changelog](CHANGELOG.md)). Updating? Read [Updating](#updating) first: several releases include one-way database migrations.
 
 ## Features
 
-- **Steam Import** — bulk-import screenshots from your Steam Community profile with live progress tracking
+- **Steam Import** — bulk-import screenshots from your Steam Community profile with live progress tracking, dated by when each screenshot was taken rather than when Steam uploaded it
 - **Special K & HDR** — imports Special K captures, and shows JPEG XR and 16-bit PNG HDR screenshots through tone-mapped thumbnails, previews and full-size renders
 - **One capture, several files** — Steam's JPG and Special K's JXR/PNG of the same moment are kept together as one capture, with a review queue for possible duplicates
 - **Manual Upload** — drag-and-drop upload with automatic thumbnail generation and EXIF metadata extraction
@@ -15,19 +20,21 @@ Self-hosted game screenshot manager. Import your Steam screenshots, upload manua
 - **Timeline View** — browse screenshots chronologically, grouped by day, with stats and a game filter
 - **Share Links** — generate public links with OpenGraph and Twitter Card meta tags for rich previews on Discord, Slack, etc.
 - **Public Gallery** — a read-only `/gallery` for visitors, showing the games you leave marked public (new games start public)
-- **Single-User Auth** — JWT-based authentication with password setup, change, and optional disable for LAN-only setups
+- **Single-User Auth** — JWT-based authentication with password setup, change, and optional disable for LAN-only setups; GameVault Sync signs in with its own revocable device token
 - **Metadata Cascade** — automatic game metadata fetching from Steam Store API, SteamGridDB, and IGDB
+- **Built for big libraries** — keyset-paginated, virtualized galleries; Timeline and Search stay in the milliseconds at 10,000 captures ([benchmark](docs/PERFORMANCE_BASELINE.md))
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
 | Backend | Python 3.12, FastAPI, aiosqlite (SQLite + WAL + FTS5) |
-| Frontend | React 19, TypeScript, Vite, Tailwind CSS v4, Zustand |
+| Frontend | React 19, TypeScript, Vite 7, Tailwind CSS v4, Zustand, react-virtuoso |
 | Image Processing | Pillow, imagecodecs (JPEG XR), NumPy |
 | Steam Scraping | httpx, BeautifulSoup4, lxml |
 | Auth | bcrypt, PyJWT |
-| Container | Multi-stage Docker (Node alpine + Python slim) |
+| Desktop app | Python, tkinter (sv-ttk), pystray, PyInstaller |
+| Container | Multi-stage Docker (Node 22 alpine + Python 3.12 slim) |
 
 ## Quick Start
 
@@ -99,13 +106,20 @@ These enable richer game metadata and cover art. Add them anytime from the Setti
 |----------|---------|-------------|
 | `GAMEVAULT_DISABLE_AUTH` | `false` | Disable password auth (LAN-only setups) |
 | `GAMEVAULT_IMPORT_RATE_LIMIT_MS` | `1000` | Delay between Steam requests during import |
+| `GAMEVAULT_IMPORT_CONCURRENCY` | `2` | Images decoded at once per imported game (1-16); each large JXR needs about 200 MB while decoding |
 | `GAMEVAULT_MAX_UPLOAD_SIZE_MB` | `512` | Per-file upload limit in MiB, including HDR originals |
 | `GAMEVAULT_MAX_UPLOAD_BATCH_SIZE_MB` | `8192` | Whole multipart request limit in MiB |
 | `GAMEVAULT_MAX_UPLOAD_FILES` | `200` | Maximum files in one upload batch |
 | `GAMEVAULT_THUMBNAIL_QUALITY` | `85` | JPEG quality for thumbnails (1-100) |
+| `GAMEVAULT_PREVIEW_MAX_WIDTH` | `1920` | Width of the viewer's preview image (800-7680); originals are untouched |
 | `GAMEVAULT_THUMBNAIL_DIR` | `/data/cache/thumbnails` | Fast local storage for generated thumbnails |
-| `GAMEVAULT_TOKEN_EXPIRY_DAYS` | `30` | Login token lifetime |
+| `GAMEVAULT_TOKEN_EXPIRY_DAYS` | `30` | Browser login token lifetime |
+| `GAMEVAULT_CORS_ORIGINS` | empty | Extra allowed origins, comma-separated, if the UI is served from another host |
+| `GAMEVAULT_SPECIALK_ALLOWED_ROOTS` | empty | Folders the server-side Special K importer may scan; required when auth is disabled |
+| `GAMEVAULT_FORCE_CHOWN` | `false` | Re-own every file under `/data` on start (only needed after copying files in as root) |
 | `TZ` | `UTC` | Container timezone |
+
+Every variable, plus the preferences stored in the database, is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## Volumes
 
@@ -130,15 +144,29 @@ move legacy thumbnails there from **Settings > Library Stats > Migrate thumbnail
 1. Go to **Docker** tab in the Unraid web UI
 2. Click **Add Container**
 3. Set **Repository** to `adiuv0/gamevault:latest`
-4. Use the included `unraid-template.xml` or manually configure:
-   - **Port**: 8080
+4. Use the included [`unraid-template.xml`](unraid-template.xml) or manually configure:
+   - **Port**: 8080 (pick another host port, such as 8088, if another container already uses 8080)
    - **App Data**: `/mnt/user/appdata/gamevault` -> `/data`
    - **Library**: `/mnt/user/screenshots/gamevault` -> `/data/library`
    - **Secret Key**: your generated key
-   - **Base URL**: your server address
+   - **Base URL**: the address you open GameVault at, including the host port (for example `http://192.168.1.100:8088`); share links are built from it
 5. Click **Apply**
 
-All API keys and tuning parameters are available as fields in the Unraid Docker UI when using the template.
+All API keys and tuning parameters are available as fields in the Unraid Docker UI when using the template (tuning fields sit under **Show more settings**).
+
+## Updating
+
+`:latest` always points at the newest release, so on Unraid an update is **Force Update** on the container. Before updating across a release with a database migration (1.1.0, 1.2.0 and 1.2.3 have one-way migrations), take a backup:
+
+```bash
+docker exec gamevault python -m backend.backup create /data/backups
+```
+
+Migrations run by themselves at startup; some follow-up work (regrouping captures in 1.2.0, correcting Steam capture dates in 1.2.3) continues in the background. After updating to 1.2.0 or later from an older release, run **Settings > Repair image cache** once so JPEG XR and TIFF captures get full-size renders. [docs/MIGRATIONS.md](docs/MIGRATIONS.md) lists every supported upgrade path and how to roll back.
+
+## GameVault Sync
+
+GameVault Sync is a small Windows tray app for the gaming PC. It finds Steam and Special K screenshot folders on its own, uploads new captures (newest first) and never re-sends a file it already synced, so deleting a screenshot in GameVault sticks. Download `GameVaultSync-Setup.exe` (or the portable `GameVaultSync.exe`) from the [latest release](https://github.com/adiuv0/gamevault/releases/latest), run it, and sign in with your GameVault address and password. See [desktop/README.md](desktop/README.md) for details.
 
 ## Steam Import
 
@@ -151,6 +179,7 @@ The Steam Import wizard walks you through 3 steps:
 The importer handles:
 - Rate limiting (configurable, default 1 req/sec)
 - Duplicate detection by Steam screenshot ID and file hash
+- Capture dates read from Steam's original file names (posted dates only as a fallback)
 - Mature content gates
 - Import cancellation
 - Automatic thumbnail generation
@@ -212,13 +241,21 @@ pulls the new image.
 ```bash
 pip install -e ".[dev]"
 
-# Main test suite
-python -m pytest tests/ -v
+# Main test suite (about 400 tests)
+python -m pytest tests/ -q
 
-# Legacy standalone tests
-python tests/test_phase4_steam_import.py   # 66 tests — Steam import pipeline
-python tests/test_phase5_metadata_timeline.py  # 52 tests — metadata & timeline
+# Legacy standalone scripts, kept out of pytest collection
+python tests/test_phase4_steam_import.py
+python tests/test_phase5_metadata_timeline.py
+
+# Desktop app
+cd desktop && pip install -r requirements.txt pytest && python -m pytest -q
+
+# Frontend lint, build and browser tests
+cd frontend && npm ci && npm run lint && npm run build && npm run test:e2e
 ```
+
+CI runs all of these on every pull request, along with `pip-audit`, `npm audit` and a Trivy scan of the Docker image.
 
 ## Documentation
 
@@ -229,8 +266,9 @@ Reference docs live in [docs/](docs/README.md):
 - [Configuration](docs/CONFIGURATION.md) — env vars, DB-stored preferences, backups
 - [API Reference](docs/API_REFERENCE.md) — every REST endpoint
 - [Architecture](docs/ARCHITECTURE.md) — how the code is organized
-- [Review fixes](docs/REVIEW_FIXES_2026-09-21.md) — upgrade notes and upload limits
+- [Migrations and recovery](docs/MIGRATIONS.md) — upgrade paths, backups, rollback
+- [GameVault Sync](desktop/README.md) — the Windows tray app
 
 ## License
 
-MIT
+[MIT](LICENSE)
