@@ -109,7 +109,7 @@ Revokes one device. Its next request gets 401 and the app asks to sign in again.
 
 ### `GET /api/health` — *public*
 
-Returns `{ "status": "ok", "version": "1.2.2" }`, plus `instance`, a random id
+Returns `{ "status": "ok", "version": "1.2.3" }`, plus `instance`, a random id
 created once per database. GameVault Sync uses it to tell servers apart: the
 same server under another address keeps the app's memory of what it uploaded,
 and a different server at the same address starts fresh. Used by Docker
@@ -429,11 +429,11 @@ terminal summary followed by `done`, including after an application restart.
 | `games_discovered` | `{ total_games, total_screenshots, games: [...] }` |
 | `game_start` | `{ app_id, name, game_index, total_games }` |
 | `screenshot_complete` | `{ steam_id, filename, game_name, index, total_for_game, overall_progress, total_screenshots }` |
-| `screenshot_skipped` | `{ steam_id, reason, game_name, ... }` |
+| `screenshot_skipped` | `{ steam_id, reason, date_fixed, game_name, ... }` — `date_fixed` is true when an already imported screenshot's capture time was corrected |
 | `screenshot_failed` | `{ steam_id, error, game_name }` |
 | `game_complete` | `{ app_id, name, completed, skipped, failed, overall_completed, overall_skipped, overall_failed, total_screenshots }` |
 | `game_error` | `{ app_id, name, error }` |
-| `import_complete` | `{ session_id, completed, skipped, failed, total_games }` |
+| `import_complete` | `{ session_id, completed, skipped, failed, dates_fixed, total_games }` |
 | `import_error` | `{ error }` |
 | `import_cancelled` | `{ session_id }` |
 | `done` | `{}` — terminal event; close the EventSource |

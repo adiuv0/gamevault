@@ -60,6 +60,7 @@ from backend.services.steam_import_service import (
     update_import_session,
 )
 from backend.services.steam_scraper import (
+    SteamDownload,
     SteamGameScreenshots,
     SteamProfile,
     SteamScraper,
@@ -219,9 +220,9 @@ async def test_full_import_pipeline():
         async def mock_download(url):
             nonlocal call_count
             call_count += 1
-            return test_image_data if call_count == 1 else test_image_data_2
+            return SteamDownload(test_image_data if call_count == 1 else test_image_data_2)
 
-        mock_scraper.download_image = AsyncMock(side_effect=mock_download)
+        mock_scraper.download_file = AsyncMock(side_effect=mock_download)
 
         with patch.object(SteamScraper, '__aexit__', return_value=AsyncMock()):
             # Run import + collect events concurrently
@@ -345,7 +346,7 @@ async def test_reimport_skips_duplicates():
         mock_scraper.discover_games = AsyncMock(return_value=[mock_game])
         mock_scraper.get_game_screenshots = AsyncMock(return_value=mock_screenshots)
         mock_scraper.get_screenshot_details = AsyncMock(side_effect=lambda s: s)
-        mock_scraper.download_image = AsyncMock(return_value=test_image_data)
+        mock_scraper.download_file = AsyncMock(return_value=SteamDownload(test_image_data))
 
         with patch.object(SteamScraper, '__aexit__', return_value=AsyncMock()):
             await asyncio.gather(
@@ -422,7 +423,7 @@ async def test_cancel_import():
         mock_scraper.discover_games = AsyncMock(return_value=mock_games)
         mock_scraper.get_game_screenshots = AsyncMock(return_value=mock_screenshots)
         mock_scraper.get_screenshot_details = AsyncMock(side_effect=lambda s: s)
-        mock_scraper.download_image = AsyncMock(return_value=test_image)
+        mock_scraper.download_file = AsyncMock(return_value=SteamDownload(test_image))
 
         with patch.object(SteamScraper, '__aexit__', return_value=AsyncMock()):
             await asyncio.gather(
@@ -493,7 +494,7 @@ async def test_import_with_game_filter():
         mock_scraper.discover_games = AsyncMock(return_value=mock_games)
         mock_scraper.get_game_screenshots = AsyncMock(return_value=mock_screenshots_tf2)
         mock_scraper.get_screenshot_details = AsyncMock(side_effect=lambda s: s)
-        mock_scraper.download_image = AsyncMock(return_value=test_image)
+        mock_scraper.download_file = AsyncMock(return_value=SteamDownload(test_image))
 
         with patch.object(SteamScraper, '__aexit__', return_value=AsyncMock()):
             # Only import TF2 (app_id=440)

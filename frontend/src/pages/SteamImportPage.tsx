@@ -35,6 +35,8 @@ interface ImportResult {
   completed: number;
   skipped: number;
   failed: number;
+  /** Already imported screenshots whose capture date this run corrected. */
+  datesFixed?: number;
   totalGames: number;
   status: 'completed' | 'failed' | 'cancelled';
   error?: string;
@@ -319,6 +321,7 @@ export function SteamImportPage() {
           completed: d.completed as number || 0,
           skipped: d.skipped as number || 0,
           failed: d.failed as number || 0,
+          datesFixed: d.dates_fixed as number || 0,
           totalGames: d.total_games as number || 0,
           status: 'completed',
         });
@@ -863,6 +866,12 @@ export function SteamImportPage() {
                 <p className="text-xs text-text-muted">Failed</p>
               </div>
             </div>
+            {Boolean(importResult.datesFixed) && (
+              <p className="text-sm text-text-secondary mt-4">
+                Corrected the capture date of {importResult.datesFixed} screenshot
+                {importResult.datesFixed === 1 ? '' : 's'} already in your library.
+              </p>
+            )}
           </div>
 
           <div className="flex items-center gap-3">

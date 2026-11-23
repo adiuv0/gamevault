@@ -220,6 +220,15 @@ any time — already-imported screenshots are kept; the rest are abandoned.
 its Steam ID or its content hash matches an existing entry — this means
 re-running the importer is safe and idempotent.
 
+**Capture dates.** Steam only reports when a screenshot was *posted*, and it
+posts a play session (or several days of them) in one go. GameVault reads
+the real capture time from the file name Steam keeps for each screenshot,
+so imports land on the day and in the order you took them. Screenshots
+imported before 1.2.3 carried the posted time; the server corrects them in
+the background after the update, and running the importer again corrects
+any it could not reach (for example private screenshots, which need
+cookies). The summary shows how many dates a run corrected.
+
 **Cookie expiration.** If cookies expire mid-import, you'll see auth
 errors in the per-game progress and the import will continue with whatever
 games it can still reach. Re-extract cookies and run the importer again to

@@ -20,13 +20,18 @@ from backend.services.metadata_service import fetch_and_apply_metadata
 from backend.services.performance_diagnostics import measure_async
 from backend.services.screenshot_service import (
     claim_unless_duplicate,
-    check_duplicate_steam_id,
     create_screenshot,
+)
+from backend.services.steam_capture_times import (
+    format_capture_time,
+    get_steam_screenshot,
+    repair_existing,
 )
 from backend.services.steam_scraper import (
     SteamGameScreenshots,
     SteamScraper,
     SteamScreenshot,
+    capture_time_from_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,6 +41,8 @@ logger = logging.getLogger(__name__)
 
 _progress_queues: dict[int, asyncio.Queue] = {}
 _cancel_flags: dict[int, bool] = {}
+# Already imported screenshots whose capture time an import corrected, per session.
+_dates_fixed: dict[int, int] = {}
 _QUEUE_LIMIT = 1000
 
 
@@ -304,6 +311,7 @@ async def run_import(
                 "completed": overall_completed,
                 "skipped": overall_skipped,
                 "failed": overall_failed,
+                "dates_fixed": _dates_fixed.get(session_id, 0),
                 "total_games": len(all_games),
             })
 
@@ -314,6 +322,7 @@ async def run_import(
         # Send a terminal event so SSE listeners know to disconnect
         await emit_progress(session_id, "done", {})
         _cancel_flags.pop(session_id, None)
+        _dates_fixed.pop(session_id, None)
 
 
 async def _fail_import(session_id: int, error: str) -> None:
@@ -489,10 +498,20 @@ async def _import_claimed_screenshot(
     )
 
     # Check if already imported (by Steam ID)
-    if await check_duplicate_steam_id(steam_id):
+    existing = await get_steam_screenshot(steam_id)
+    if existing:
+        # Earlier versions stored the time Steam posted the screenshot. Meeting
+        # it again is the chance to ask Steam when it was really taken.
+        date_fixed = await repair_existing(scraper, screenshot, existing)
+        if date_fixed:
+            _dates_fixed[session_id] = _dates_fixed.get(session_id, 0) + 1
+            if existing["game_id"] != game_id:
+                # Moved by a merge: the game being imported recalculates its own.
+                await update_screenshot_stats(existing["game_id"])
         await emit_progress(session_id, "screenshot_skipped", {
             "steam_id": steam_id,
             "reason": "already_imported",
+            "date_fixed": date_fixed,
             "game_name": game_name,
             "index": index,
             "total_for_game": total_for_game,
@@ -522,14 +541,21 @@ async def _import_claimed_screenshot(
         return "failed"
 
     # Download the image
-    image_data = await scraper.download_image(image_url)
-    if not image_data:
+    download = await scraper.download_file(image_url)
+    if not download:
         await emit_progress(session_id, "screenshot_failed", {
             "steam_id": steam_id,
             "error": "Download failed",
             "game_name": game_name,
         })
         return "failed"
+    image_data = download.data
+    # Steam's own name for the file says when it was taken; the API listing
+    # sometimes carries it too.
+    posted_at = screenshot.date_taken
+    captured = capture_time_from_name(download.original_name, posted_at) or (
+        capture_time_from_name(screenshot.original_name, posted_at)
+    )
 
     # Check duplicate by hash (hashing multi-MB bodies stays off the event loop)
     sha256 = await asyncio.to_thread(compute_sha256_bytes, image_data)
@@ -551,6 +577,7 @@ async def _import_claimed_screenshot(
             session_id, screenshot, image_url, image_data, sha256, game_id,
             game_folder, game_name, index, total_for_game, overall_completed,
             total_screenshots,
+            taken_at=format_capture_time(captured) if captured else posted_at,
         )
     finally:
         claimed.discard(hash_key)
@@ -569,8 +596,11 @@ async def _store_screenshot(
     total_for_game: int,
     overall_completed: int,
     total_screenshots: int,
+    taken_at: str | None = None,
 ) -> str:
     steam_id = screenshot.screenshot_id
+    if taken_at is None:
+        taken_at = screenshot.date_taken
     # Save to disk
     # Generate filename: steam_<id>.<ext>
     ext = _guess_extension(image_url, image_data)
@@ -599,9 +629,6 @@ async def _store_screenshot(
     thumb_sm, thumb_md = info["thumbnail_path_sm"], info["thumbnail_path_md"]
     preview, perceptual_hash = info["preview_path"], info["perceptual_hash"]
 
-    # Parse date from scraper
-    taken_at = screenshot.date_taken  # already ISO string or None
-
     # Relative path for DB
     rel_path = f"{game_folder}/screenshots/{filename}"
 
@@ -620,6 +647,8 @@ async def _store_screenshot(
         format=fmt,
         file_size=file_size,
         taken_at=taken_at,
+        # Never NULL here: NULL marks rows whose capture time was not looked up.
+        steam_posted_at=screenshot.date_taken or "",
         thumbnail_path_sm=thumb_sm,
         thumbnail_path_md=thumb_md,
         preview_path=preview,
