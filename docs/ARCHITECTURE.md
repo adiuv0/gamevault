@@ -17,10 +17,12 @@ configuration, see [CONFIGURATION.md](CONFIGURATION.md).
 | HTTP client | httpx (async) |
 | HTML parsing | BeautifulSoup + lxml |
 | Auth | bcrypt + PyJWT |
-| Frontend | React 19 + TypeScript + Vite |
+| Frontend | React 19 + TypeScript + Vite 7 |
 | Styling | Tailwind CSS v4 |
 | State | Zustand stores |
-| Routing | react-router-dom |
+| Routing | react-router-dom 7 |
+| Virtualized grids | react-virtuoso |
+| Desktop app | tkinter (sv-ttk) + pystray, PyInstaller + Inno Setup |
 | Container | Multi-stage Docker (node:22-alpine + python:3.12-slim) |
 
 ---
@@ -34,7 +36,8 @@ gamevault/
 │   ├── auth.py                 # bcrypt hashing, JWT encoding, require_auth dependency
 │   ├── config.py               # Settings (pydantic-settings) singleton
 │   ├── database.py             # aiosqlite connection management
-│   ├── migrations/             # Schema migrations + runner
+│   ├── migrations/             # Schema migrations (m001-m018) + runner
+│   ├── version.py              # APP_VERSION, the single backend version source
 │   ├── models/                 # Pydantic request/response models
 │   ├── routers/                # FastAPI routers (one per feature)
 │   └── services/               # Domain logic — DB writes, file I/O, external APIs
@@ -54,6 +57,8 @@ gamevault/
 ├── cli/
 │   └── gamevault_sync.py       # Old entry point; starts the desktop app
 ├── tests/                      # pytest suites
+├── benchmarks/                 # Large-library gallery benchmark
+├── .github/workflows/          # ci, docker-publish, desktop
 ├── docs/                       # This documentation set
 ├── Dockerfile                  # Multi-stage build
 ├── docker-compose.yml          # Example deployment
@@ -362,6 +367,10 @@ JavaScript, no external assets except the screenshot itself.
 - `/gallery/*` — public gallery, wrapped in `GalleryShell`, no auth
 - everything else — wrapped in `AuthGate` then `AppShell` (sidebar + top bar)
 
+Both shells wrap their routes in `RouteErrorBoundary`, so a render error or a
+stale lazy-loaded chunk after a container update shows a reload prompt instead
+of a blank page. Unknown paths get a 404 page.
+
 The auth gate redirects to `/login` if there's no token, or to `/setup`
 if no password has been created.
 
@@ -513,24 +522,55 @@ python -m pytest tests/ -v
 backend module imports, redirecting paths to a `tempfile.mkdtemp()`
 directory and disabling auth so tests can hit endpoints freely.
 
-Test files:
+Test files, roughly by area:
 
-- [`test_core_services.py`](../tests/test_core_services.py) — DB init,
-  schema, FTS, filesystem, image processing, auth, search, timeline
-- [`test_steam_parsers.py`](../tests/test_steam_parsers.py) — Steam HTML
-  parsing + URL building (uses HTML fixtures)
+- **Core** — [`test_core_services.py`](../tests/test_core_services.py)
+  (DB init, schema, FTS, filesystem, image processing, auth, search,
+  timeline), [`test_phase6_share_settings.py`](../tests/test_phase6_share_settings.py)
+- **Steam** — [`test_steam_parsers.py`](../tests/test_steam_parsers.py)
+  (HTML fixtures), [`test_steam_capture_times.py`](../tests/test_steam_capture_times.py)
+- **HDR and images** — `test_specialk_hdr.py`, `test_full_render.py`,
+  `test_preview_cache.py`, `test_tone_map_cache.py`
+- **Captures and duplicates** — `test_capture_primary.py`,
+  `test_duplicate_review.py`, `test_game_merge.py`
+- **Imports and uploads** — `test_durable_import_jobs.py`,
+  `test_durable_upload_jobs.py`, `test_import_hardening.py`
+- **Performance** — `test_performance_foundation.py`,
+  `test_performance_diagnostics.py`, `test_cursor_pagination.py`,
+  `test_large_library_benchmark.py`
+- **Security** — `test_security_phase1.py` to `phase3`, `test_device_tokens.py`
+- **Releases** — [`test_release_recovery.py`](../tests/test_release_recovery.py)
+  upgrades a fixture database from every shipped release
+  (`SUPPORTED_RELEASE_SCHEMAS`) and checks that every version surface agrees;
+  `test_audit_regressions.py`, `test_review_regressions.py` and
+  `test_release_1_2_2.py` pin fixed bugs.
 - [`test_phase4_steam_import.py`](../tests/test_phase4_steam_import.py),
   [`test_phase5_metadata_timeline.py`](../tests/test_phase5_metadata_timeline.py)
-  — legacy standalone runners (excluded from pytest collection — run
-  directly with `python tests/test_phaseN_*.py`)
-- [`test_phase6_share_settings.py`](../tests/test_phase6_share_settings.py)
-  — share + settings integration
-- [`test_specialk_hdr.py`](../tests/test_specialk_hdr.py) — HDR
-  detection, tone-map algorithms, sRGB encoding, name cleaning, scanner
-  behaviour
+  — legacy standalone runners, excluded from pytest collection; run them
+  with `python tests/test_phaseN_*.py`.
 
-Run `pytest -q` for the current count (about 440 as of 1.2.3), plus the
-legacy phase4/5 standalone scripts, which CI runs separately.
+`pytest -q` runs about 400 tests. The desktop app has its own suite in
+`desktop/tests`, and the frontend has Playwright tests in `frontend/e2e`.
+CI ([`ci.yml`](../.github/workflows/ci.yml)) runs all of them plus
+`pip-audit`, `npm audit`, lint, and a Trivy scan of the built image.
+
+---
+
+## Releases
+
+The version lives in `backend/version.py`, `pyproject.toml`, and
+`frontend/package.json` / `package-lock.json` (the sidebar reads it from
+`package.json` at build time). A test fails if they disagree, if
+`CHANGELOG.md` has no heading for the version, or if the health example in
+`API_REFERENCE.md` is stale. A release that adds a migration also adds the
+previous version to `SUPPORTED_RELEASE_SCHEMAS`.
+
+[`docker-publish.yml`](../.github/workflows/docker-publish.yml) runs after CI
+passes on `main` and pushes `adiuv0/gamevault:latest` and `:sha-<commit>`,
+plus `:<version>` the first time a version ships.
+[`desktop.yml`](../.github/workflows/desktop.yml) builds GameVault Sync on
+Windows and, for `v*` tags, attaches the installer and portable exe to the
+GitHub release.
 
 ---
 
@@ -541,14 +581,17 @@ Multi-stage:
 1. **`frontend-builder`** — `node:22-alpine`, runs `npm ci` then `npm run
    build`, leaves the built SPA in `frontend/dist/`.
 2. **Production image** — `python:3.12-slim`, installs system libs
-   (`libjpeg62-turbo`, `libpng-dev`, `libwebp-dev`, `libxml2-dev`,
+   (`libjpeg62-turbo-dev`, `libpng-dev`, `libwebp-dev`, `libxml2-dev`,
    `libxslt1-dev`, `gosu`), pip-installs from `requirements.txt`, copies
    the backend code and the built frontend, creates a non-root
    `gamevault` user.
 
-`entrypoint.sh` runs as root, `chown -R`s `/data` to the gamevault user
-(needed for mounted volumes that come in owned by some other UID), then
-`exec gosu gamevault "$@"`.
+`entrypoint.sh` runs as root, makes sure `/data` and `/data/library` belong
+to the gamevault user, then `exec gosu gamevault "$@"`. The recursive
+`chown -R /data` only runs when those top-level folders are not owned yet
+(first start, or a volume copied in as another user) or when
+`GAMEVAULT_FORCE_CHOWN=true`, because walking every library file spins up
+Unraid's array disks on each start.
 
 The `imagecodecs` wheel (~50–150 MB) is the heaviest dependency — bundles
 its own native libs so no apt packages are needed for it. Rest of Pillow

@@ -7,6 +7,15 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+### Documentation
+
+- README, architecture notes and the Unraid template brought up to date with
+  1.2.3: every environment variable is listed (the template gains import
+  concurrency, upload batch limits, preview width, Special K folders, CORS
+  origins and Force Ownership Fix), an Updating section explains backups
+  before one-way migrations, and GameVault Sync downloads point at releases.
+  Added the MIT `LICENSE` file the README already referred to.
+
 ## [1.2.3] - 2026-11-23
 
 Steam imports are now dated by when a screenshot was taken. Includes a database
