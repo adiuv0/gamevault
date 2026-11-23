@@ -4,6 +4,8 @@ export interface Game {
   folder_name: string;
   steam_app_id: number | null;
   cover_image_path: string | null;
+  /** Public gallery only: set when the game has a cover. */
+  cover_version?: string | null;
   developer: string | null;
   publisher: string | null;
   release_date: string | null;
@@ -27,7 +29,7 @@ export interface ScreenshotVariant {
   format: string | null;
   taken_at: string | null;
   uploaded_at: string;
-  source?: 'upload' | 'steam_import' | 'steam_local';
+  source?: 'upload' | 'steam_import' | 'steam_local' | 'specialk_import';
   is_favorite?: boolean;
   has_annotation?: boolean;
 }
@@ -65,7 +67,7 @@ export interface Screenshot extends PublicScreenshot {
   thumbnail_path_md: string | null;
   steam_screenshot_id: string | null;
   steam_description: string | null;
-  source: 'upload' | 'steam_import' | 'steam_local';
+  source: 'upload' | 'steam_import' | 'steam_local' | 'specialk_import';
   is_favorite: boolean;
   view_count: number;
   exif_data: string | null;

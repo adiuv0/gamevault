@@ -91,3 +91,25 @@ test('ungroup applies to the selected HDR variant', async ({ page }) => {
   await expect(page.getByTitle('Close (Esc)')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: game.name })).toBeVisible();
 });
+
+test('public gallery shows game covers and an unknown page shows not found', async ({ page }) => {
+  await page.route('**/api/gallery/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/cover')) return route.fulfill({ contentType: 'image/png', body: pixel });
+    if (path === '/api/gallery/games') {
+      return route.fulfill({ json: { total: 2, games: [
+        { id: 1, name: 'With Cover', screenshot_count: 3, cover_version: 'abc123' },
+        { id: 2, name: 'No Cover', screenshot_count: 1, cover_version: null },
+      ] } });
+    }
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/gallery');
+  const cover = page.getByRole('img', { name: 'With Cover' });
+  await expect(cover).toBeVisible();
+  await expect(cover).toHaveAttribute('src', /\/api\/gallery\/games\/1\/cover\?v=abc123$/);
+  await expect(page.getByRole('img', { name: 'No Cover' })).toHaveCount(0);
+
+  await page.goto('/gallery/nowhere');
+  await expect(page.getByText('Page not found')).toBeVisible();
+});

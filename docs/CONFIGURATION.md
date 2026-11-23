@@ -68,6 +68,7 @@ take precedence over env vars.
 | `GAMEVAULT_PREVIEW_MAX_WIDTH` | `1920` | Maximum width of the browser viewer derivative (800-7680). Originals are unaffected. |
 | `GAMEVAULT_CORS_ORIGINS` | `""` | Comma-separated list of additional origins beyond the localhost defaults. Required if you serve the frontend from a different host than the backend. |
 | `GAMEVAULT_SPECIALK_ALLOWED_ROOTS` | `""` | Comma-separated absolute paths the Special K importer is allowed to scan. **Required when `GAMEVAULT_DISABLE_AUTH=true`** — otherwise the endpoint refuses with HTTP 403. When auth is enabled, an empty value falls back to "any path" for backward compatibility. See [Special K import safety](#special-k-import-safety) below. |
+| `GAMEVAULT_FORCE_CHOWN` | `false` | `true` re-owns every file under `/data` on start. Normally only needed after copying files into the library as root; see [Entrypoint behavior](#entrypoint-behavior). |
 | `TZ` | `UTC` | Container timezone. Affects timestamps in logs and the `taken_at` displayed in the UI. |
 
 ### Auto-managed
@@ -325,20 +326,24 @@ public deployments lean on the proxy.
 
 ## Entrypoint behavior
 
-[`entrypoint.sh`](../entrypoint.sh) runs as root on container start, then
-`chown -R gamevault:gamevault /data` before dropping to the `gamevault`
-user via `gosu`. This is what makes mounted volumes (which arrive owned
-by the host user, often UID 99 on Unraid) writable inside the container.
+[`entrypoint.sh`](../entrypoint.sh) runs as root on container start, makes
+`/data` writable for the `gamevault` user, then drops to that user via
+`gosu`. Mounted volumes arrive owned by the host user (often UID 99 on
+Unraid), so ownership has to be fixed once.
 
-**Side effects:**
+Since 1.2.2 the full `chown -R gamevault:gamevault /data` runs only when
+`/data` or `/data/library` itself isn't owned by `gamevault` yet (first
+start, or a volume copied in as another user). Otherwise only top-level
+folders under `/data` that aren't ours are fixed. Earlier versions walked
+every file on every start, which was slow for large libraries and woke up
+Unraid's array disks.
 
-- Slow on startup for large libraries (every file is touched). Containers
-  with millions of screenshots may take tens of seconds to start.
-- The chown is recursive — bind-mounting unrelated directories under
-  `/data` will rewrite their ownership. Mount only what GameVault needs.
-- If you're certain your volume's ownership already matches, you can
-  skip the chown by overriding the entrypoint or running with
-  `--user gamevault:gamevault` directly.
+**Notes:**
+
+- Set `GAMEVAULT_FORCE_CHOWN=true` to force the full recursive pass, for
+  example after copying files into the library as root.
+- The chown is recursive when it runs: bind-mounting unrelated directories
+  under `/data` will rewrite their ownership. Mount only what GameVault needs.
 
 ---
 

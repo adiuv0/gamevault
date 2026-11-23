@@ -4,6 +4,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import { AuthGate } from '@/components/layout/AuthGate';
 import { GalleryShell } from '@/components/layout/GalleryShell';
 import { LibraryPage } from '@/pages/LibraryPage';
+import { NotFoundPage } from '@/pages/NotFoundPage';
 
 // Each page is its own chunk: opening the library or a public gallery link no
 // longer downloads the import, upload, settings, and duplicate-review screens.
@@ -26,6 +27,7 @@ function App() {
         <Route path="/gallery" element={<GalleryShell />}>
           <Route index element={<GalleryHomePage />} />
           <Route path="games/:id" element={<GalleryGamePage />} />
+          <Route path="*" element={<NotFoundPage home="/gallery" />} />
         </Route>
 
         {/* Admin UI — requires auth */}
@@ -45,6 +47,7 @@ function App() {
           <Route path="/search" element={<SearchPage />} />
           <Route path="/duplicates" element={<DuplicateReviewPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

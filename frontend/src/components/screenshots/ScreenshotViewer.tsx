@@ -566,6 +566,7 @@ export function ScreenshotViewer({
                   <InfoRow label="Source" value={
                     activeVariant.source === 'steam_import' ? 'Steam Import'
                     : activeVariant.source === 'steam_local' ? 'Steam Local'
+                    : activeVariant.source === 'specialk_import' ? 'Special K Import'
                     : 'Upload'
                   } />
                   {screenshot.steam_description && (

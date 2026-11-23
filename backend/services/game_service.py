@@ -306,8 +306,14 @@ async def merge_games(source_id: int, target_id: int) -> dict:
         await db.execute("UPDATE game_redirects SET target_id = ? WHERE target_id = ?", (target_id, source_id))
         await db.execute("INSERT INTO game_redirects VALUES (?, ?)", (source_id, target_id))
         if not target.get("cover_image_path") and source.get("cover_image_path"):
-            await db.execute("UPDATE games SET cover_image_path = ? WHERE id = ?",
-                             (source["cover_image_path"], target_id))
+            await db.execute(
+                "UPDATE games SET cover_image_path = ?, updated_at = datetime('now') WHERE id = ?",
+                (source["cover_image_path"], target_id),
+            )
+        # Keep the Steam app ID, or the next Steam import recreates the source game.
+        if not target.get("steam_app_id") and source.get("steam_app_id"):
+            await db.execute("UPDATE games SET steam_app_id = ? WHERE id = ?",
+                             (source["steam_app_id"], target_id))
         for screenshot_id in ids:
             await _sync_fts(screenshot_id, commit=False)
         await update_screenshot_stats(target_id, commit=False)

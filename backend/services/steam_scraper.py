@@ -10,7 +10,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -151,7 +151,7 @@ def _get_profile_url(user_id: str, is_numeric: bool = False) -> str:
     """Build the Steam profile URL."""
     if is_numeric or user_id.isdigit():
         return f"{STEAM_COMMUNITY_URL}/profiles/{user_id}"
-    return f"{STEAM_COMMUNITY_URL}/id/{user_id}"
+    return f"{STEAM_COMMUNITY_URL}/id/{quote(user_id, safe='')}"
 
 
 def _parse_steam_date(date_str: str) -> datetime | None:
@@ -209,9 +209,15 @@ class SteamScraper:
         self._steam64_id: str | None = user_id if self.is_numeric else None
 
     async def __aenter__(self):
+        # A plain dict would send steamLoginSecure to every host this client
+        # talks to (the Web API and the image CDNs too). Scope it to the
+        # community site, the only host that needs it.
+        jar = httpx.Cookies()
+        for name, value in self.cookies.items():
+            jar.set(name, value, domain="steamcommunity.com")
         self._client = httpx.AsyncClient(
             headers={"User-Agent": USER_AGENT},
-            cookies=self.cookies,
+            cookies=jar,
             follow_redirects=True,
             timeout=30.0,
         )
@@ -310,7 +316,7 @@ class SteamScraper:
             try:
                 url = (
                     f"{STEAM_API_URL}/ISteamUser/ResolveVanityURL/v1/"
-                    f"?key={self.api_key}&vanityurl={self.user_id}"
+                    f"?key={quote(self.api_key, safe='')}&vanityurl={quote(self.user_id, safe='')}"
                 )
                 resp = await self._get(url, rate_limit=False)
                 if resp.status_code == 200:

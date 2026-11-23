@@ -174,6 +174,19 @@ export function UploadPage() {
           setIsUploading(false);
           es.close();
         }
+      }, () => {
+        // While CONNECTING the browser retries by itself, and the server replays
+        // a snapshot on reconnect. CLOSED means it gave up (401, 404, ...):
+        // stop waiting instead of showing "processing" forever.
+        if (es.readyState !== EventSource.CLOSED) return;
+        setUploadItems((prev) =>
+          prev.map((item) =>
+            item.status === 'uploading' || item.status === 'processing'
+              ? { ...item, status: 'error' as const, error: 'Lost contact with the server. Check the game page; the upload may still finish.' }
+              : item,
+          ),
+        );
+        setIsUploading(false);
       });
       progressStream.current = es;
     } catch (error) {

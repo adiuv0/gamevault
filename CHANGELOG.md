@@ -7,6 +7,66 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-23
+
+Fixes for bugs found by an outside review of the code. No database migration.
+
+### Fixed
+
+- The public gallery never showed game covers: it only drew a cover when the
+  game's cover path was present, and the public API deliberately leaves that
+  path out. Public games now carry an opaque `cover_version`, which the gallery
+  also adds to the cover's address so a replaced cover isn't served stale.
+- Merging a game that came from a Steam import into another game dropped its
+  Steam app ID, so the next Steam import created the merged-away game again.
+- JPEG XR captures with very saturated colours could get white specks.
+  Wide-gamut scRGB stores such colours as negative values, and the Reinhard and
+  ACES curves turned large negatives into bright output. Negative values (and
+  NaN) now map to black before tone mapping.
+- Every JPEG XR import decoded the whole file twice, once to check it and once
+  for thumbnails. The check now reads only the header; a file whose image data
+  turns out to be broken is still rejected and leaves nothing behind.
+- JPEG XR and 16-bit PNG decoding now honour the same 144-megapixel cap as
+  every other format.
+- Special K imports running in parallel could pick the same library file name
+  for two different captures (same name and second, from HDR/ and SDR/ folders)
+  and one would overwrite the other.
+- Two identical files in one Steam or Special K import could both be imported:
+  the "already importing this" claim was taken after the database check.
+- Import error logs could lose messages when several screenshots failed at once.
+- The import progress bar counted skipped duplicates twice and could pass 100%.
+- The Steam importer sent your Steam login cookie to Steam's Web API and image
+  servers as well as steamcommunity.com. It now goes to steamcommunity.com only.
+  Profile names are URL-encoded.
+- The public gallery's screenshot details included thumbnail paths, which
+  contain the library folder name and the file's SHA-256. They are gone.
+- After a container update, an open browser tab that navigated to a page it
+  hadn't loaded yet showed a blank screen. It now reloads once to get the new
+  version, and any other page error shows a message with a Reload button
+  instead of blanking the app. Unknown addresses show "Page not found".
+- When the server couldn't be reached at startup, the app opened anyway and
+  every page failed. It now says so, with a Try again button.
+- Changing the password no longer leaves the old sign-in in the app's memory,
+  and the list of signed-in sync PCs empties right away (a password change
+  signs them all out).
+- The upload page waited forever if its progress stream was refused.
+- Search works with filters alone (favorites, a game, a date range), and the
+  search box shows the new text when you search from the top bar.
+- Special K imports were labelled "Upload" in the viewer's info panel.
+- GameVault Sync names non-Steam game screenshots stored under Steam's older
+  64-bit folder ids, and names shortcuts since removed from Steam using
+  `screenshots.vdf`.
+- A failed sync upload (for example a full disk) could leave its staging folder
+  behind. The login rate limiter no longer keeps every IP it has seen.
+
+### Changed
+
+- The container no longer re-owns every file in `/data` on each start, which
+  walked the whole library and woke up Unraid's array disks. The full pass runs
+  only when `/data` itself isn't owned by GameVault yet;
+  `GAMEVAULT_FORCE_CHOWN=true` forces it.
+- The image's Unraid template label points at the template in this repository.
+
 ## [1.2.1] - 2026-11-09
 
 A cleanup release from a full read-through of the project. No database

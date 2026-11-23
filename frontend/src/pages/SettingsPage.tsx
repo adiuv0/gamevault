@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useAuthStore } from '@/stores/authStore';
 import {
   Settings,
   Key,
@@ -51,6 +52,7 @@ import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 export function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [devicesVersion, setDevicesVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [migratingThumbnails, setMigratingThumbnails] = useState(false);
   const [thumbnailMigrationResult, setThumbnailMigrationResult] = useState<string | null>(null);
@@ -106,7 +108,9 @@ export function SettingsPage() {
       setPwChanging(true);
       setPwResult(null);
       const { token } = await changePassword(currentPassword, newPassword);
-      localStorage.setItem('gamevault_token', token);
+      useAuthStore.getState().setToken(token);
+      // A password change signs out every sync PC; show the emptied list.
+      setDevicesVersion((v) => v + 1);
       setPwResult({ ok: true, message: 'Password changed successfully' });
       setCurrentPassword('');
       setNewPassword('');
@@ -318,7 +322,7 @@ export function SettingsPage() {
         <SpecialKSection settings={settings} onSaved={loadSettings} />
 
         {/* Sync app */}
-        <SyncAppSection authDisabled={settings.auth_disabled} />
+        <SyncAppSection key={devicesVersion} authDisabled={settings.auth_disabled} />
 
         {/* Password Change */}
         {!settings.auth_disabled && (

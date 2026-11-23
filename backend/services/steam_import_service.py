@@ -1,7 +1,6 @@
 """Steam import orchestrator: drives the scraper, saves screenshots, emits SSE progress."""
 
 import asyncio
-import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +19,7 @@ from backend.services.image_processor import (
 from backend.services.metadata_service import fetch_and_apply_metadata
 from backend.services.performance_diagnostics import measure_async
 from backend.services.screenshot_service import (
-    check_duplicate_hash,
+    claim_unless_duplicate,
     check_duplicate_steam_id,
     create_screenshot,
 )
@@ -112,17 +111,14 @@ async def update_import_session(session_id: int, **fields) -> None:
 
 async def append_error_log(session_id: int, error_msg: str) -> None:
     """Append an error message to the session's error_log JSON array."""
+    # One statement, so concurrent workers can't drop each other's messages
+    # (a read-then-write could also fail with SQLITE_BUSY under WAL).
     db = await get_db()
-    cursor = await db.execute(
-        "SELECT error_log FROM steam_import_sessions WHERE id = ?",
-        (session_id,),
-    )
-    row = await cursor.fetchone()
-    existing = json.loads(row[0]) if row and row[0] else []
-    existing.append(error_msg)
     await db.execute(
-        "UPDATE steam_import_sessions SET error_log = ? WHERE id = ?",
-        (json.dumps(existing), session_id),
+        """UPDATE steam_import_sessions
+           SET error_log = json_insert(COALESCE(NULLIF(error_log, ''), '[]'), '$[#]', ?)
+           WHERE id = ?""",
+        (error_msg, session_id),
     )
     await db.commit()
 
@@ -538,7 +534,7 @@ async def _import_claimed_screenshot(
     # Check duplicate by hash (hashing multi-MB bodies stays off the event loop)
     sha256 = await asyncio.to_thread(compute_sha256_bytes, image_data)
     hash_key = f"sha:{sha256}"
-    if hash_key in claimed or await check_duplicate_hash(sha256):
+    if await claim_unless_duplicate(hash_key, sha256, claimed):
         await emit_progress(session_id, "screenshot_skipped", {
             "steam_id": steam_id,
             "reason": "duplicate_hash",
@@ -550,7 +546,6 @@ async def _import_claimed_screenshot(
         })
         return "skipped"
 
-    claimed.add(hash_key)
     try:
         return await _store_screenshot(
             session_id, screenshot, image_url, image_data, sha256, game_id,

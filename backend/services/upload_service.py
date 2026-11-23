@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from backend.services.filesystem import get_screenshots_dir, sanitize_filename
 from backend.services.game_service import get_game, update_screenshot_stats
+from backend.services.hdr_processor import is_jxr
 from backend.services.image_processor import (
     compute_sha256,
     describe_image,
@@ -100,7 +101,7 @@ def _generate_filename(game_name: str, taken_at: datetime | None, original_ext: 
     return f"{base}{ext}"
 
 
-def _copy_exclusive(source: Path, destination: Path) -> None:
+def _copy_exclusive(source: Path, destination: Path, *, allow_link: bool = True) -> None:
     """Copy into a new file, failing instead of overwriting one that appeared meanwhile.
 
     The name is chosen with an exists() check first; a concurrent upload (the
@@ -110,14 +111,17 @@ def _copy_exclusive(source: Path, destination: Path) -> None:
     When staging and the library share a filesystem, a hard link moves the file
     without writing it again; link() also refuses an existing name, so it is
     exclusive too. Separate mounts (the usual Docker layout) fall back to a copy.
+    Pass ``allow_link=False`` when the source is the user's own file (a Special K
+    folder), so editing it later can't change the library original.
     """
-    try:
-        os.link(source, destination)
-        return
-    except FileExistsError:
-        raise
-    except OSError:
-        pass
+    if allow_link:
+        try:
+            os.link(source, destination)
+            return
+        except FileExistsError:
+            raise
+        except OSError:
+            pass
     with open(source, "rb") as reader:
         # Opened outside the try: if the name is taken, that file is not ours to remove.
         writer = open(destination, "xb")  # noqa: SIM115
@@ -334,6 +338,10 @@ async def process_upload(
             sm, md, preview, perceptual_hash = await asyncio.to_thread(
                 generate_thumbnails_with_hash, final_path, folder_name, Path(filename).stem
             )
+            if sm is None and is_jxr(final_path):
+                # validate_image only reads a JXR's header; this was the full decode.
+                final_path.unlink(missing_ok=True)
+                raise ValueError("Not a valid image file")
 
             # Create file_path relative to library
             rel_path = f"{folder_name}/screenshots/{filename}"

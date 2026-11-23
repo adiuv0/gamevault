@@ -1,9 +1,11 @@
 import { Suspense } from 'react';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
-import { Outlet, Link } from 'react-router-dom';
+import { RouteErrorBoundary } from '@/components/shared/RouteErrorBoundary';
+import { Outlet, Link, useLocation } from 'react-router-dom';
 import { Gamepad2 } from 'lucide-react';
 
 export function GalleryShell() {
+  const { pathname } = useLocation();
   return (
     <div className="min-h-screen flex flex-col bg-bg-primary">
       {/* Header */}
@@ -23,9 +25,11 @@ export function GalleryShell() {
 
       {/* Main content */}
       <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full">
-        <Suspense fallback={<div className="py-12"><LoadingSpinner /></div>}>
-          <Outlet />
-        </Suspense>
+        <RouteErrorBoundary key={pathname}>
+          <Suspense fallback={<div className="py-12"><LoadingSpinner /></div>}>
+            <Outlet />
+          </Suspense>
+        </RouteErrorBoundary>
       </main>
 
       {/* Footer */}

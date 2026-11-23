@@ -54,8 +54,8 @@ export async function galleryGetScreenshot(screenshotId: number): Promise<Public
   return galleryGet(`/screenshots/${screenshotId}`);
 }
 
-export function galleryCoverUrl(gameId: number): string {
-  return `${GALLERY_BASE}/games/${gameId}/cover`;
+export function galleryCoverUrl(gameId: number, coverVersion?: string | null): string {
+  return `${GALLERY_BASE}/games/${gameId}/cover${versionQuery(coverVersion ?? undefined)}`;
 }
 
 export function galleryImageUrl(screenshotId: number, mediaVersion?: string): string {

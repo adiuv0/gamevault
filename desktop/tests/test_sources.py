@@ -80,3 +80,18 @@ def test_clean_specialk_folder_name():
     assert sources.clean_specialk_folder_name("EldenRing.exe") == "Elden Ring"
     assert sources.clean_specialk_folder_name("Witcher3") == "Witcher 3"
     assert sources.clean_specialk_folder_name("HZDGame") == "HZD Game"
+
+
+def test_shortcut_names_cover_64bit_folders_and_removed_shortcuts(tmp_path):
+    steam = make_steam(tmp_path)
+    account = steam / "userdata" / "11111"
+    # A shortcut removed from shortcuts.vdf is still named in screenshots.vdf.
+    (account / "760" / "screenshots.vdf").write_text(
+        '"Screenshots"\n{\n "shortcutnames"\n {\n  "3000000001" "PCSX2"\n }\n}\n',
+        encoding="utf-8")
+    names = sources.steam_shortcut_names(steam, "11111")
+    assert names[3228583970] == "Dolphin"
+    # Older Steam named shortcut folders by the 64-bit game id.
+    assert names[(3228583970 << 32) | 0x02000000] == "Dolphin"
+    assert names[3000000001] == "PCSX2"
+    assert names[(3000000001 << 32) | 0x02000000] == "PCSX2"

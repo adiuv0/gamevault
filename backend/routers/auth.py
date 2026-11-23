@@ -34,7 +34,10 @@ def _check_rate_limit(
     attempts = bucket.get(ip, [])
     # Prune old entries
     attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
-    bucket[ip] = attempts
+    if attempts:
+        bucket[ip] = attempts
+    else:
+        bucket.pop(ip, None)  # don't keep every IP that ever logged in
     if len(attempts) >= _RATE_LIMIT_MAX:
         raise HTTPException(
             status_code=429,

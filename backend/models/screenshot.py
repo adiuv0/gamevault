@@ -116,8 +116,7 @@ class PublicScreenshot(BaseModel):
     game_id: int
     filename: str
     media_version: str
-    thumbnail_path_sm: str | None = None
-    thumbnail_path_md: str | None = None
+    # No thumbnail paths: they embed the library folder and the file's SHA-256.
     width: int | None = None
     height: int | None = None
     taken_at: str | None = None

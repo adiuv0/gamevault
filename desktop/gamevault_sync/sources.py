@@ -310,14 +310,26 @@ def parse_binary_vdf(data: bytes) -> dict:
     return result
 
 
+def _add_shortcut_name(names: dict[int, str], game_id: int, name: str) -> None:
+    """Register a shortcut under both forms of its id, keeping names already set.
+
+    Current Steam names a shortcut's screenshot folder by its 32-bit app id.
+    Older builds used the 64-bit game id ((appid << 32) | 0x02000000), and
+    libraries carried over from then can still have such folders.
+    """
+    short_id = game_id >> 32 if game_id > 0xFFFFFFFF else game_id & 0xFFFFFFFF
+    names.setdefault(short_id, name)
+    names.setdefault((short_id << 32) | 0x02000000, name)
+
+
 def steam_shortcut_names(steam_root: Path, account_id: str) -> dict[int, str]:
     """Names of non-Steam games added to this Steam account, keyed by screenshot id."""
+    names: dict[int, str] = {}
     path = steam_root / "userdata" / account_id / "config" / "shortcuts.vdf"
     try:
         data = parse_binary_vdf(path.read_bytes())
     except (OSError, ValueError, IndexError, struct.error):
-        return {}
-    names: dict[int, str] = {}
+        data = {}
     shortcuts = data.get("shortcuts") or data.get("Shortcuts") or {}
     for entry in shortcuts.values():
         if not isinstance(entry, dict):
@@ -325,7 +337,26 @@ def steam_shortcut_names(steam_root: Path, account_id: str) -> dict[int, str]:
         app_id = entry.get("appid") or entry.get("AppId")
         name = entry.get("AppName") or entry.get("appname")
         if isinstance(app_id, int) and name:
-            names[app_id & 0xFFFFFFFF] = str(name).strip()
+            _add_shortcut_name(names, app_id & 0xFFFFFFFF, str(name).strip())
+    # screenshots.vdf keeps a name for every shortcut that ever took a
+    # screenshot, including ones since removed from shortcuts.vdf.
+    try:
+        text = (steam_root / "userdata" / account_id / "760" / "screenshots.vdf").read_text(
+            encoding="utf-8", errors="replace")
+        root = vdf_parse(text)
+    except Exception:
+        root = {}
+    screenshots = root.get("Screenshots") or root.get("screenshots") or {}
+    # Accept the section at either nesting level the file has been seen with.
+    sections = [screenshots] + [v for v in screenshots.values() if isinstance(v, dict)] \
+        if isinstance(screenshots, dict) else []
+    for section in sections:
+        shortcut_names = section.get("shortcutnames")
+        if not isinstance(shortcut_names, dict):
+            continue
+        for key, name in shortcut_names.items():
+            if isinstance(name, str) and name.strip() and str(key).isdigit():
+                _add_shortcut_name(names, int(key), name.strip())
     return names
 
 

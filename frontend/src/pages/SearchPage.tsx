@@ -77,23 +77,24 @@ export function SearchPage() {
     };
   }, []);
 
+  // Filters work without text too (favorites, one game, a date range).
+  const hasActiveFilters = !!(selectedGameId || dateFrom || dateTo || favoritesOnly);
+
   useEffect(() => {
-    if (query) {
+    if (query || hasActiveFilters) {
       void performSearch(1);
     } else {
       requestVersion.current += 1;
       setResults([]);
       setTotal(0);
     }
-  }, [query, performSearch]);
+  }, [query, hasActiveFilters, performSearch]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
     const q = (formData.get('q') as string || '').trim();
-    if (q) {
-      setSearchParams({ q });
-    }
+    setSearchParams(q ? { q } : {});
   };
 
   const clearFilters = () => {
@@ -103,8 +104,6 @@ export function SearchPage() {
     setFavoritesOnly(false);
     setSortBy('relevance');
   };
-
-  const hasActiveFilters = selectedGameId || dateFrom || dateTo || favoritesOnly;
 
   return (
     <div>
@@ -116,6 +115,7 @@ export function SearchPage() {
             <input
               type="text"
               name="q"
+              key={query}
               defaultValue={query}
               placeholder="Search screenshots and annotations..."
               className="w-full pl-11 pr-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:border-accent-primary text-sm"
@@ -144,7 +144,7 @@ export function SearchPage() {
               )}
             </button>
 
-            {query && (
+            {(query || hasActiveFilters) && (
               <span className="text-sm text-text-muted">
                 {total} {total === 1 ? 'result' : 'results'}
                 {query && ` for "${query}"`}
@@ -240,7 +240,7 @@ export function SearchPage() {
       )}
 
       {/* Results */}
-      {!query && !loading && (
+      {!query && !hasActiveFilters && !loading && (
         <EmptyState
           icon={<Search className="h-12 w-12" />}
           title="Search your screenshots"
@@ -254,11 +254,13 @@ export function SearchPage() {
         </div>
       )}
 
-      {query && !loading && results.length === 0 && (
+      {(query || hasActiveFilters) && !loading && results.length === 0 && (
         <EmptyState
           icon={<Search className="h-12 w-12" />}
           title="No results found"
-          description={`No screenshots matching "${query}". Try a different search term or adjust your filters.`}
+          description={query
+            ? `No screenshots matching "${query}". Try a different search term or adjust your filters.`
+            : 'No screenshots match these filters.'}
         />
       )}
 

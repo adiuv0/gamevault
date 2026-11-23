@@ -70,6 +70,13 @@ def is_hdr_source(file_path: Path) -> bool:
 
 # ── Decoding ─────────────────────────────────────────────────────────────────
 
+# imagecodecs decodes without Pillow's MAX_IMAGE_PIXELS check, so the same cap
+# (image_processor sets it to 144 MP) is applied here from the file header.
+def _check_pixel_cap(width: int, height: int, file_path: Path) -> None:
+    limit = Image.MAX_IMAGE_PIXELS
+    if limit and width * height > limit:
+        raise ValueError(f"{file_path.name} is {width}x{height}, over the {limit:,} pixel limit")
+
 
 def decode_jxr(file_path: Path) -> np.ndarray:
     """Decode a JPEG XR file to a float32 RGB array in linear-ish space.
@@ -78,6 +85,9 @@ def decode_jxr(file_path: Path) -> np.ndarray:
     but may exceed 1.0 for HDR highlights — that's the entire point.
     """
     codecs = _get_imagecodecs()
+    dims = read_jxr_header_dimensions(file_path)
+    if dims:
+        _check_pixel_cap(*dims, file_path)
     data = file_path.read_bytes()
     arr = codecs.jpegxr_decode(data)
 
@@ -107,6 +117,8 @@ def decode_jxr(file_path: Path) -> np.ndarray:
 
 def decode_hdr_png(file_path: Path) -> np.ndarray:
     """Decode all channels at native precision; Pillow truncates RGB16 to RGB8."""
+    with Image.open(file_path) as header:  # lazy: reads only the IHDR
+        _check_pixel_cap(*header.size, file_path)
     arr = _get_imagecodecs().png_decode(file_path.read_bytes())
     maximum = np.iinfo(arr.dtype).max if np.issubdtype(arr.dtype, np.integer) else 1.0
     out = arr.astype(np.float32) / maximum
@@ -122,18 +134,31 @@ def decode_hdr_png(file_path: Path) -> np.ndarray:
 ToneMapAlgorithm = Literal["reinhard", "aces", "clip"]
 
 
+def _exposed(rgb: np.ndarray, scale: float) -> np.ndarray:
+    """Scale into a new array with negatives and NaN set to 0.
+
+    scRGB captures store wide-gamut colours as negative channel values. Both
+    curves below turn large negatives into bright output (Reinhard's x/(1+x)
+    is > 1 for x < -1, ACES tends to ~1), which showed up as white specks in
+    saturated highlights. fmax also maps NaN to 0. Done in place: no extra copy.
+    """
+    x = rgb * scale
+    np.fmax(x, 0.0, out=x)
+    return x
+
+
 def _reinhard(rgb: np.ndarray, exposure: float = 1.0) -> np.ndarray:
     """Reinhard tone-mapping — soft rolloff into highlights.
 
     out = (x * exp) / (1 + x * exp)
     """
-    x = rgb * exposure
+    x = _exposed(rgb, exposure)
     return x / (1.0 + x)
 
 
 def _aces(rgb: np.ndarray, exposure: float = 1.0) -> np.ndarray:
     """ACES filmic tone curve (Narkowicz approximation)."""
-    x = rgb * exposure * 0.6  # ACES expects pre-exposure scale
+    x = _exposed(rgb, exposure * 0.6)  # ACES expects pre-exposure scale
     a = 2.51
     b = 0.03
     c = 2.43
@@ -144,7 +169,8 @@ def _aces(rgb: np.ndarray, exposure: float = 1.0) -> np.ndarray:
 
 def _clip(rgb: np.ndarray, exposure: float = 1.0) -> np.ndarray:
     """Hard clip at 1.0 after exposure adjustment — fastest, blows highlights."""
-    return np.clip(rgb * exposure, 0.0, 1.0)
+    x = _exposed(rgb, exposure)
+    return np.minimum(x, 1.0, out=x)
 
 
 _TONE_MAPPERS = {
