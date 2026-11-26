@@ -106,7 +106,7 @@ async def run_case(
         list_screenshots_cursor,
     )
     from backend.services.search_service import search_screenshots
-    from backend.services.timeline_service import get_timeline
+    from backend.services.timeline_service import get_timeline, get_timeline_insights
 
     await close_db()
     with tempfile.TemporaryDirectory(prefix="gamevault-benchmark-") as temp_dir:
@@ -135,6 +135,7 @@ async def run_case(
             deep_page_times = []
             cursor_page_times = []
             timeline_times = []
+            insights_times = []
             search_times = []
             for _ in range(iterations):
                 started = time.perf_counter()
@@ -158,6 +159,10 @@ async def run_case(
                 started = time.perf_counter()
                 await get_timeline()
                 timeline_times.append(time.perf_counter() - started)
+
+                started = time.perf_counter()
+                await get_timeline_insights()
+                insights_times.append(time.perf_counter() - started)
 
                 started = time.perf_counter()
                 await search_screenshots("capture")
@@ -189,6 +194,7 @@ async def run_case(
                     "total": deep_total,
                 },
                 "timeline_first_page": _summary(timeline_times),
+                "timeline_insights_all_time": _summary(insights_times),
                 "search_first_page": _summary(search_times),
                 "cursor_deep_page": {
                     **_summary(cursor_page_times),
