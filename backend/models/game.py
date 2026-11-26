@@ -29,6 +29,8 @@ class GameResponse(BaseModel):
     folder_name: str
     steam_app_id: int | None = None
     cover_image_path: str | None = None
+    # "#rrggbb" taken from the cover; None or "" when there is none.
+    accent_color: str | None = None
     developer: str | None = None
     publisher: str | None = None
     release_date: str | None = None
@@ -74,6 +76,7 @@ class PublicGame(BaseModel):
     # Opaque cover revision: present only when the game has a cover, and
     # changes when the game is updated, so replaced covers aren't served stale.
     cover_version: str | None = None
+    accent_color: str | None = None
 
     @model_validator(mode="before")
     @classmethod

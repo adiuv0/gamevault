@@ -12,7 +12,7 @@ export function ScreenshotSortControl({
   onChange,
 }: ScreenshotSortControlProps) {
   return (
-    <div className="flex justify-end mb-3">
+    <div className="flex justify-end">
       <div className="relative">
         <ArrowUpDown
           className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted pointer-events-none"

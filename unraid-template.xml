@@ -16,6 +16,8 @@
     Self-hosted game screenshot manager. Import your Steam screenshots (dated by when you took them), back up Steam and Special K captures from your gaming PC automatically with the GameVault Sync Windows app, keep HDR JPEG XR / 16-bit PNG originals with tone-mapped previews, and browse by game or timeline with full-text search, annotations, a public gallery and share links with Discord/Slack previews. Back up the database before updating: some releases migrate it one way.
   </Overview>
   <Changes>
+### 1.3.0 (2026-11-26)
+New look: each game page opens on one of its own captures with a colour taken from its cover, the library starts with the games you captured last, and screenshot grids lose their frames. Small database migration (adds one column).
 ### 1.2.3 (2026-11-23)
 Steam imports are dated by capture time, not upload time; older imports are corrected in the background. One-way database migration: back up first.
 ### 1.2.2 (2026-11-23)

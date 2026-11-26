@@ -30,7 +30,7 @@ export function GalleryGameCard({ game }: GalleryGameCardProps) {
         )}
 
         {/* Screenshot count badge */}
-        <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm text-white text-xs font-medium px-2 py-0.5 rounded-full">
+        <div className="absolute top-2 right-2 bg-black/75 text-white text-xs font-medium px-2 py-0.5 rounded-full">
           {game.screenshot_count}
         </div>
 

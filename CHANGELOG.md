@@ -7,6 +7,41 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-26
+
+A new look. The interface no longer borrows a code-hosting site's dark theme:
+games supply the colour. Includes a small database migration (`m019`, one new
+column that older releases ignore).
+
+### Changed
+
+- **Game pages open on the game.** One of its captures (a favourite if there
+  is one near the top, otherwise the latest) runs edge to edge behind the
+  title, with the capture count and first and last capture dates set large.
+  Buttons and highlights on the page take a colour from the game's cover art.
+- **The Library starts with "Jump back in"**: the three games you captured
+  most recently, each behind its latest capture. Covers below it lose their
+  card frames; hovering one outlines it in that game's colour.
+- **Screenshot grids are tighter and plainer.** No border, padded footer or
+  repeated date under every thumbnail, and 4 px gaps instead of 12. The date is
+  in the tooltip and the viewer. Applies to game pages, the Timeline and the
+  public gallery.
+- **The sidebar is regrouped.** Library, Timeline and Search on top, then your
+  five most recently captured games, then Upload, the importers, Duplicates
+  and Settings under Tools.
+- New palette (neutral near-black instead of blue-grey), and the Barlow and
+  Barlow Condensed typefaces, bundled with the app so nothing is fetched from
+  a font service.
+
+### Performance
+
+- Thumbnail badges no longer use `backdrop-filter: blur`, and cards no longer
+  scale and cast a glow on hover. With hundreds of thumbnails on screen that
+  was per-card compositing work for no visible gain.
+- Cover colours are worked out on the server, once, when a cover is saved
+  (existing covers after the first start on this version) and stored on the
+  game. The browser never decodes a cover to theme a page.
+
 ### Documentation
 
 - README, architecture notes and the Unraid template brought up to date with

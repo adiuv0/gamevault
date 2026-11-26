@@ -175,7 +175,7 @@ export function SettingsPage() {
     <div>
       <div className="flex items-center gap-3 mb-6">
         <Settings className="h-6 w-6 text-text-muted" />
-        <h1 className="text-2xl font-bold text-text-primary">Settings</h1>
+        <h1 className="display-title text-3xl sm:text-4xl text-text-primary">Settings</h1>
       </div>
 
       <div className="space-y-6 max-w-2xl">
@@ -756,7 +756,7 @@ function SpecialKSection({
           <button
             onClick={handleSave}
             disabled={saving || !dirty}
-            className="flex items-center gap-2 px-3 py-1.5 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-3 py-1.5 bg-accent-primary text-on-accent rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Save
@@ -881,7 +881,7 @@ function SyncAppSection({ authDisabled }: { authDisabled: boolean }) {
       <div className="flex flex-wrap items-center gap-3 mb-5">
         <a
           href={SYNC_APP_DOWNLOADS.installer}
-          className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-on-accent rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors"
         >
           <Download className="h-4 w-4" />
           Download for Windows
@@ -1117,7 +1117,7 @@ function ApiKeyRow({
           <button
             onClick={handleSave}
             disabled={saving || !value.trim()}
-            className="flex items-center gap-1 px-3 py-1.5 bg-accent-primary text-white rounded-md text-xs font-medium hover:bg-accent-primary/90 disabled:opacity-50"
+            className="flex items-center gap-1 px-3 py-1.5 bg-accent-primary text-on-accent rounded-md text-xs font-medium hover:bg-accent-primary/90 disabled:opacity-50"
           >
             {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
             Save

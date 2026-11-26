@@ -18,6 +18,7 @@ rollback procedures. Migrations run automatically when GameVault starts.
 | `1.2.0` | `1.2.1` | None | No schema change; the automated fixture confirms the `1.2.0` schema opens unchanged |
 | `1.2.1` | `1.2.2` | None | No schema change |
 | `1.2.2` | `1.2.3` | Applies `m018` | Automated fixture upgrades the shipped `1.2.2` schema; tests cover the new column and the background repair `m018` queues |
+| `1.2.3` | `1.3.0` | Applies `m019` | Automated fixture upgrades the shipped `1.2.3` schema; tests cover the new column and the startup backfill |
 
 The `1.0.0` migrations add gallery indexes, logical capture groups, duplicate review,
 viewer previews, and durable import/upload jobs to Docker `0.3.1`. They do not rewrite
@@ -48,6 +49,12 @@ profile of the last Steam import. It changes only `screenshots.taken_at`, moves 
 previous value into `steam_posted_at`, and downloads no images. Without internet
 access, or for screenshots Steam does not list publicly, nothing changes; running a
 Steam import again repairs those.
+
+`m019` adds the nullable `games.accent_color`, a `#rrggbb` colour taken from each
+game's cover art that the interface uses for highlights. Existing games are filled in
+after startup by reading each cover once from the library folder; nothing is fetched
+and no file is changed. Older releases ignore the extra column, so rolling back to
+`1.2.3` needs no restore.
 
 ## Before Upgrading
 

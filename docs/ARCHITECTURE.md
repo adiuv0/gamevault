@@ -36,7 +36,7 @@ gamevault/
 │   ├── auth.py                 # bcrypt hashing, JWT encoding, require_auth dependency
 │   ├── config.py               # Settings (pydantic-settings) singleton
 │   ├── database.py             # aiosqlite connection management
-│   ├── migrations/             # Schema migrations (m001-m018) + runner
+│   ├── migrations/             # Schema migrations (m001-m019) + runner
 │   ├── version.py              # APP_VERSION, the single backend version source
 │   ├── models/                 # Pydantic request/response models
 │   ├── routers/                # FastAPI routers (one per feature)

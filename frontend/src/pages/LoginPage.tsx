@@ -135,7 +135,7 @@ export function LoginPage({ mode = 'login' }: LoginPageProps) {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2 px-4 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full py-2 px-4 bg-accent-primary text-on-accent rounded-md text-sm font-medium hover:bg-accent-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {loading
               ? 'Please wait...'

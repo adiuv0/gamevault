@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Upload, Image, Trash2, Loader2, RefreshCw, CheckCircle2, AlertCircle, Globe, Lock, GitMerge, Search } from 'lucide-react';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
@@ -10,9 +10,9 @@ import {
   type ScreenshotSort,
 } from '@/components/screenshots/ScreenshotSortControl';
 import { getGame, deleteGame, updateGame, getCoverUrl, listGames, mergeGameInto } from '@/api/games';
-import { listScreenshotsCursor } from '@/api/screenshots';
+import { listScreenshotsCursor, getScreenshotPreviewUrl } from '@/api/screenshots';
 import { fetchGameMetadata } from '@/api/metadata';
-import { formatCount, formatDate } from '@/lib/formatters';
+import { formatCount, formatDate, formatMonthYear, isHexColor } from '@/lib/formatters';
 import type { Game, ScreenshotListItem } from '@/lib/types';
 
 export function GamePage() {
@@ -24,6 +24,9 @@ export function GamePage() {
   // The route id the loaded game answers (merged games redirect to another id).
   const [loadedRouteId, setLoadedRouteId] = useState<number | null>(null);
   const [screenshots, setScreenshots] = useState<ScreenshotListItem[]>([]);
+  // The capture behind the title. Chosen once per game, so re-sorting doesn't swap it.
+  const [hero, setHero] = useState<ScreenshotListItem | null>(null);
+  const heroGameRef = useRef<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
@@ -57,6 +60,15 @@ export function GamePage() {
       setGame(gameData);
       setLoadedRouteId(gameId);
       setScreenshots(screenshotData.screenshots);
+      if (heroGameRef.current !== gameId || screenshotData.screenshots.length === 0) {
+        heroGameRef.current = gameId;
+        // A favourite if one is near the top, otherwise the first capture listed.
+        setHero(
+          screenshotData.screenshots.find((item) => item.is_favorite)
+            ?? screenshotData.screenshots[0]
+            ?? null,
+        );
+      }
       setNextCursor(screenshotData.next_cursor);
       setLoadMoreError(false);
       setViewerIndex(null);
@@ -173,106 +185,154 @@ export function GamePage() {
     );
   }
 
-  return (
-    <div>
-      {/* Header */}
-      <div className="mb-6">
-        <Link
-          to="/"
-          className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary transition-colors no-underline mb-3"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Library
-        </Link>
+  const accentStyle = isHexColor(game.accent_color)
+    ? ({ '--color-accent-primary': game.accent_color } as CSSProperties)
+    : undefined;
+  const longName = game.name.length > 28;
+  const facts = [
+    game.developer,
+    game.publisher && game.publisher !== game.developer ? game.publisher : null,
+    game.release_date,
+    game.genres,
+  ].filter(Boolean);
+  const secondaryButton =
+    'flex items-center gap-1.5 px-3 py-1.5 border border-border bg-bg-primary/60 text-text-secondary rounded-md text-sm hover:text-text-primary hover:border-accent-primary/50 transition-colors disabled:opacity-50';
 
-        <div className="flex flex-col lg:flex-row items-start justify-between gap-4">
-          <div className="flex min-w-0 items-start gap-4">
-            {/* Cover */}
+  return (
+    // The accent set here reaches everything on the page, the viewer and dialogs included.
+    <div style={accentStyle}>
+      {/* Hero: one of the game's own captures behind its title. Bleeds to the edges of the page. */}
+      <header className="relative -mx-4 -mt-4 sm:-mx-6 sm:-mt-6 mb-5 overflow-hidden">
+        {hero && (
+          <div className="absolute inset-0" aria-hidden="true">
+            <img
+              src={getScreenshotPreviewUrl(hero.id, hero.media_version)}
+              alt=""
+              decoding="async"
+              className="h-full w-full object-cover"
+            />
+            {/* Plain gradients, no blur: readable text over any capture at no scrolling cost. */}
+            <div className="absolute inset-0 bg-gradient-to-r from-bg-primary/85 via-bg-primary/35 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-b from-bg-primary/20 via-bg-primary/45 to-bg-primary" />
+          </div>
+        )}
+
+        <div className={`relative px-4 sm:px-8 pb-5 ${hero ? 'pt-4 sm:pt-5' : 'pt-4 sm:pt-6'}`}>
+          <Link
+            to="/"
+            className="inline-flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary transition-colors no-underline"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Library
+          </Link>
+
+          <div className={`flex items-end gap-5 sm:gap-6 ${hero ? 'mt-14 sm:mt-24 lg:mt-32' : 'mt-6'}`}>
             {game.cover_image_path ? (
               <img
                 src={getCoverUrl(game.id, game.updated_at)}
-                alt={game.name}
-                className="w-16 h-24 rounded-lg object-cover flex-shrink-0 hidden sm:block"
+                alt=""
+                className="hidden sm:block w-28 lg:w-32 aspect-[2/3] rounded object-cover flex-shrink-0 shadow-xl shadow-black/60"
               />
             ) : (
-              <div className="w-16 h-24 rounded-lg bg-bg-tertiary flex items-center justify-center flex-shrink-0 hidden sm:block">
+              <div className="hidden sm:flex w-28 lg:w-32 aspect-[2/3] rounded bg-bg-tertiary items-center justify-center flex-shrink-0">
                 <Image className="h-6 w-6 text-text-muted" />
               </div>
             )}
 
-            <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-text-primary break-words">{game.name}</h1>
-              <div className="flex flex-wrap items-center gap-3 mt-1 text-sm text-text-muted">
-                <span>{formatCount(game.screenshot_count)}</span>
-                {game.developer && <span>{game.developer}</span>}
-                {game.last_screenshot_date && (
-                  <span>Last: {formatDate(game.last_screenshot_date)}</span>
+            <div className="min-w-0 flex-1">
+              <h1
+                className={`display-title text-text-primary break-words text-balance ${
+                  longName ? 'text-3xl sm:text-5xl' : 'text-4xl sm:text-6xl'
+                }`}
+              >
+                {game.name}
+              </h1>
+
+              <dl className="flex flex-wrap gap-x-7 gap-y-2 mt-4">
+                <Stat value={game.screenshot_count.toLocaleString()} label={game.screenshot_count === 1 ? 'capture' : 'captures'} />
+                {game.first_screenshot_date && (
+                  <Stat value={formatMonthYear(game.first_screenshot_date)} label="first capture" />
                 )}
-              </div>
+                {game.last_screenshot_date && (
+                  <Stat value={formatDate(game.last_screenshot_date)} label="last capture" />
+                )}
+              </dl>
+
+              {facts.length > 0 && (
+                <p className="mt-3 text-sm text-text-secondary break-words">{facts.join(' · ')}</p>
+              )}
             </div>
           </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => setShowMergeModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-text-secondary rounded-md text-sm hover:text-text-primary hover:border-accent-primary/50 transition-colors"
-              title="Merge this game into another (e.g. consolidate Steam + Special K duplicates)"
-            >
-              <GitMerge className="h-3.5 w-3.5" />
-              Merge
-            </button>
-            <button
-              onClick={async () => {
-                try {
-                  const updated = await updateGame(gameId, { is_public: !game.is_public });
-                  setGame(updated);
-                } catch {
-                  // The button keeps showing the old state; say why it didn't change.
-                  setMetaFailed(true);
-                  setMetaResult("Couldn't change who can see this game");
-                  clearTimeout(metaResultTimer.current);
-                  metaResultTimer.current = setTimeout(() => setMetaResult(null), 5000);
-                }
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-text-secondary rounded-md text-sm hover:text-text-primary hover:border-accent-primary/50 transition-colors"
-              title={game.is_public ? 'Visible in public gallery' : 'Hidden from public gallery'}
-            >
-              {game.is_public ? (
-                <Globe className="h-3.5 w-3.5" />
-              ) : (
-                <Lock className="h-3.5 w-3.5" />
-              )}
-              {game.is_public ? 'Public' : 'Private'}
-            </button>
-            <button
-              onClick={handleFetchMetadata}
-              disabled={fetchingMeta}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-text-secondary rounded-md text-sm hover:text-text-primary hover:border-accent-primary/50 transition-colors disabled:opacity-50"
-              title="Fetch metadata from Steam/SteamGridDB/IGDB"
-            >
-              {fetchingMeta ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
-              )}
-              {fetchingMeta ? 'Fetching...' : 'Metadata'}
-            </button>
-            <Link
-              to={`/upload?game=${game.id}`}
-              className="flex items-center gap-2 px-3 py-1.5 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors no-underline"
-            >
-              <Upload className="h-4 w-4" />
-              Upload
-            </Link>
-            <button
-              onClick={() => setShowDeleteConfirm(true)}
-              className="p-1.5 rounded-md text-text-muted hover:text-accent-danger hover:bg-accent-danger/10 transition-colors"
-              title="Delete game"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
         </div>
+      </header>
+
+      {/* Actions */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3 mb-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to={`/upload?game=${game.id}`}
+            className="flex items-center gap-2 px-3 py-1.5 bg-accent-primary text-on-accent rounded-md text-sm font-semibold hover:bg-accent-primary/90 transition-colors no-underline"
+          >
+            <Upload className="h-4 w-4" />
+            Upload
+          </Link>
+          <button
+            onClick={() => setShowMergeModal(true)}
+            className={secondaryButton}
+            title="Merge this game into another (e.g. consolidate Steam + Special K duplicates)"
+          >
+            <GitMerge className="h-3.5 w-3.5" />
+            Merge
+          </button>
+          <button
+            onClick={async () => {
+              try {
+                const updated = await updateGame(gameId, { is_public: !game.is_public });
+                setGame(updated);
+              } catch {
+                // The button keeps showing the old state; say why it didn't change.
+                setMetaFailed(true);
+                setMetaResult("Couldn't change who can see this game");
+                clearTimeout(metaResultTimer.current);
+                metaResultTimer.current = setTimeout(() => setMetaResult(null), 5000);
+              }
+            }}
+            className={secondaryButton}
+            title={game.is_public ? 'Visible in public gallery' : 'Hidden from public gallery'}
+          >
+            {game.is_public ? (
+              <Globe className="h-3.5 w-3.5" />
+            ) : (
+              <Lock className="h-3.5 w-3.5" />
+            )}
+            {game.is_public ? 'Public' : 'Private'}
+          </button>
+          <button
+            onClick={handleFetchMetadata}
+            disabled={fetchingMeta}
+            className={secondaryButton}
+            title="Fetch metadata from Steam/SteamGridDB/IGDB"
+          >
+            {fetchingMeta ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            {fetchingMeta ? 'Fetching...' : 'Metadata'}
+          </button>
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="p-1.5 rounded-md text-text-muted hover:text-accent-danger hover:bg-accent-danger/10 transition-colors"
+            title="Delete game"
+            aria-label="Delete game"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+
+        {screenshots.length > 0 && (
+          <ScreenshotSortControl value={screenshotSort} onChange={setScreenshotSort} />
+        )}
       </div>
 
       {/* Metadata result toast */}
@@ -289,36 +349,12 @@ export function GamePage() {
 
       {/* Game description */}
       {game.description && (
-        <div className="mb-6 text-sm text-text-secondary leading-relaxed max-w-3xl">
+        <p className="mb-5 text-sm text-text-secondary leading-relaxed max-w-3xl line-clamp-3" title={game.description}>
           {game.description}
-        </div>
-      )}
-
-      {/* Metadata chips */}
-      {(game.genres || game.release_date || game.publisher) && (
-        <div className="flex flex-wrap gap-2 mb-6">
-          {game.genres && (
-            <span className="px-2 py-0.5 bg-bg-tertiary text-text-muted text-xs rounded-full">
-              {game.genres}
-            </span>
-          )}
-          {game.release_date && (
-            <span className="px-2 py-0.5 bg-bg-tertiary text-text-muted text-xs rounded-full">
-              {game.release_date}
-            </span>
-          )}
-          {game.publisher && game.publisher !== game.developer && (
-            <span className="px-2 py-0.5 bg-bg-tertiary text-text-muted text-xs rounded-full">
-              {game.publisher}
-            </span>
-          )}
-        </div>
+        </p>
       )}
 
       {/* Screenshots */}
-      {screenshots.length > 0 && (
-        <ScreenshotSortControl value={screenshotSort} onChange={setScreenshotSort} />
-      )}
       {screenshots.length === 0 ? (
         <EmptyState
           icon={<Image className="h-12 w-12" />}
@@ -327,7 +363,7 @@ export function GamePage() {
           action={
             <Link
               to={`/upload?game=${game.id}`}
-              className="px-4 py-2 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors no-underline"
+              className="px-4 py-2 bg-accent-primary text-on-accent rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors no-underline"
             >
               Upload Screenshots
             </Link>
@@ -438,6 +474,18 @@ Delete <strong>{game.name}</strong> and all its screenshots, notes and share lin
 }
 
 
+function Stat({ value, label }: { value: string; label: string }) {
+  return (
+    <div className="flex flex-col-reverse">
+      <dt className="mt-1 text-xs text-text-secondary">{label}</dt>
+      <dd className="font-display text-xl sm:text-2xl font-semibold leading-none text-text-primary tabular-nums">
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+
 // ── Merge modal ─────────────────────────────────────────────────────────────
 
 
@@ -521,7 +569,7 @@ function MergeModal({ source, onClose, onMerged }: MergeModalProps) {
               <button
                 onClick={handleMerge}
                 disabled={merging}
-                className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-on-accent rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors disabled:opacity-50"
               >
                 {merging && <Loader2 className="h-3 w-3 animate-spin" />}
                 Merge {source.screenshot_count} screenshot{source.screenshot_count === 1 ? '' : 's'}

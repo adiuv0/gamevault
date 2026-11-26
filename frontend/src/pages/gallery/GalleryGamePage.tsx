@@ -144,7 +144,7 @@ export function GalleryGamePage() {
           )}
 
           <div>
-            <h1 className="text-2xl font-bold text-text-primary">{game.name}</h1>
+            <h1 className="display-title text-3xl sm:text-4xl text-text-primary">{game.name}</h1>
             <div className="flex items-center gap-3 mt-1 text-sm text-text-muted">
               <span>{formatCount(game.screenshot_count)}</span>
               {game.developer && <span>{game.developer}</span>}

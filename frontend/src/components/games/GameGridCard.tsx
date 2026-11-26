@@ -1,7 +1,7 @@
+import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
-import { ImageOff } from 'lucide-react';
 import { getCoverUrl } from '@/api/games';
-import { formatCount, formatDate } from '@/lib/formatters';
+import { formatCount, formatDate, isHexColor } from '@/lib/formatters';
 import type { Game } from '@/lib/types';
 
 interface GameGridCardProps {
@@ -12,50 +12,41 @@ export function GameGridCard({ game }: GameGridCardProps) {
   const coverUrl = game.cover_image_path
     ? getCoverUrl(game.id, game.updated_at)
     : null;
+  // Hovering a cover outlines it in that game's own colour.
+  const style = isHexColor(game.accent_color)
+    ? ({ '--color-accent-primary': game.accent_color } as CSSProperties)
+    : undefined;
 
   return (
     <Link
       to={`/games/${game.id}`}
-      className="group block rounded-lg overflow-hidden bg-bg-secondary border border-border hover:border-accent-primary/50 transition-all duration-200 hover:scale-[1.02] hover:shadow-lg hover:shadow-accent-primary/5 no-underline"
+      style={style}
+      title={game.last_screenshot_date ? `Last capture ${formatDate(game.last_screenshot_date)}` : undefined}
+      className="group block no-underline"
     >
       {/* Cover image - 2:3 aspect ratio (Steam library format) */}
-      <div className="relative aspect-[2/3] bg-bg-tertiary overflow-hidden">
+      <div className="relative aspect-[2/3] rounded bg-bg-tertiary overflow-hidden outline-2 outline-offset-2 outline-transparent group-hover:outline-accent-primary transition-[outline-color]">
         {coverUrl ? (
           <img
             src={coverUrl}
             alt={game.name}
-            className="w-full h-full object-cover group-hover:brightness-110 transition-all duration-200"
+            className="w-full h-full object-cover"
             loading="lazy"
+            decoding="async"
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <ImageOff className="h-12 w-12 text-text-muted" />
+          // No cover art: the name, set like a title card.
+          <div className="w-full h-full flex items-end p-3 bg-gradient-to-b from-bg-tertiary to-bg-secondary">
+            <span className="display-title text-xl text-text-secondary line-clamp-4 break-words">{game.name}</span>
           </div>
         )}
-
-        {/* Screenshot count badge */}
-        <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm text-white text-xs font-medium px-2 py-0.5 rounded-full">
-          {game.screenshot_count}
-        </div>
-
-        {/* Hover overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          <div className="absolute bottom-0 left-0 right-0 p-3">
-            {game.last_screenshot_date && (
-              <p className="text-xs text-gray-300">
-                Last: {formatDate(game.last_screenshot_date)}
-              </p>
-            )}
-          </div>
-        </div>
       </div>
 
-      {/* Game name */}
-      <div className="p-3">
+      <div className="pt-2">
         <h3 className="text-sm font-medium text-text-primary truncate group-hover:text-accent-primary transition-colors">
           {game.name}
         </h3>
-        <p className="text-xs text-text-muted mt-0.5">
+        <p className="text-xs text-text-muted mt-0.5 tabular-nums">
           {formatCount(game.screenshot_count)}
         </p>
       </div>

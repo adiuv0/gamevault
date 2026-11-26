@@ -5,6 +5,7 @@ import { EmptyState } from '@/components/shared/EmptyState';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { GameGrid } from '@/components/games/GameGrid';
 import { GameList } from '@/components/games/GameList';
+import { RecentShelf } from '@/components/games/RecentShelf';
 import { useViewStore } from '@/stores/viewStore';
 import { listGames, createGame, cleanupEmptyGames } from '@/api/games';
 import { fetchAllMetadata } from '@/api/metadata';
@@ -153,7 +154,7 @@ export function LibraryPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-text-primary">Library</h1>
+          <h1 className="display-title text-3xl sm:text-4xl text-text-primary">Library</h1>
           {games.length > 0 && (
             <span className="text-sm text-text-muted bg-bg-tertiary px-2 py-0.5 rounded-full">
               {games.length} {games.length === 1 ? 'game' : 'games'}
@@ -205,7 +206,7 @@ export function LibraryPage() {
           </button>
           <button
             onClick={() => { setCreateError(null); setShowCreateModal(true); }}
-            className="flex items-center gap-2 px-3 py-1.5 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 bg-accent-primary text-on-accent rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors"
           >
             <Plus className="h-4 w-4" />
             Add Game
@@ -235,7 +236,7 @@ export function LibraryPage() {
             <div className="flex gap-3">
               <Link
                 to="/upload"
-                className="px-4 py-2 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors no-underline"
+                className="px-4 py-2 bg-accent-primary text-on-accent rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors no-underline"
               >
                 Upload Screenshots
               </Link>
@@ -248,10 +249,13 @@ export function LibraryPage() {
             </div>
           }
         />
-      ) : viewMode === 'grid' ? (
-        <GameGrid games={games} />
       ) : (
-        <GameList games={games} />
+        <>
+          {/* With only a handful of games the shelf would just repeat the wall below it. */}
+          {games.length > 4 && <RecentShelf games={games} />}
+          {games.length > 4 && <h2 className="shelf-label mb-3">All games</h2>}
+          {viewMode === 'grid' ? <GameGrid games={games} /> : <GameList games={games} />}
+        </>
       )}
 
       {/* Create Game Modal */}
@@ -286,7 +290,7 @@ export function LibraryPage() {
                 <button
                   type="submit"
                   disabled={!newGameName.trim() || creating}
-                  className="px-4 py-2 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="px-4 py-2 bg-accent-primary text-on-accent rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {creating && <Loader2 className="h-3 w-3 animate-spin" />}
                   Create

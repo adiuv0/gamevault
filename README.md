@@ -5,7 +5,7 @@
 
 Self-hosted game screenshot manager. Import your Steam screenshots, back up Steam and Special K captures from your gaming PC automatically, upload manually, annotate, search, and share — all from a dark, gaming-themed web UI built for Unraid.
 
-The current release is **1.2.3** ([changelog](CHANGELOG.md)). Updating? Read [Updating](#updating) first: several releases include one-way database migrations.
+The current release is **1.3.0** ([changelog](CHANGELOG.md)). Updating? Read [Updating](#updating) first: several releases include one-way database migrations.
 
 ## Features
 
