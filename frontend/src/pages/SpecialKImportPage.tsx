@@ -359,7 +359,7 @@ export function SpecialKImportPage() {
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-2xl font-bold text-text-primary mb-6">Special K Import</h1>
+      <h1 className="display-title text-3xl sm:text-4xl text-text-primary mb-6">Special K Import</h1>
 
       {/* Step indicator */}
       <div className="flex items-center gap-2 mb-6 text-xs text-text-muted">
@@ -420,7 +420,7 @@ export function SpecialKImportPage() {
             <button
               onClick={handleScan}
               disabled={!path.trim() || scanning}
-              className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-white rounded-md hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-on-accent rounded-md hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
               {scanning ? 'Scanning...' : 'Scan path'}
@@ -555,7 +555,7 @@ export function SpecialKImportPage() {
             <button
               onClick={handleStartImport}
               disabled={selectedFolders.size === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-white rounded-md hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-on-accent rounded-md hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Sparkles className="h-4 w-4" />
               Import {selectedFolders.size} Game{selectedFolders.size !== 1 ? 's' : ''} (
@@ -719,7 +719,7 @@ export function SpecialKImportPage() {
           <div className="flex items-center gap-3">
             <a
               href="/"
-              className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-white rounded-md hover:bg-accent-primary/90 transition-colors"
+              className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-on-accent rounded-md hover:bg-accent-primary/90 transition-colors"
             >
               View Library
             </a>

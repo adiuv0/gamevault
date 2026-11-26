@@ -307,8 +307,9 @@ async def merge_games(source_id: int, target_id: int) -> dict:
         await db.execute("INSERT INTO game_redirects VALUES (?, ?)", (source_id, target_id))
         if not target.get("cover_image_path") and source.get("cover_image_path"):
             await db.execute(
-                "UPDATE games SET cover_image_path = ?, updated_at = datetime('now') WHERE id = ?",
-                (source["cover_image_path"], target_id),
+                """UPDATE games SET cover_image_path = ?, accent_color = ?,
+                       updated_at = datetime('now') WHERE id = ?""",
+                (source["cover_image_path"], source.get("accent_color"), target_id),
             )
         # Keep the Steam app ID, or the next Steam import recreates the source game.
         if not target.get("steam_app_id") and source.get("steam_app_id"):
@@ -335,5 +336,9 @@ async def save_cover_image(game_id: int, image_data: bytes, filename: str = "cov
     cover_path.write_bytes(image_data)
 
     rel_path = f"{game['folder_name']}/{filename}"
-    await update_game(game_id, cover_image_path=rel_path)
+    from backend.services.cover_accent import accent_for_cover
+
+    await update_game(
+        game_id, cover_image_path=rel_path, accent_color=await accent_for_cover(rel_path)
+    )
     return rel_path

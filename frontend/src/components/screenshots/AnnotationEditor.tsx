@@ -149,7 +149,7 @@ export function AnnotationEditor({
             <button
               onClick={handleSave}
               disabled={!content.trim() || saving}
-              className="flex items-center gap-1 px-3 py-1 text-xs bg-accent-primary text-white rounded hover:bg-accent-primary/90 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1 px-3 py-1 text-xs bg-accent-primary text-on-accent rounded hover:bg-accent-primary/90 transition-colors disabled:opacity-50"
             >
               {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
               Save

@@ -23,7 +23,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   };
 
   return (
-    <header className="h-14 bg-bg-secondary border-b border-border flex items-center px-4 gap-4 sticky top-0 z-10">
+    <header className="h-14 bg-bg-primary border-b border-border flex items-center px-4 gap-4 sticky top-0 z-10">
       <button
         type="button"
         onClick={onMenuClick}

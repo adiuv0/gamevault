@@ -218,7 +218,7 @@ export function UploadPage() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold text-text-primary mb-6">Upload Screenshots</h1>
+      <h1 className="display-title text-3xl sm:text-4xl text-text-primary mb-6">Upload Screenshots</h1>
 
       {/* Game selector */}
       <div className="mb-6">
@@ -263,7 +263,7 @@ export function UploadPage() {
         <button
           onClick={handleUpload}
           disabled={!selectedGameId || pendingCount === 0 || isUploading}
-          className="flex items-center gap-2 px-6 py-2.5 bg-accent-primary text-white rounded-md font-medium hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex items-center gap-2 px-6 py-2.5 bg-accent-primary text-on-accent rounded-md font-medium hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Upload className="h-4 w-4" />
           {isUploading

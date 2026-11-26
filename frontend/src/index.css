@@ -1,27 +1,56 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* Bundled with the app: a self-hosted server shouldn't fetch fonts from elsewhere. */
+@import "@fontsource/barlow/latin-400.css";
+@import "@fontsource/barlow/latin-500.css";
+@import "@fontsource/barlow/latin-600.css";
+@import "@fontsource/barlow-condensed/latin-600.css";
+@import "@fontsource/barlow-condensed/latin-700.css";
+
 @theme {
-  --color-bg-primary: #0d1117;
-  --color-bg-secondary: #161b22;
-  --color-bg-tertiary: #21262d;
-  --color-accent-primary: #58a6ff;
+  --color-bg-primary: #0a0c10;
+  --color-bg-secondary: #11141a;
+  --color-bg-tertiary: #1b1f28;
+  /* Default accent. A game page overrides it with a colour from that game's cover. */
+  --color-accent-primary: #2fd3ef;
+  /* Text on top of the accent: the accent is always light, so this is dark. */
+  --color-on-accent: #05161b;
   --color-accent-success: #3fb950;
   --color-accent-warning: #d29922;
   --color-accent-danger: #f85149;
-  --color-text-primary: #e6edf3;
-  --color-text-secondary: #8b949e;
-  --color-text-muted: #484f58;
-  --color-border: #30363d;
+  --color-text-primary: #f4f5f7;
+  --color-text-secondary: #a3a9b5;
+  --color-text-muted: #6b7280;
+  --color-border: #242935;
+  --font-sans: 'Barlow', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-display: 'Barlow Condensed', 'Arial Narrow', 'Barlow', sans-serif;
 }
 
 /* Base styles */
 body {
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  font-family: var(--font-sans);
   margin: 0;
   min-height: 100vh;
+}
+
+/* Page and section titles: condensed capitals, the one loud element on a page. */
+.display-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  line-height: 0.95;
+}
+
+.shelf-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
 }
 
 /* Custom scrollbar */

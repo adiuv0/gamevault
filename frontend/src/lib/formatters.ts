@@ -11,6 +11,16 @@ export function formatDate(dateStr: string | null): string {
   });
 }
 
+/** "Feb 2025": for a date where the day doesn't matter. */
+export function formatMonthYear(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+}
+
+/** True for the "#rrggbb" accent colours the server derives from cover art. */
+export function isHexColor(value: string | null | undefined): value is string {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+}
+
 /**
  * Format a date with time.
  */

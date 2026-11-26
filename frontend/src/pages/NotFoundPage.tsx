@@ -11,7 +11,7 @@ export function NotFoundPage({ home = '/' }: { home?: string }) {
       action={
         <Link
           to={home}
-          className="px-4 py-2 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors no-underline"
+          className="px-4 py-2 bg-accent-primary text-on-accent rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors no-underline"
         >
           Go back
         </Link>

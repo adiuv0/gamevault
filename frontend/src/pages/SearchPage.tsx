@@ -138,7 +138,7 @@ export function SearchPage() {
               <Filter className="h-4 w-4" />
               Filters
               {hasActiveFilters && (
-                <span className="bg-accent-primary text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                <span className="bg-accent-primary text-on-accent text-xs rounded-full w-4 h-4 flex items-center justify-center">
                   !
                 </span>
               )}
@@ -326,12 +326,12 @@ function SearchResultCard({ result }: { result: SearchResult }) {
         {/* Badges */}
         <div className="absolute top-2 right-2 flex items-center gap-1">
           {Boolean(result.is_favorite) && (
-            <div className="bg-black/70 backdrop-blur-sm rounded-full p-1">
+            <div className="bg-black/75 rounded-full p-1">
               <Heart className="h-3 w-3 text-red-400 fill-red-400" />
             </div>
           )}
           {Boolean(result.has_annotation) && (
-            <div className="bg-black/70 backdrop-blur-sm rounded-full p-1">
+            <div className="bg-black/75 rounded-full p-1">
               <MessageSquare className="h-3 w-3 text-accent-primary" />
             </div>
           )}

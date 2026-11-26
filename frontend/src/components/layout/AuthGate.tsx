@@ -81,7 +81,7 @@ export function AuthGate({ children }: AuthGateProps) {
               setUnreachable(false);
               void checkAuth().then(finishCheck);
             }}
-            className="mt-4 px-4 py-2 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors"
+            className="mt-4 px-4 py-2 bg-accent-primary text-on-accent rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors"
           >
             Try again
           </button>

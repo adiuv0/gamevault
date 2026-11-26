@@ -129,7 +129,7 @@ export function DuplicateReviewPage() {
         <div className="flex items-center gap-3">
           <ScanSearch className="h-6 w-6 text-accent-primary" />
           <div>
-            <h1 className="text-2xl font-bold text-text-primary">Duplicate Review</h1>
+            <h1 className="display-title text-3xl sm:text-4xl text-text-primary">Duplicate Review</h1>
             <p className="text-sm text-text-muted">{total.toLocaleString()} {status}</p>
           </div>
         </div>
@@ -137,7 +137,7 @@ export function DuplicateReviewPage() {
           type="button"
           onClick={handleScan}
           disabled={scanActive}
-          className="flex items-center gap-2 px-3 py-2 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 disabled:opacity-50"
+          className="flex items-center gap-2 px-3 py-2 bg-accent-primary text-on-accent rounded-md text-sm font-medium hover:bg-accent-primary/90 disabled:opacity-50"
         >
           {scanActive ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanSearch className="h-4 w-4" />}
           Scan library
@@ -274,7 +274,7 @@ function CandidateRow({
             type="button"
             onClick={() => onDecision(candidate, true)}
             disabled={acting}
-            className="flex items-center gap-2 px-3 py-1.5 text-sm bg-accent-primary text-white rounded-md disabled:opacity-50"
+            className="flex items-center gap-2 px-3 py-1.5 text-sm bg-accent-primary text-on-accent rounded-md disabled:opacity-50"
           >
             {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitMerge className="h-4 w-4" />}
             Group variants

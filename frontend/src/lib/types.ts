@@ -6,6 +6,8 @@ export interface Game {
   cover_image_path: string | null;
   /** Public gallery only: set when the game has a cover. */
   cover_version?: string | null;
+  /** "#rrggbb" taken from the cover art; null or empty when the cover has no usable colour. */
+  accent_color?: string | null;
   developer: string | null;
   publisher: string | null;
   release_date: string | null;

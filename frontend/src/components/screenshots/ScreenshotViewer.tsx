@@ -518,7 +518,7 @@ export function ScreenshotViewer({
                   <button
                     onClick={handleCreateShareLink}
                     disabled={shareLoading}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-accent-primary text-white rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors disabled:opacity-50"
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-accent-primary text-on-accent rounded-md text-sm font-medium hover:bg-accent-primary/90 transition-colors disabled:opacity-50"
                   >
                     {shareLoading ? (
                       <Loader2 className="h-4 w-4 animate-spin" />

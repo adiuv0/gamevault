@@ -140,7 +140,7 @@ export function TimelinePage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Timeline</h1>
+          <h1 className="display-title text-3xl sm:text-4xl text-text-primary">Timeline</h1>
           {stats && stats.total_screenshots > 0 && (
             <p className="text-sm text-text-muted mt-1">
               {stats.total_screenshots.toLocaleString()} screenshots across {stats.total_days} days
@@ -162,7 +162,7 @@ export function TimelinePage() {
           <Filter className="h-3.5 w-3.5" />
           Filter
           {hasActiveFilters && (
-            <span className="bg-accent-primary text-white text-xs px-1.5 py-0.5 rounded-full">1</span>
+            <span className="bg-accent-primary text-on-accent text-xs px-1.5 py-0.5 rounded-full">1</span>
           )}
         </button>
       </div>
@@ -293,12 +293,12 @@ function TimelineDayCard({
       </div>
 
       {/* Screenshot grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-1">
         {day.screenshots.map(screenshot => (
           <button
             key={screenshot.id}
             onClick={() => onScreenshotClick(screenshot.id, screenshot.game_id)}
-            className="group relative aspect-video rounded-md overflow-hidden bg-bg-tertiary hover:ring-2 hover:ring-accent-primary transition-all"
+            className="group relative aspect-video rounded-sm overflow-hidden bg-bg-tertiary outline-2 -outline-offset-2 outline-transparent hover:outline-accent-primary transition-[outline-color]"
           >
             <img
               src={getThumbnailUrl(screenshot.id, 'sm', screenshot.media_version)}

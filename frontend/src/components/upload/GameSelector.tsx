@@ -142,7 +142,7 @@ export function GameSelector({ selectedGameId, onSelect }: GameSelectorProps) {
                 type="button"
                 onClick={handleCreate}
                 disabled={!newName.trim() || creating}
-                className="px-2 py-1.5 bg-accent-primary text-white rounded text-sm hover:bg-accent-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
+                className="px-2 py-1.5 bg-accent-primary text-on-accent rounded text-sm hover:bg-accent-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
               >
                 {creating ? (
                   <Loader2 className="h-3 w-3 animate-spin" />

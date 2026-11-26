@@ -63,7 +63,7 @@ export function VirtualizedScreenshotGrid({
           customScrollParent={scrollParent ?? undefined}
           data={screenshots}
           computeItemKey={(_, screenshot) => screenshot.id}
-          listClassName="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3"
+          listClassName="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-1"
           itemClassName="min-w-0"
           increaseViewportBy={{ top: 400, bottom: 800 }}
           rangeChanged={({ endIndex }) => {
