@@ -140,6 +140,8 @@ async def find_variant_group(db, asset: dict) -> int | None:
         if rank is not None:
             ranked.append((rank, other["group_id"]))
     if not ranked:
+        ranked = await _unique_hash_match(db, asset, own_group)
+    if not ranked:
         return None
 
     own_members = await _group_members(db, asset["game_id"], own_group) if own_group else []
@@ -156,6 +158,66 @@ async def find_variant_group(db, asset: dict) -> int | None:
             continue
         return group_id
     return None
+
+
+async def _unique_hash_match(db, asset: dict, own_group: int | None) -> list:
+    """Pair by picture alone when a capture time is missing on one side.
+
+    Files uploaded before capture times were read (or whose names carry none) have
+    ``taken_at`` NULL and a name made from the upload time, so neither time nor name
+    can match them to the Steam JPG of the same press. On a real library, 403 of 416
+    such Special K JXRs had exactly one JPG within ``VARIANT_HASH_DISTANCE`` bits and
+    the next-closest picture was 15+ bits away. So the match must be unambiguous both
+    ways: one capture of another type looks like ``asset``, and no other file of
+    ``asset``'s type looks like that capture. Anything less is left apart.
+    """
+    own_format = variant_format(asset["filename"], asset.get("format"))
+    # A capture time on both sides is decisive, and the timed search already ran.
+    time_filter = "AND taken_at IS NULL" if asset.get("taken_at") else ""
+    cursor = await db.execute(
+        f"""SELECT {_CANDIDATE_COLUMNS} FROM screenshots
+            WHERE game_id = ? AND perceptual_hash IS NOT NULL {time_filter}
+              AND COALESCE(capture_group_id, id) IS NOT ?""",
+        (asset["game_id"], own_group),
+    )
+    columns = [d[0] for d in cursor.description]
+    others = [dict(zip(columns, row)) for row in await cursor.fetchall()]
+    matches = [
+        other for other in others
+        if variant_format(other["filename"], other.get("format")) != own_format
+        and _same_shape(asset, other)
+        and hash_distance(asset["perceptual_hash"], other["perceptual_hash"])
+        <= VARIANT_HASH_DISTANCE
+    ]
+    if len({match["group_id"] for match in matches}) != 1:
+        return []
+
+    # The other way round: no second file of asset's type may fit that capture.
+    # Rows with a capture time count only when the match has none to rule them out.
+    partner_timed = any(match.get("taken_at") for match in matches)
+    cursor = await db.execute(
+        f"""SELECT {_CANDIDATE_COLUMNS} FROM screenshots
+            WHERE game_id = ? AND perceptual_hash IS NOT NULL
+              {"AND taken_at IS NULL" if partner_timed else ""}
+              AND COALESCE(capture_group_id, id) IS NOT ?
+              AND COALESCE(capture_group_id, id) IS NOT ?""",
+        (asset["game_id"], matches[0]["group_id"], own_group),
+    )
+    rivals = [dict(zip(columns, row)) for row in await cursor.fetchall()]
+    for rival in rivals:
+        if variant_format(rival["filename"], rival.get("format")) != own_format:
+            continue
+        if any(
+            _same_shape(rival, match)
+            and hash_distance(rival["perceptual_hash"], match["perceptual_hash"])
+            <= VARIANT_HASH_DISTANCE
+            for match in matches
+        ):
+            return []
+    distance = min(
+        hash_distance(asset["perceptual_hash"], match["perceptual_hash"]) for match in matches
+    )
+    return [((float(VARIANT_SECONDS), distance), matches[0]["group_id"])]
 
 
 async def _group_members(db, game_id: int, group_id: int) -> list[dict]:

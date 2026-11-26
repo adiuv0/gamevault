@@ -19,6 +19,7 @@ rollback procedures. Migrations run automatically when GameVault starts.
 | `1.2.1` | `1.2.2` | None | No schema change |
 | `1.2.2` | `1.2.3` | Applies `m018` | Automated fixture upgrades the shipped `1.2.2` schema; tests cover the new column and the background repair `m018` queues |
 | `1.2.3` | `1.3.0` | Applies `m019` | Automated fixture upgrades the shipped `1.2.3` schema; tests cover the new column and the startup backfill |
+| `1.3.0` | `1.3.1` | Applies `m020` | Automated fixture upgrades the shipped `1.3.0` schema; tests cover the background regroup `m020` queues |
 
 The `1.0.0` migrations add gallery indexes, logical capture groups, duplicate review,
 viewer previews, and durable import/upload jobs to Docker `0.3.1`. They do not rewrite
@@ -55,6 +56,13 @@ game's cover art that the interface uses for highlights. Existing games are fill
 after startup by reading each cover once from the library folder; nothing is fetched
 and no file is changed. Older releases ignore the extra column, so rolling back to
 `1.2.3` needs no restore.
+
+`m020` queues the same background scan as `m017`, after pairing learned to match
+copies that have no capture time (files uploaded before times were read) by
+picture alone when exactly one copy of another type fits. It changes only
+`screenshots.capture_group_id`, so older releases read the new groups as they are,
+rolling back to `1.3.0` needs no restore, and each pairing can be undone with
+**Ungroup**.
 
 ## Before Upgrading
 

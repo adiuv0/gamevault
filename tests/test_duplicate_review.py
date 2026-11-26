@@ -439,10 +439,24 @@ async def test_pairing_requires_every_signal(duplicate_library, overrides):
 
 @pytest.mark.asyncio
 async def test_like_wildcards_in_names_do_not_pair(duplicate_library):
+    from backend.services.screenshot_service import create_screenshot
+
     db, _ = duplicate_library
-    _, hdr = await _create_named_pair(
-        db, sdr_name="shotA1.png", hdr_name="shot_1.jxr",
-        sdr_taken_at=None, hdr_taken_at=None,
+    sdr, _ = await _create_named_pair(
+        db, sdr_name="shotA1.png", hdr_name="placeholder.jxr",
+        sdr_taken_at=None, hdr_taken_at=None, hdr_hash="f" * 32,
+    )
+    # A second PNG with the same picture makes the picture-only match ambiguous,
+    # so only a (wrong) wildcard name match could pair the JXR.
+    await create_screenshot(
+        game_id=sdr["game_id"], filename="elsewhere.png", file_path="Pairs/elsewhere.png",
+        format="png", is_hdr=False, width=640, height=360, perceptual_hash="0" * 32,
+        recalculate_stats=False,
+    )
+    hdr = await create_screenshot(
+        game_id=sdr["game_id"], filename="shot_1.jxr", file_path="Pairs/shot_1.jxr",
+        format="jxr", is_hdr=True, width=640, height=360, perceptual_hash="0" * 32,
+        recalculate_stats=False,
     )
 
     assert hdr["capture_group_id"] == hdr["id"]
@@ -618,3 +632,133 @@ async def test_upgrade_regroups_existing_library_in_the_background(duplicate_lib
     )
     assert [row[0] for row in await cursor.fetchall()] == [ids[0], ids[0]]
     assert (await duplicate_service.get_latest_scan_job())["status"] == "completed"
+
+
+def _hash(bits: int) -> str:
+    """A 128-bit fingerprint with the lowest ``bits`` bits set."""
+    return f"{(1 << bits) - 1:032x}"
+
+
+async def _add_untimed(game_id: int, name: str, image_format: str,
+                       perceptual_hash: str) -> dict:
+    from backend.services.screenshot_service import create_screenshot
+
+    return await create_screenshot(
+        game_id=game_id, filename=name, file_path=f"Pairs/{name}",
+        format=image_format, is_hdr=image_format == "jxr", width=3840, height=2160,
+        perceptual_hash=perceptual_hash, recalculate_stats=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_untimed_copy_pairs_with_the_one_matching_picture(duplicate_library):
+    """A JXR uploaded with no capture time, named by its upload minute."""
+    from backend.services.game_service import get_game, update_screenshot_stats
+
+    db, _ = duplicate_library
+    game_id = await _new_game(db)
+    jpg = await _add(db, game_id, "steam_1.jpg", "jpeg", "2025-06-16T12:01:55-07:00", _hash(0))
+    other = await _add(db, game_id, "steam_2.jpg", "jpeg", "2025-06-16T12:09:00-07:00",
+                       "f" * 16 + "0" * 16)
+    jxr = await _add_untimed(game_id, "Pairs 2026_04_28 08_30.jxr", "jxr", _hash(6))
+    await update_screenshot_stats(game_id)
+
+    assert jxr["capture_group_id"] == jpg["id"]
+    assert other["capture_group_id"] == other["id"]
+    assert (await get_game(game_id))["screenshot_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_timed_copy_pairs_with_an_untimed_one_already_there(duplicate_library):
+    db, _ = duplicate_library
+    game_id = await _new_game(db)
+    jxr = await _add_untimed(game_id, "Pairs 2026_04_28 08_30.jxr", "jxr", _hash(0))
+    jpg = await _add(db, game_id, "steam_1.jpg", "jpeg", "2025-06-16T12:01:55", _hash(8))
+
+    assert jpg["capture_group_id"] == jxr["id"]
+
+
+@pytest.mark.asyncio
+async def test_untimed_copy_stays_apart_when_two_pictures_fit(duplicate_library):
+    db, _ = duplicate_library
+    game_id = await _new_game(db)
+    await _add(db, game_id, "a.jpg", "jpeg", "2025-06-16T12:01:55", _hash(0))
+    await _add(db, game_id, "b.jpg", "jpeg", "2025-06-16T12:30:00", _hash(3))
+    jxr = await _add_untimed(game_id, "upload 08_30.jxr", "jxr", _hash(1))
+
+    assert jxr["capture_group_id"] == jxr["id"]
+
+
+@pytest.mark.asyncio
+async def test_untimed_copy_stays_apart_when_a_rival_fits_the_capture(duplicate_library):
+    """Two untimed JXRs both look like the one JPG: neither claims it."""
+    db, _ = duplicate_library
+    game_id = await _new_game(db)
+    jpg = await _add(db, game_id, "a.jpg", "jpeg", "2025-06-16T12:01:55", _hash(0))
+    first = await _add_untimed(game_id, "upload 08_30.jxr", "jxr", "f" * 32)
+    await db.execute(
+        "UPDATE screenshots SET perceptual_hash = ? WHERE id = ?", (_hash(2), first["id"])
+    )
+    await db.commit()
+    second = await _add_untimed(game_id, "upload 08_31.jxr", "jxr", _hash(4))
+
+    assert second["capture_group_id"] == second["id"]
+    assert jpg["capture_group_id"] == jpg["id"]
+
+
+@pytest.mark.asyncio
+async def test_untimed_copy_needs_a_close_picture_and_same_shape(duplicate_library):
+    from backend.services.screenshot_service import create_screenshot
+
+    db, _ = duplicate_library
+    game_id = await _new_game(db)
+    await _add(db, game_id, "a.jpg", "jpeg", "2025-06-16T12:01:55", _hash(0))
+    far = await _add_untimed(game_id, "far.jxr", "jxr", _hash(13))
+    wide = await create_screenshot(
+        game_id=game_id, filename="wide.png", file_path="Pairs/wide.png", format="png",
+        width=5120, height=2160, perceptual_hash=_hash(0), recalculate_stats=False,
+    )
+
+    assert far["capture_group_id"] == far["id"]
+    assert wide["capture_group_id"] == wide["id"]
+
+
+@pytest.mark.asyncio
+async def test_upgrade_pairs_untimed_copies_in_the_background(duplicate_library):
+    """m020 queues a scan; a 1.3.0 library with untimed JXRs regroups on start."""
+    import asyncio
+
+    from backend.migrations.m020_pair_untimed_variants import upgrade
+    from backend.services import duplicate_service
+    from backend.services.game_service import get_game
+
+    db, _ = duplicate_library
+    game_id = await _new_game(db, "Legacy")
+    ids = []
+    for name, image_format, taken_at, fingerprint in (
+        ("steam_1.jpg", "jpeg", "2025-06-16T12:01:55", _hash(0)),
+        ("steam_2.jpg", "jpeg", "2025-06-16T12:09:00", "f" * 16 + "0" * 16),
+        ("Legacy 2026_04_28 08_30.jxr", "jxr", None, _hash(5)),
+        ("Legacy 2026_04_28 08_30 (1).jxr", "jxr", None, "f" * 16 + "0" * 15 + "7"),
+    ):
+        cursor = await db.execute(
+            """INSERT INTO screenshots (game_id, filename, file_path, format, width,
+                   height, taken_at, perceptual_hash, is_hdr)
+               VALUES (?, ?, ?, ?, 3840, 2160, ?, ?, ?)""",
+            (game_id, name, f"Legacy/{name}", image_format, taken_at, fingerprint,
+             int(image_format == "jxr")),
+        )
+        ids.append(cursor.lastrowid)
+    await db.execute("UPDATE screenshots SET capture_group_id = id WHERE game_id = ?", (game_id,))
+    await db.commit()
+
+    await upgrade(db)
+    await db.commit()
+    await duplicate_service.resume_scan_job()
+    await asyncio.wait_for(duplicate_service._startup_scan, timeout=10)
+
+    cursor = await db.execute(
+        "SELECT capture_group_id FROM screenshots WHERE game_id = ? ORDER BY id", (game_id,)
+    )
+    assert [row[0] for row in await cursor.fetchall()] == [ids[0], ids[1], ids[0], ids[1]]
+    assert (await get_game(game_id))["screenshot_count"] == 2

@@ -29,6 +29,7 @@ MIGRATIONS = [
     "backend.migrations.m017_repair_capture_variants",
     "backend.migrations.m018_steam_capture_times",
     "backend.migrations.m019_game_accent_color",
+    "backend.migrations.m020_pair_untimed_variants",
 ]
 
 
