@@ -5,8 +5,9 @@ import binascii
 import json
 
 from backend.database import atomic, get_db
-from backend.services.capture_matching import find_variant_group
+from backend.services.capture_matching import find_variant_group, share_capture_time
 from backend.services.game_service import update_screenshot_stats
+from backend.services.image_processor import parse_capture_time
 from backend.services.media_cache_service import media_version
 from backend.services.performance_diagnostics import measure_async
 
@@ -338,6 +339,8 @@ async def create_screenshot(
             "UPDATE screenshots SET capture_group_id = ? WHERE id = ?",
             (screenshot_id, screenshot_id),
         )
+    else:
+        await share_capture_time(db, game_id, fields["capture_group_id"])
     # Sync FTS index
     await _sync_fts(screenshot_id, commit=False)
 
@@ -501,6 +504,40 @@ async def check_duplicate_steam_id(steam_id: str) -> bool:
         (steam_id,),
     )
     return await cursor.fetchone() is not None
+
+
+async def apply_capture_time_hints(times: dict[str, str]) -> int:
+    """Date stored copies that have no capture time from times a client reports.
+
+    ``times`` maps a file's sha256 to when the copy on the client was taken.
+    Only rows with ``taken_at`` NULL change; their grouped copies share the time.
+    Returns how many rows were dated.
+    """
+    db = await get_db()
+    dated = 0
+    games: set[int] = set()
+    for sha, when in times.items():
+        captured = parse_capture_time(when) if isinstance(when, str) else None
+        if captured is None:
+            continue
+        cursor = await db.execute(
+            """SELECT id, game_id, COALESCE(capture_group_id, id) FROM screenshots
+               WHERE sha256_hash = ? AND taken_at IS NULL""",
+            (sha,),
+        )
+        for screenshot_id, game_id, group_id in await cursor.fetchall():
+            await db.execute(
+                "UPDATE screenshots SET taken_at = ? WHERE id = ? AND taken_at IS NULL",
+                (captured.isoformat(timespec="seconds"), screenshot_id),
+            )
+            await share_capture_time(db, game_id, group_id)
+            dated += 1
+            games.add(game_id)
+    for game_id in games:
+        await update_screenshot_stats(game_id, commit=False)
+    if dated:
+        await db.commit()
+    return dated
 
 
 async def check_hashes_batch(hashes: list[str]) -> set[str]:

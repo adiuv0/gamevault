@@ -290,8 +290,15 @@ class GameVaultClient:
 
     # ── Sync ─────────────────────────────────────────────────────────────────
 
-    def existing_hashes(self, hashes: list[str]) -> set[str]:
-        body = self._json("POST", "/api/screenshots/check-hashes", json={"hashes": hashes})
+    def existing_hashes(self, hashes: list[str],
+                        capture_times: dict[str, str] | None = None) -> set[str]:
+        """Which hashes the server has. ``capture_times`` (sha256 -> local capture
+        time) lets the server date a stored copy that has no time of its own;
+        servers before 1.4.1 ignore it."""
+        payload: dict = {"hashes": hashes}
+        if capture_times:
+            payload["capture_times"] = capture_times
+        body = self._json("POST", "/api/screenshots/check-hashes", json=payload)
         return set(body.get("existing", []))
 
     def game_by_steam_app_id(self, app_id: int, name_hint: str | None = None) -> dict:

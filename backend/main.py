@@ -23,6 +23,12 @@ from starlette.datastructures import MutableHeaders
 from backend.config import DEFAULT_SECRET_SENTINEL, settings
 from backend.database import close_db, database_session, init_db
 from backend.services.duplicate_service import resume_scan_job, stop_scan_job
+from backend.services.embedded_capture_times import (
+    resume_repair_job as resume_embedded_times_job,
+)
+from backend.services.embedded_capture_times import (
+    stop_repair_job as stop_embedded_times_job,
+)
 from backend.services.import_job_service import start_import_worker, stop_import_worker
 from backend.services.performance_diagnostics import MediaTimingMiddleware
 from backend.services.cover_accent import start_accent_backfill, stop_accent_backfill
@@ -159,7 +165,8 @@ async def lifespan(app: FastAPI):
     _ensure_secret_key()
     await init_db()
     await start_import_worker()
-    await resume_scan_job()
+    # The duplicate scan waits for a queued capture time repair: dated copies pair by time.
+    await resume_embedded_times_job(then=resume_scan_job)
     await resume_repair_job()
     await start_accent_backfill()
 
@@ -175,6 +182,7 @@ async def lifespan(app: FastAPI):
     finally:
         # Stop the worker before closing SQLite. Running jobs are requeued on startup.
         await stop_import_worker()
+        await stop_embedded_times_job()
         await stop_scan_job()
         await stop_repair_job()
         await stop_accent_backfill()

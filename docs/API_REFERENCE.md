@@ -109,7 +109,7 @@ Revokes one device. Its next request gets 401 and the app asks to sign in again.
 
 ### `GET /api/health` — *public*
 
-Returns `{ "status": "ok", "version": "1.4.0" }`, plus `instance`, a random id
+Returns `{ "status": "ok", "version": "1.4.1" }`, plus `instance`, a random id
 created once per database. GameVault Sync uses it to tell servers apart: the
 same server under another address keeps the app's memory of what it uploaded,
 and a different server at the same address starts fresh. Used by Docker
@@ -276,9 +276,12 @@ updated.
 
 ### `POST /api/screenshots/check-hashes`
 
-Bulk hash existence check. Body: `{ "hashes": ["sha256...", ...] }`.
-Returns `{ "existing": [...], "new": [...] }`. Used by GameVault Sync to
-avoid uploading duplicates.
+Bulk hash existence check. Body: `{ "hashes": ["sha256...", ...] }`, optionally
+with `"capture_times": { "sha256...": "2025-07-04T19:42:07" }` (local time of
+capture). Returns `{ "existing": [...], "new": [...], "capture_times_applied": n }`.
+Used by GameVault Sync to avoid uploading duplicates; a reported time fills in
+the capture time of a stored copy that has none (and of the copies grouped with
+it), and never replaces one it already has.
 
 ### `POST /api/screenshots/{id}/share`
 

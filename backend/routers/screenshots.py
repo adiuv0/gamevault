@@ -28,6 +28,9 @@ from backend.services.media_cache_service import media_response_headers
 
 class HashCheckRequest(BaseModel):
     hashes: list[str]
+    # sha256 -> when the local file was taken (ISO 8601, local time), as GameVault
+    # Sync works it out. Fills in the time of a stored copy that has none.
+    capture_times: dict[str, str] | None = None
 
 router = APIRouter(
     prefix="/api/screenshots",
@@ -44,7 +47,16 @@ async def check_hashes(data: HashCheckRequest):
     """
     existing = await screenshot_service.check_hashes_batch(data.hashes)
     all_set = set(data.hashes)
-    return {"existing": list(existing), "new": list(all_set - existing)}
+    dated = 0
+    if data.capture_times:
+        dated = await screenshot_service.apply_capture_time_hints(
+            {sha: when for sha, when in data.capture_times.items() if sha in existing}
+        )
+    return {
+        "existing": list(existing),
+        "new": list(all_set - existing),
+        "capture_times_applied": dated,
+    }
 
 
 @router.get("/{screenshot_id}", response_model=ScreenshotResponse)

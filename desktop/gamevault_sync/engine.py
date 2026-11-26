@@ -226,11 +226,17 @@ class SyncEngine:
 
     def _ask_server(self, candidates: list[tuple[LocalFile, str]], report: SyncReport) -> list[tuple[LocalFile, str]]:
         hashes = sorted({sha for _, sha in candidates})
+        # A copy uploaded through the browser may have no capture time (Steam's
+        # JPGs carry none); the local file's name or Steam's records still do.
+        times = {sha: item.taken_at_hint for item, sha in candidates if item.taken_at_hint}
         existing: set[str] = set()
         for start in range(0, len(hashes), HASH_BATCH):
             self._check_cancel()
             self._on_progress(Progress("checking", start, len(hashes)))
-            existing |= self.client.existing_hashes(hashes[start:start + HASH_BATCH])
+            chunk = hashes[start:start + HASH_BATCH]
+            existing |= self.client.existing_hashes(
+                chunk, {sha: times[sha] for sha in chunk if sha in times}
+            )
         on_server = [item.path for item, sha in candidates if sha in existing]
         self.state.mark(on_server, SYNCED, "Already in GameVault")
         report.already += len(on_server)

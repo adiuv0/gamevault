@@ -31,6 +31,7 @@ MIGRATIONS = [
     "backend.migrations.m019_game_accent_color",
     "backend.migrations.m020_pair_untimed_variants",
     "backend.migrations.m021_library_revision",
+    "backend.migrations.m022_embedded_capture_times",
 ]
 
 

@@ -12,6 +12,7 @@ from backend.services.capture_matching import (
     is_complementary_variant_pair,
     is_known_hdr_variant,
     same_capture_name,
+    share_capture_time,
 )
 from backend.services.filesystem import safe_library_path
 from backend.services.game_service import update_screenshot_stats
@@ -291,6 +292,7 @@ async def _pair_variant(db, asset: dict) -> bool:
            WHERE game_id = ? AND COALESCE(capture_group_id, id) IN (?, ?)""",
         (min(own_group, other_group), asset["game_id"], own_group, other_group),
     )
+    await share_capture_time(db, asset["game_id"], min(own_group, other_group))
     left, right = sorted((asset["id"], other_group))
     await db.execute(
         """INSERT INTO duplicate_candidates
