@@ -17,7 +17,7 @@ The current release is **1.3.0** ([changelog](CHANGELOG.md)). Updating? Read [Up
 - **Game Library** — grid and list views, cover art, per-game screenshot counts, and metadata from Steam/SteamGridDB/IGDB
 - **Annotations** — rich text editor (Markdown) for adding notes to any screenshot
 - **Full-Text Search** — FTS5-powered search across game names, filenames, descriptions, and annotations with BM25 ranking
-- **Timeline View** — browse screenshots chronologically, grouped by day, with stats and a game filter
+- **Timeline View** — browse captures by day and play session, with streaks, a clickable capture calendar, most captured games, "on this day" and an hour-of-day chart
 - **Share Links** — generate public links with OpenGraph and Twitter Card meta tags for rich previews on Discord, Slack, etc.
 - **Public Gallery** — a read-only `/gallery` for visitors, showing the games you leave marked public (new games start public)
 - **Single-User Auth** — JWT-based authentication with password setup, change, and optional disable for LAN-only setups; GameVault Sync signs in with its own revocable device token

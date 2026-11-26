@@ -7,6 +7,43 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-26
+
+The Timeline now tells you how you play, not only what you captured.
+
+### Added
+
+- **Play sessions.** Each day on the Timeline is split into sessions: a run of
+  one game's captures with no gap longer than 45 minutes. A session shows its
+  game, start and end time, length, capture and HDR counts, and up to 12
+  thumbnails spread from its first capture to its last, edged in the game's
+  cover accent. Length is the time between the first and last capture, not
+  time played.
+- **Stats strip** for a year or all time, following the game filter:
+  captures, days with captures, current and best streak, busiest day, play
+  sessions with the longest one, and the share of captures with an HDR file.
+- **Capture calendar.** A heatmap of captures per day for the chosen year (or
+  the last 53 weeks). Clicking a day jumps the Timeline to it; **Back to
+  latest** returns.
+- **Most captured games** for the range, in each game's accent colour.
+- **On this day**: captures from today's date in earlier years, when there
+  are any.
+- **When you capture**: captures by hour of day, read as each capture's own
+  clock wrote it (the time zone question from the 1.2.1 audit is still open,
+  so treat it as roughly right).
+- `GET /api/timeline/insights` serves all of the above. Each day of
+  `GET /api/timeline` gains `sessions`, `session_count` and `session_minutes`.
+
+### Changed
+
+- A Timeline day now sends up to 12 previews per session instead of its
+  newest 50 captures, so a long evening shows its beginning as well as its
+  end.
+- Statistics count logical captures only, like the rest of the app. They read
+  the existing per-day index and are cached until a capture, game or
+  annotation changes (migration `m021`, which adds only a revision counter).
+  At 10,000 captures a cache miss takes about 40 ms and a hit well under one.
+
 ## [1.3.1] - 2026-11-26
 
 ### Fixed

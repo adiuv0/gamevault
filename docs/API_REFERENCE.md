@@ -109,7 +109,7 @@ Revokes one device. Its next request gets 401 and the app asks to sign in again.
 
 ### `GET /api/health` — *public*
 
-Returns `{ "status": "ok", "version": "1.3.1" }`, plus `instance`, a random id
+Returns `{ "status": "ok", "version": "1.4.0" }`, plus `instance`, a random id
 created once per database. GameVault Sync uses it to tell servers apart: the
 same server under another address keeps the app's memory of what it uploaded,
 and a different server at the same address starts fresh. Used by Docker
@@ -541,7 +541,9 @@ hyphens. Each query word becomes a `"word"*` prefix term.
 
 ### `GET /api/timeline?...`
 
-Screenshots grouped by day, paginated by days. Query parameters:
+Captures grouped by day and play session, paginated by days. Counts are
+logical captures: a grouped JPG + JXR is one. A play session is a run of one
+game's captures with no gap longer than 45 minutes. Query parameters:
 
 | Param | Default | Notes |
 |---|---|---|
@@ -560,7 +562,17 @@ Returns:
       "date": "2026-04-25",
       "screenshot_count": 12,
       "games": ["Game A", "Game B"],
-      "screenshots": [/* up to 50 thumbnails */]
+      "session_count": 2,
+      "session_minutes": 95,
+      "sessions": [
+        {
+          "game_id": 3, "game_name": "Game A", "accent_color": "#e8833a",
+          "started_at": "2026-04-25T21:12:00", "ended_at": "2026-04-25T22:47:00",
+          "duration_minutes": 95, "capture_count": 9, "hdr_count": 4,
+          "screenshot_ids": [/* up to 12, spread from first to last capture */]
+        }
+      ],
+      "screenshots": [/* the sessions' preview captures, in session order */]
     }
   ],
   "total_days": 47,
@@ -573,6 +585,24 @@ Returns:
 
 Returns `{ total_screenshots, total_days, earliest_date, latest_date,
 total_games }`.
+
+### `GET /api/timeline/insights?...`
+
+Statistics for the Timeline page. Query parameters: `year` (omit for all
+time), `game_id`, and `today`, the viewer's local `YYYY-MM-DD` (streaks, the
+all-time heatmap window and "on this day" are relative to it; defaults to the
+server's date). Results are cached until any capture, game or annotation
+changes (migration `m021`).
+
+Returns `year`, `years` (newest first), `range`, `total_captures`,
+`active_days`, `games`, `hdr_captures` (captures with any HDR file),
+`busiest_day { date, captures, game_id, game_name }`,
+`best_streak` and `current_streak` (`{ days, start, end }`), `session_count`,
+`longest_session { game_id, game_name, date, duration_minutes, captures }`,
+`top_games` (five, with `accent_color`), `other_games { games, captures }`,
+`heatmap { start, end, days: [[date, captures], ...] }` (the year, or the 371
+days ending `today`), and `on_this_day { date, captures: [...] }`, up to 8
+captures from this calendar day in earlier years.
 
 ---
 

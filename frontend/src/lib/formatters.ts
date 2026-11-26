@@ -70,3 +70,12 @@ export function timeAgo(dateStr: string): string {
   if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
   return formatDate(dateStr);
 }
+
+/** "2 h 36 min", "45 min", "under a minute". */
+export function formatSessionLength(minutes: number): string {
+  if (minutes < 1) return 'under a minute';
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (!hours) return `${rest} min`;
+  return rest ? `${hours} h ${String(rest).padStart(2, '0')} min` : `${hours} h`;
+}
