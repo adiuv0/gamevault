@@ -334,6 +334,13 @@ async def create_screenshot(
         values,
     )
     screenshot_id = cursor.lastrowid
+    if fields.get("sha256_hash"):
+        # Imports and Sync skip deleted files before they get here, so a file that
+        # arrives anyway was uploaded on purpose: stop treating it as deleted.
+        await db.execute(
+            "DELETE FROM deleted_screenshots WHERE sha256_hash = ?",
+            (fields["sha256_hash"],),
+        )
     if fields.get("capture_group_id") is None:
         await db.execute(
             "UPDATE screenshots SET capture_group_id = ? WHERE id = ?",
@@ -487,13 +494,27 @@ async def claim_unless_duplicate(key: str, sha256: str, claimed: set[str]) -> bo
         return True
     claimed.add(key)
     try:
-        duplicate = await check_duplicate_hash(sha256) is not None
+        # Imports skip files the person deleted, as well as ones already stored.
+        duplicate = (
+            await check_duplicate_hash(sha256) is not None
+            or await is_deleted_hash(sha256)
+        )
     except BaseException:
         claimed.discard(key)
         raise
     if duplicate:
         claimed.discard(key)
     return duplicate
+
+
+async def is_deleted_hash(sha256_hash: str) -> bool:
+    """Whether a file with this hash was deleted from the library on purpose."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT 1 FROM deleted_screenshots WHERE sha256_hash = ?",
+        (sha256_hash,),
+    )
+    return await cursor.fetchone() is not None
 
 
 async def check_duplicate_steam_id(steam_id: str) -> bool:
@@ -541,19 +562,25 @@ async def apply_capture_time_hints(times: dict[str, str]) -> int:
 
 
 async def check_hashes_batch(hashes: list[str]) -> set[str]:
-    """Return the subset of hashes that already exist in the database."""
+    """Return the subset of hashes the server has, or that were deleted on purpose.
+
+    GameVault Sync uploads whatever this leaves out, so a deleted screenshot
+    counts as present: otherwise the next sync would upload it again.
+    """
     if not hashes:
         return set()
     db = await get_db()
     existing: set[str] = set()
     # SQLite has a variable limit (~999), so batch in chunks
-    chunk_size = 500
+    chunk_size = 400
     for i in range(0, len(hashes), chunk_size):
         chunk = hashes[i : i + chunk_size]
         placeholders = ", ".join(["?"] * len(chunk))
         cursor = await db.execute(
-            f"SELECT sha256_hash FROM screenshots WHERE sha256_hash IN ({placeholders})",
-            chunk,
+            f"""SELECT sha256_hash FROM screenshots WHERE sha256_hash IN ({placeholders})
+                UNION
+                SELECT sha256_hash FROM deleted_screenshots WHERE sha256_hash IN ({placeholders})""",
+            chunk + chunk,
         )
         rows = await cursor.fetchall()
         existing.update(row[0] for row in rows)

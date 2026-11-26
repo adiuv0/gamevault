@@ -22,6 +22,7 @@ rollback procedures. Migrations run automatically when GameVault starts.
 | `1.3.0` | `1.3.1` | Applies `m020` | Automated fixture upgrades the shipped `1.3.0` schema; tests cover the background regroup `m020` queues |
 | `1.3.1` | `1.4.0` | Applies `m021` | Automated fixture upgrades the shipped `1.3.1` schema; tests cover the revision triggers through the Timeline statistics cache |
 | `1.4.0` | `1.4.1` | Applies `m022` | Automated fixture upgrades the shipped `1.4.0` schema; tests cover the capture time repair `m022` queues and the regroup behind it |
+| `1.4.1` | `1.5.0` | Applies `m023` | Automated fixture upgrades the shipped `1.4.1` schema; tests cover deletes recording hashes and Sync/imports skipping them |
 
 The `1.0.0` migrations add gallery indexes, logical capture groups, duplicate review,
 viewer previews, and durable import/upload jobs to Docker `0.3.1`. They do not rewrite
@@ -79,6 +80,11 @@ scan that waits for it, so newly dated copies pair by time. It only fills
 `screenshots.taken_at` where it was NULL, and an undated copy grouped with a dated
 one takes that time. No schema change: older releases read the times as they
 are, so rolling back to `1.4.0` needs no restore (the times stay filled in).
+
+`m023` adds an empty `deleted_screenshots` table: the sha256 of each file deleted
+in GameVault, so GameVault Sync and the Steam / Special K importers don't bring it
+back. It changes no existing data, and older releases ignore the table, so rolling
+back to `1.4.1` needs no restore (Sync would then upload deleted files again).
 
 ## Before Upgrading
 

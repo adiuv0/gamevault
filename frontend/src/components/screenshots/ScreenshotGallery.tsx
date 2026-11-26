@@ -4,14 +4,18 @@ import type { ScreenshotListItem } from '@/lib/types';
 
 interface ScreenshotGalleryProps {
   screenshots: ScreenshotListItem[];
-  onSelect: (index: number) => void;
+  onSelect: (index: number, shiftKey?: boolean) => void;
   onEndReached?: () => void;
+  selecting?: boolean;
+  selectedIds?: ReadonlySet<number>;
 }
 
 export function ScreenshotGallery({
   screenshots,
   onSelect,
   onEndReached,
+  selecting = false,
+  selectedIds,
 }: ScreenshotGalleryProps) {
   return (
     <VirtualizedScreenshotGrid
@@ -23,6 +27,8 @@ export function ScreenshotGallery({
           screenshot={screenshot}
           index={index}
           onSelect={select}
+          selecting={selecting}
+          selected={selecting && !!selectedIds?.has(screenshot.id)}
         />
       )}
     />

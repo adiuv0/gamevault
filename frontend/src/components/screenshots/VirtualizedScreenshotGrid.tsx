@@ -4,10 +4,14 @@ import type { ScreenshotListItem } from '@/lib/types';
 
 interface VirtualizedScreenshotGridProps {
   screenshots: ScreenshotListItem[];
-  onSelect: (index: number) => void;
+  onSelect: (index: number, shiftKey?: boolean) => void;
   onEndReached?: () => void;
   /** Cards receive the index and call onSelect themselves so they can be memoized. */
-  renderItem: (screenshot: ScreenshotListItem, index: number, onSelect: (index: number) => void) => ReactNode;
+  renderItem: (
+    screenshot: ScreenshotListItem,
+    index: number,
+    onSelect: (index: number, shiftKey?: boolean) => void,
+  ) => ReactNode;
 }
 
 function findScrollParent(element: HTMLElement | null): HTMLElement | null {

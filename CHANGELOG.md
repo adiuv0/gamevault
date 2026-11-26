@@ -7,6 +7,23 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-26
+
+### Added
+
+- **Delete a screenshot.** The viewer has a delete button (or press Del). A
+  grouped capture asks whether to delete all its files or only the one shown,
+  so you can drop the Steam JPG and keep the Special K JXR; the note, share link
+  and favourite stay with the file that's kept. Files, thumbnails, previews and
+  full-size renders are removed from the library folder, and game counts and
+  Timeline statistics update.
+- **Delete several at once.** "Select" on a game page turns the grid into a
+  multi-select (shift-click selects a range); delete the selection in one go.
+- **Deleted screenshots stay deleted.** GameVault remembers each deleted file
+  (migration `m023`, a new table), so GameVault Sync doesn't upload it again
+  and Steam / Special K imports skip it. Uploading the file by hand on the
+  Upload page brings it back.
+
 ## [1.4.1] - 2026-11-26
 
 ### Fixed

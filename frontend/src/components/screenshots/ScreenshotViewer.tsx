@@ -20,10 +20,13 @@ import {
   getScreenshotFullUrl,
   getScreenshotImageUrl,
   getScreenshotPreviewUrl,
+  deleteScreenshot,
+  type DeleteResult,
 } from '@/api/screenshots';
 import { toggleFavorite, createShareLink, getShareLink, deleteShareLink } from '@/api/screenshots';
 import { AnnotationEditor } from './AnnotationEditor';
 import { ProgressiveImage } from '@/components/shared/ProgressiveImage';
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { usePreloadImages } from '@/hooks/usePreloadImages';
 import { formatDateTime, formatFileSize } from '@/lib/formatters';
 import type {
@@ -67,6 +70,8 @@ interface ScreenshotViewerProps {
   onFavoriteToggle?: (id: number, isFav: boolean) => void;
   onAnnotationChanged?: (id: number, hasAnnotation: boolean) => void;
   onGroupingChanged?: () => void;
+  /** Called after a delete. `result.deleted_captures` is 0 when only one file of the capture went. */
+  onDeleted?: (id: number, result: DeleteResult) => void;
 }
 
 export function ScreenshotViewer({
@@ -77,6 +82,7 @@ export function ScreenshotViewer({
   onFavoriteToggle,
   onAnnotationChanged,
   onGroupingChanged,
+  onDeleted,
 }: ScreenshotViewerProps) {
   const [showInfo, setShowInfo] = useState(false);
   const [ungrouping, setUngrouping] = useState(false);
@@ -86,6 +92,9 @@ export function ScreenshotViewer({
   const [detailsById, setDetailsById] = useState<Record<number, Screenshot>>({});
   const [detailErrorId, setDetailErrorId] = useState<number | null>(null);
   const [originalFailures, setOriginalFailures] = useState<Record<number, boolean>>({});
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Share state
   const [showSharePanel, setShowSharePanel] = useState(false);
@@ -137,6 +146,9 @@ export function ScreenshotViewer({
     };
   }, [detailsById, listItem]);
 
+  // Wait for the capture's file list, so the dialog can say what a delete removes.
+  const canDelete = !!screenshot || detailError;
+
   const handleCycleVariant = useCallback(() => {
     if (variants.length < 2 || !activeVariant) return;
     const currentVariantIndex = variants.findIndex((variant) => variant.id === activeVariant.id);
@@ -154,7 +166,9 @@ export function ScreenshotViewer({
     setShareLoading(false);
     setShareLink(null);
     setShareCopied(false);
-  }, [currentIndex]);
+    setConfirmDelete(false);
+    setDeleteError(null);
+  }, [listItem?.id]);
 
   const handlePrev = useCallback(() => {
     if (hasPrev) onNavigate(currentIndex - 1);
@@ -169,6 +183,8 @@ export function ScreenshotViewer({
       const target = e.target;
       if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.metaKey || e.altKey
         || (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]'))) return;
+      // The delete dialog handles its own keys.
+      if (confirmDelete) return;
       // Don't handle keyboard shortcuts if share panel is open (for text selection)
       if (showSharePanel) {
         if (e.key === 'Escape') {
@@ -193,9 +209,12 @@ export function ScreenshotViewer({
         case 'h':
           handleCycleVariant();
           break;
+        case 'Delete':
+          if (onDeleted && canDelete) setConfirmDelete(true);
+          break;
       }
     },
-    [onClose, handlePrev, handleNext, handleCycleVariant, showSharePanel],
+    [onClose, handlePrev, handleNext, handleCycleVariant, showSharePanel, confirmDelete, onDeleted, canDelete],
   );
 
   useEffect(() => {
@@ -290,7 +309,32 @@ export function ScreenshotViewer({
     }
   };
 
+  const handleDelete = async (onlyThisFile: boolean) => {
+    if (!listItem || !activeVariant || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const result = await deleteScreenshot(onlyThisFile ? activeVariant.id : listItem.id, onlyThisFile);
+      setConfirmDelete(false);
+      setActiveVariantId(null);
+      // The capture's files changed: fetch its details again when it's shown.
+      setDetailsById((current) => {
+        const next = { ...current };
+        delete next[listItem.id];
+        return next;
+      });
+      onDeleted?.(listItem.id, result);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : 'Could not delete the screenshot');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (!listItem || !activeVariant) return null;
+
+  const fileCount = variants.length;
+  const activeLabel = variantLabel(activeVariant, variants.indexOf(activeVariant), variants);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
@@ -389,6 +433,18 @@ export function ScreenshotViewer({
             <Download className="h-5 w-5 text-white/70" />
           </a>
 
+          {onDeleted && (
+            <button
+              onClick={() => { setDeleteError(null); setConfirmDelete(true); }}
+              disabled={!canDelete}
+              className="p-2 rounded-md text-white/70 hover:text-accent-danger hover:bg-accent-danger/15 transition-colors disabled:opacity-40"
+              title="Delete (Del)"
+              aria-label="Delete screenshot"
+            >
+              <Trash2 className="h-5 w-5" />
+            </button>
+          )}
+
           <button
             onClick={onClose}
             className="p-2 rounded-md hover:bg-white/10 transition-colors"
@@ -398,6 +454,36 @@ export function ScreenshotViewer({
           </button>
         </div>
       </div>
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title={fileCount > 1 ? 'Delete this capture?' : 'Delete this screenshot?'}
+          busy={deleting}
+          error={deleteError}
+          onCancel={() => setConfirmDelete(false)}
+          actions={fileCount > 1
+            ? [
+                { label: `Only the ${activeLabel} file`, onClick: () => void handleDelete(true) },
+                { label: `Delete all ${fileCount} files`, onClick: () => void handleDelete(false), danger: true },
+              ]
+            : [{ label: 'Delete', onClick: () => void handleDelete(false), danger: true }]}
+        >
+          {fileCount > 1 ? (
+            <>
+              <p>
+                This capture has {fileCount} files: {variants.map((variant, index) => variantLabel(variant, index, variants)).join(', ')}.
+                Delete all of them, or only the {activeLabel} file you're looking at?
+              </p>
+              <p>The files are removed from GameVault and from the library folder. This can't be undone.</p>
+            </>
+          ) : (
+            <p>
+              <strong className="text-text-primary break-all">{activeVariant.filename}</strong> is removed from GameVault
+              and from the library folder. This can't be undone.
+            </p>
+          )}
+        </ConfirmDialog>
+      )}
 
       {/* Main area */}
       {groupError && <p role="alert" className="px-4 text-sm text-accent-danger">{groupError}</p>}

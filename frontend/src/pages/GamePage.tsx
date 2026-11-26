@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Upload, Image, Trash2, Loader2, RefreshCw, CheckCircle2, AlertCircle, Globe, Lock, GitMerge, Search } from 'lucide-react';
+import { ArrowLeft, Upload, Image, Trash2, Loader2, RefreshCw, CheckCircle2, AlertCircle, Globe, Lock, GitMerge, Search, CheckSquare, X } from 'lucide-react';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { ScreenshotGallery } from '@/components/screenshots/ScreenshotGallery';
 import { ScreenshotViewer } from '@/components/screenshots/ScreenshotViewer';
 import {
@@ -10,7 +11,13 @@ import {
   type ScreenshotSort,
 } from '@/components/screenshots/ScreenshotSortControl';
 import { getGame, deleteGame, updateGame, getCoverUrl, listGames, mergeGameInto } from '@/api/games';
-import { listScreenshotsCursor, getScreenshotPreviewUrl } from '@/api/screenshots';
+import {
+  listScreenshotsCursor,
+  getScreenshotPreviewUrl,
+  getScreenshot,
+  deleteScreenshots,
+  type DeleteResult,
+} from '@/api/screenshots';
 import { fetchGameMetadata } from '@/api/metadata';
 import { formatCount, formatDate, formatMonthYear, isHexColor } from '@/lib/formatters';
 import type { Game, ScreenshotListItem } from '@/lib/types';
@@ -43,6 +50,13 @@ export function GamePage() {
   const [metaFailed, setMetaFailed] = useState(false);
   const [showMergeModal, setShowMergeModal] = useState(false);
   const metaResultTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Multi-select in the grid.
+  const [selecting, setSelecting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set());
+  const lastSelectedIndex = useRef<number | null>(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkDeleteError, setBulkDeleteError] = useState<string | null>(null);
 
   useEffect(() => () => clearTimeout(metaResultTimer.current), []);
 
@@ -72,6 +86,8 @@ export function GamePage() {
       setNextCursor(screenshotData.next_cursor);
       setLoadMoreError(false);
       setViewerIndex(null);
+      setSelectedIds(new Set());
+      lastSelectedIndex.current = null;
     } catch (err) {
       if (requestVersion !== requestVersionRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load game');
@@ -117,6 +133,115 @@ export function GamePage() {
       ),
     );
   }, []);
+
+  const stopSelecting = useCallback(() => {
+    setSelecting(false);
+    setSelectedIds(new Set());
+    lastSelectedIndex.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (!selecting) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented && viewerIndex === null) stopSelecting();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [selecting, stopSelecting, viewerIndex]);
+
+  // Read through refs so the card callback stays stable: memoized cards then
+  // re-render only when their own selection changes, not on every page load.
+  const listRef = useRef(screenshots);
+  const selectingRef = useRef(selecting);
+  useEffect(() => {
+    listRef.current = screenshots;
+    selectingRef.current = selecting;
+  }, [screenshots, selecting]);
+
+  const handleCardSelect = useCallback((index: number, shiftKey?: boolean) => {
+    if (!selectingRef.current) {
+      setViewerIndex(index);
+      return;
+    }
+    const from = lastSelectedIndex.current;
+    const screenshots = listRef.current;
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      const target = screenshots[index];
+      if (!target) return current;
+      if (shiftKey && from !== null) {
+        // Shift-click selects the whole run from the last card clicked.
+        const [start, end] = from < index ? [from, index] : [index, from];
+        for (const item of screenshots.slice(start, end + 1)) next.add(item.id);
+      } else if (next.has(target.id)) {
+        next.delete(target.id);
+      } else {
+        next.add(target.id);
+      }
+      return next;
+    });
+    lastSelectedIndex.current = index;
+  }, []);
+
+  // Counts and first/last capture dates come from the server after any delete.
+  const refreshGame = useCallback(() => {
+    getGame(gameId).then(setGame).catch(() => undefined);
+  }, [gameId]);
+
+  const removeCaptures = useCallback((ids: ReadonlySet<number>) => {
+    setScreenshots((current) => current.filter((item) => !ids.has(item.id)));
+    setHero((current) => (current && ids.has(current.id) ? null : current));
+  }, []);
+
+  const handleViewerDeleted = useCallback(async (id: number, result: DeleteResult) => {
+    if (result.deleted_captures === 0) {
+      // One file of the capture went; the capture stays, maybe shown by another file now.
+      const remainingId = result.remaining_id ?? id;
+      try {
+        const capture = await getScreenshot(remainingId);
+        setScreenshots((current) => current.map((item) => (item.id === id ? {
+          ...item,
+          id: capture.id,
+          filename: capture.filename,
+          media_version: capture.media_version,
+          taken_at: capture.taken_at,
+          uploaded_at: capture.uploaded_at,
+          is_favorite: capture.is_favorite,
+          has_annotation: capture.has_annotation,
+          variant_count: capture.variant_count,
+        } : item)));
+      } catch {
+        void fetchData();
+      }
+      refreshGame();
+      return;
+    }
+    const remaining = screenshots.filter((item) => item.id !== id);
+    removeCaptures(new Set([id]));
+    // Stay at the same spot: the next capture slides into it.
+    setViewerIndex((index) => {
+      if (index === null || remaining.length === 0) return null;
+      return Math.min(index, remaining.length - 1);
+    });
+    refreshGame();
+  }, [fetchData, refreshGame, removeCaptures, screenshots]);
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkDeleting(true);
+    setBulkDeleteError(null);
+    try {
+      await deleteScreenshots([...selectedIds]);
+      removeCaptures(selectedIds);
+      setConfirmBulkDelete(false);
+      stopSelecting();
+      refreshGame();
+    } catch (err) {
+      setBulkDeleteError(err instanceof Error ? err.message : 'Could not delete the screenshots');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   const handleDelete = async () => {
     try {
@@ -185,6 +310,7 @@ export function GamePage() {
     );
   }
 
+  const heroShot = hero ?? screenshots.find((item) => item.is_favorite) ?? screenshots[0] ?? null;
   const accentStyle = isHexColor(game.accent_color)
     ? ({ '--color-accent-primary': game.accent_color } as CSSProperties)
     : undefined;
@@ -203,10 +329,10 @@ export function GamePage() {
     <div style={accentStyle}>
       {/* Hero: one of the game's own captures behind its title. Bleeds to the edges of the page. */}
       <header className="relative -mx-4 -mt-4 sm:-mx-6 sm:-mt-6 mb-5 overflow-hidden">
-        {hero && (
+        {heroShot && (
           <div className="absolute inset-0" aria-hidden="true">
             <img
-              src={getScreenshotPreviewUrl(hero.id, hero.media_version)}
+              src={getScreenshotPreviewUrl(heroShot.id, heroShot.media_version)}
               alt=""
               decoding="async"
               className="h-full w-full object-cover"
@@ -217,7 +343,7 @@ export function GamePage() {
           </div>
         )}
 
-        <div className={`relative px-4 sm:px-8 pb-5 ${hero ? 'pt-4 sm:pt-5' : 'pt-4 sm:pt-6'}`}>
+        <div className={`relative px-4 sm:px-8 pb-5 ${heroShot ? 'pt-4 sm:pt-5' : 'pt-4 sm:pt-6'}`}>
           <Link
             to="/"
             className="inline-flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary transition-colors no-underline"
@@ -226,7 +352,7 @@ export function GamePage() {
             Library
           </Link>
 
-          <div className={`flex items-end gap-5 sm:gap-6 ${hero ? 'mt-14 sm:mt-24 lg:mt-32' : 'mt-6'}`}>
+          <div className={`flex items-end gap-5 sm:gap-6 ${heroShot ? 'mt-14 sm:mt-24 lg:mt-32' : 'mt-6'}`}>
             {game.cover_image_path ? (
               <img
                 src={getCoverUrl(game.id, game.updated_at)}
@@ -331,7 +457,18 @@ export function GamePage() {
         </div>
 
         {screenshots.length > 0 && (
-          <ScreenshotSortControl value={screenshotSort} onChange={setScreenshotSort} />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => (selecting ? stopSelecting() : setSelecting(true))}
+              className={`${secondaryButton} ${selecting ? 'text-text-primary border-accent-primary/60' : ''}`}
+              title="Select screenshots to delete several at once"
+              aria-pressed={selecting}
+            >
+              <CheckSquare className="h-3.5 w-3.5" />
+              {selecting ? 'Done' : 'Select'}
+            </button>
+            <ScreenshotSortControl value={screenshotSort} onChange={setScreenshotSort} />
+          </div>
         )}
       </div>
 
@@ -373,8 +510,10 @@ export function GamePage() {
         <>
           <ScreenshotGallery
             screenshots={screenshots}
-            onSelect={setViewerIndex}
+            onSelect={handleCardSelect}
             onEndReached={nextCursor ? loadMore : undefined}
+            selecting={selecting}
+            selectedIds={selectedIds}
           />
 
           {loadingMore && (
@@ -415,6 +554,7 @@ export function GamePage() {
           onClose={() => setViewerIndex(null)}
           onNavigate={setViewerIndex}
           onGroupingChanged={() => { setViewerIndex(null); void fetchData(); }}
+          onDeleted={(id, result) => void handleViewerDeleted(id, result)}
           onFavoriteToggle={handleFavoriteToggle}
           onAnnotationChanged={(id, has) => {
             setScreenshots((prev) =>
@@ -424,6 +564,47 @@ export function GamePage() {
             );
           }}
         />
+      )}
+
+      {/* Multi-select bar: stays in view while scrolling the grid. */}
+      {selecting && viewerIndex === null && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 pl-4 pr-2 py-2 rounded-full bg-bg-secondary/95 border border-border shadow-xl shadow-black/50">
+          <span className="text-sm text-text-primary tabular-nums whitespace-nowrap" aria-live="polite">
+            {selectedIds.size === 0 ? 'Click captures to select' : `${selectedIds.size.toLocaleString()} selected`}
+          </span>
+          <span className="hidden sm:inline text-xs text-text-muted whitespace-nowrap">Shift-click selects a range</span>
+          <button
+            onClick={() => { setBulkDeleteError(null); setConfirmBulkDelete(true); }}
+            disabled={selectedIds.size === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-danger text-white rounded-full text-sm font-medium hover:bg-accent-danger/90 transition-colors disabled:opacity-40"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete
+          </button>
+          <button
+            onClick={stopSelecting}
+            className="p-1.5 rounded-full text-text-muted hover:text-text-primary hover:bg-bg-tertiary transition-colors"
+            title="Cancel selection (Esc)"
+            aria-label="Cancel selection"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {confirmBulkDelete && (
+        <ConfirmDialog
+          title={`Delete ${selectedIds.size.toLocaleString()} ${selectedIds.size === 1 ? 'capture' : 'captures'}?`}
+          busy={bulkDeleting}
+          error={bulkDeleteError}
+          onCancel={() => setConfirmBulkDelete(false)}
+          actions={[{ label: 'Delete', onClick: () => void handleBulkDelete(), danger: true }]}
+        >
+          <p>
+            Every file of each capture goes, grouped copies included (Steam JPG, Special K JXR and PNG).
+            They're removed from GameVault and from the library folder. This can't be undone.
+          </p>
+        </ConfirmDialog>
       )}
 
       {/* Merge modal */}

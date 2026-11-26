@@ -109,7 +109,7 @@ Revokes one device. Its next request gets 401 and the app asks to sign in again.
 
 ### `GET /api/health` — *public*
 
-Returns `{ "status": "ok", "version": "1.4.1" }`, plus `instance`, a random id
+Returns `{ "status": "ok", "version": "1.5.0" }`, plus `instance`, a random id
 created once per database. GameVault Sync uses it to tell servers apart: the
 same server under another address keeps the app's memory of what it uploaded,
 and a different server at the same address starts fresh. Used by Docker
@@ -222,8 +222,27 @@ slimmer public response model.
 
 ### `DELETE /api/screenshots/{id}`
 
-Delete the screenshot record AND its files (full image + thumbnails).
-Different from game deletion which leaves files alone.
+Delete a logical capture: every file grouped in it (Steam JPG, Special K JXR and
+PNG), with thumbnails, previews and full renders. Files another row still uses
+stay. Different from game deletion, which leaves files alone.
+
+`?variant=true` deletes only this one file and keeps the capture's other files;
+its note, share link and favourite move to a file that stays. Deleting the last
+file of a capture deletes the capture.
+
+Returns `{ "deleted_files": n, "deleted_captures": n, "removed_from_disk": n }`,
+plus `remaining_id` (the file that now represents the capture, or `null`) for a
+variant delete. 404 if the id doesn't exist.
+
+Each deleted file's sha256 is remembered, so `check-hashes` reports it as
+existing (GameVault Sync won't upload it again) and Steam / Special K imports
+skip it. Uploading the same file by hand on the Upload page brings it back.
+
+### `POST /api/screenshots/delete`
+
+Delete several captures at once. Body: `{ "ids": [1, 2, 3] }` (1 to 2000 ids;
+unknown ids are skipped). Each id deletes its whole capture, as above. Returns
+`{ "deleted_files": n, "deleted_captures": n, "removed_from_disk": n }`.
 
 ### `GET /api/screenshots/{id}/image`
 
@@ -279,7 +298,8 @@ updated.
 Bulk hash existence check. Body: `{ "hashes": ["sha256...", ...] }`, optionally
 with `"capture_times": { "sha256...": "2025-07-04T19:42:07" }` (local time of
 capture). Returns `{ "existing": [...], "new": [...], "capture_times_applied": n }`.
-Used by GameVault Sync to avoid uploading duplicates; a reported time fills in
+Used by GameVault Sync to avoid uploading duplicates; files deleted in GameVault
+count as existing so they aren't uploaded again; a reported time fills in
 the capture time of a stored copy that has none (and of the copies grouped with
 it), and never replaces one it already has.
 
