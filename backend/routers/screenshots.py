@@ -1,11 +1,10 @@
 """Screenshot management routes."""
 
-import asyncio
 import mimetypes
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Some MIME types Python's mimetypes module doesn't know natively.
 _EXTRA_MIME_TYPES = {
@@ -14,14 +13,13 @@ _EXTRA_MIME_TYPES = {
 }
 
 from backend.auth import require_auth
-from backend.database import get_db
 from backend.models.annotation import AnnotationCreate
 from backend.models.screenshot import ScreenshotResponse
-from backend.services import full_render_service, screenshot_service
+from backend.services import full_render_service, screenshot_delete_service, screenshot_service
+from backend.services.screenshot_delete_service import MAX_BULK_DELETE
 from backend.services.filesystem import (
     safe_library_path,
     safe_media_path,
-    thumbnail_cache_path,
 )
 from backend.services.media_cache_service import media_response_headers
 
@@ -69,73 +67,31 @@ async def get_screenshot(screenshot_id: int):
 
 
 @router.delete("/{screenshot_id}")
-async def delete_screenshot(screenshot_id: int):
-    """Delete a screenshot record and its files."""
-    screenshot = await screenshot_service.get_screenshot(screenshot_id)
-    if not screenshot:
+async def delete_screenshot(screenshot_id: int, variant: bool = False):
+    """Delete a capture: every file in it, with thumbnails, previews and renders.
+
+    ``?variant=true`` deletes only this file and keeps the capture's other files
+    (for example drop the Steam JPG, keep the Special K JXR).
+    """
+    if variant:
+        result = await screenshot_delete_service.delete_variant(screenshot_id)
+    else:
+        result = await screenshot_delete_service.delete_captures([screenshot_id])
+        if not result["deleted_files"]:
+            result = None
+    if result is None:
         raise HTTPException(status_code=404, detail="Screenshot not found")
+    return {"message": "Screenshot deleted", **result}
 
-    # Resolve every file first — through the library-containment check so a
-    # poisoned DB row can't reach outside — and skip any still shared by
-    # another row.
-    doomed = []
-    for path_field in [
-        "file_path",
-        "thumbnail_path_sm",
-        "thumbnail_path_md",
-        "preview_path",
-    ]:
-        rel_path = screenshot.get(path_field)
-        if not rel_path:
-            continue
-        db = await get_db()
-        cursor = await db.execute(
-            """SELECT 1 FROM screenshots WHERE id != ? AND (
-                file_path = ? OR thumbnail_path_sm = ? OR thumbnail_path_md = ? OR preview_path = ?
-            ) LIMIT 1""",
-            (screenshot_id, rel_path, rel_path, rel_path, rel_path),
-        )
-        if await cursor.fetchone():
-            continue
-        try:
-            resolver = safe_library_path if path_field == "file_path" else safe_media_path
-            doomed.append(resolver(rel_path))
-        except HTTPException:
-            # Unsafe stored path — skip the unlink rather than fail the
-            # whole delete. The DB row will still be removed below.
-            continue
 
-    # The full-size render is content-addressed like the preview, so a
-    # duplicate of the same original still needs it.
-    if full_render_service.needs_full_render(screenshot):
-        try:
-            full_rel = await asyncio.to_thread(
-                full_render_service.full_render_rel_path, screenshot
-            )
-            full_path = thumbnail_cache_path(full_rel)
-        except HTTPException:
-            full_path = None
-        if full_path is not None:
-            db = await get_db()
-            cursor = await db.execute(
-                """SELECT 1 FROM screenshots WHERE id != ? AND (
-                    sha256_hash = ? OR preview_path = ?
-                ) LIMIT 1""",
-                (screenshot_id, screenshot.get("sha256_hash"), screenshot.get("preview_path")),
-            )
-            if not await cursor.fetchone():
-                doomed.append(full_path)
+class BulkDeleteRequest(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=MAX_BULK_DELETE)
 
-    # Remove the row before the files: if the delete fails, nothing points at
-    # missing originals.
-    await screenshot_service.delete_screenshot(screenshot_id)
 
-    def unlink_all():
-        for full_path in doomed:
-            full_path.unlink(missing_ok=True)
-
-    await asyncio.to_thread(unlink_all)
-    return {"message": "Screenshot deleted"}
+@router.post("/delete")
+async def delete_screenshots(data: BulkDeleteRequest):
+    """Delete several captures at once (multi-select in the grid)."""
+    return await screenshot_delete_service.delete_captures(data.ids)
 
 
 @router.post("/{screenshot_id}/ungroup", response_model=ScreenshotResponse)

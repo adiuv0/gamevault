@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Files, Heart, MessageSquare } from 'lucide-react';
+import { Check, Files, Heart, MessageSquare } from 'lucide-react';
 import { getThumbnailUrl } from '@/api/screenshots';
 import { formatDate } from '@/lib/formatters';
 import type { ScreenshotListItem } from '@/lib/types';
@@ -7,7 +7,10 @@ import type { ScreenshotListItem } from '@/lib/types';
 interface ScreenshotCardProps {
   screenshot: ScreenshotListItem;
   index: number;
-  onSelect: (index: number) => void;
+  onSelect: (index: number, shiftKey?: boolean) => void;
+  /** Multi-select mode: a click toggles the card instead of opening it. */
+  selecting?: boolean;
+  selected?: boolean;
 }
 
 // Memoized: loading another page or toggling a favourite re-renders only the cards that changed.
@@ -15,13 +18,18 @@ export const ScreenshotCard = memo(function ScreenshotCard({
   screenshot,
   index,
   onSelect,
+  selecting = false,
+  selected = false,
 }: ScreenshotCardProps) {
   return (
     <button
       type="button"
-      onClick={() => onSelect(index)}
+      onClick={(event) => onSelect(index, event.shiftKey)}
       title={formatDate(screenshot.taken_at ?? screenshot.uploaded_at)}
-      className="group relative block w-full aspect-video overflow-hidden rounded-sm bg-bg-tertiary outline-2 -outline-offset-2 outline-transparent hover:outline-accent-primary focus-visible:outline-accent-primary transition-[outline-color]"
+      aria-pressed={selecting ? selected : undefined}
+      className={`group relative block w-full aspect-video overflow-hidden rounded-sm bg-bg-tertiary outline-2 -outline-offset-2 hover:outline-accent-primary focus-visible:outline-accent-primary transition-[outline-color] ${
+        selected ? 'outline-accent-primary' : 'outline-transparent'
+      }`}
     >
       {/* No frame or caption: the capture is the card. The date is in the tooltip and the viewer. */}
       <img
@@ -33,6 +41,20 @@ export const ScreenshotCard = memo(function ScreenshotCard({
         loading="lazy"
         decoding="async"
       />
+
+      {selecting && (
+        <>
+          {selected && <div className="absolute inset-0 bg-accent-primary/25" aria-hidden="true" />}
+          <div
+            aria-hidden="true"
+            className={`absolute top-2 left-2 flex h-5 w-5 items-center justify-center rounded-full border-2 ${
+              selected ? 'bg-accent-primary border-accent-primary text-on-accent' : 'border-white/80 bg-black/40'
+            }`}
+          >
+            {selected && <Check className="h-3 w-3" strokeWidth={3} />}
+          </div>
+        </>
+      )}
 
       {/* Badges overlay */}
       <div className="absolute top-2 right-2 flex items-center gap-1.5">

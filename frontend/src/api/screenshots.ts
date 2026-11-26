@@ -79,3 +79,23 @@ export async function getShareLink(screenshotId: number): Promise<ShareLink | nu
 export async function deleteShareLink(screenshotId: number): Promise<void> {
   return api.delete(`/screenshots/${screenshotId}/share`);
 }
+
+// ── Deleting ──────────────────────────────────────────────────────────
+
+export interface DeleteResult {
+  deleted_files: number;
+  deleted_captures: number;
+  removed_from_disk: number;
+  /** After deleting one file of a capture: the file that now represents it. */
+  remaining_id?: number | null;
+}
+
+/** Delete a capture with all its files, or with `onlyThisFile` just this one file of it. */
+export async function deleteScreenshot(id: number, onlyThisFile = false): Promise<DeleteResult> {
+  return api.delete(`/screenshots/${id}${onlyThisFile ? '?variant=true' : ''}`);
+}
+
+/** Delete several captures (and all their files) at once. */
+export async function deleteScreenshots(ids: number[]): Promise<DeleteResult> {
+  return api.post('/screenshots/delete', { ids });
+}
