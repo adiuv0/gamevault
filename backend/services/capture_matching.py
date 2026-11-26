@@ -242,3 +242,30 @@ async def _split_by_hand(db, left_ids: list[int], right_ids: list[int]) -> bool:
         (*left_ids, *right_ids, *right_ids, *left_ids),
     )
     return await cursor.fetchone() is not None
+
+
+async def share_capture_time(db, game_id: int, group_id: int) -> int:
+    """Give a capture's undated copies the time recorded on another copy.
+
+    A Steam JPG carries no date of its own; once it is grouped with the Special K
+    JXR of the same press, the JXR's time is the JPG's too. Without this the
+    capture's representative copy could still sort by its upload day. Returns how
+    many rows got a time. The caller commits.
+    """
+    cursor = await db.execute(
+        """UPDATE screenshots SET taken_at = (
+               SELECT MIN(t.taken_at) FROM screenshots t
+               WHERE t.game_id = screenshots.game_id
+                 AND COALESCE(t.capture_group_id, t.id) = ?
+                 AND t.taken_at IS NOT NULL
+           )
+           WHERE game_id = ? AND COALESCE(capture_group_id, id) = ?
+             AND taken_at IS NULL
+             AND EXISTS (
+                 SELECT 1 FROM screenshots t
+                 WHERE t.game_id = ? AND COALESCE(t.capture_group_id, t.id) = ?
+                   AND t.taken_at IS NOT NULL
+             )""",
+        (group_id, game_id, group_id, game_id, group_id),
+    )
+    return cursor.rowcount

@@ -8,8 +8,10 @@ original file is always preserved on disk for download.
 import hashlib
 import logging
 import os
+import re
 import tempfile
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import dhash
@@ -131,6 +133,77 @@ def _exif_date(exif_data) -> datetime | None:
     return None
 
 
+# Capture tools that write no EXIF still date their files. Special K and the
+# Windows capture path put an XMP packet near the start of PNG, JXR and JPEG
+# files (exif:DateTimeOriginal, xmp:CreateDate); older Special K builds wrote a
+# PNG ``Creation Time`` text chunk instead. Both sit in the first few KB, so a
+# short read finds them without decoding a 4K HDR image.
+_EMBEDDED_DATE_HEAD_BYTES = 256 * 1024
+_XMP_DATE = re.compile(
+    rb"<(?:exif:DateTimeOriginal|xmp:CreateDate|photoshop:DateCreated|exif:DateTimeDigitized)>"
+    rb"\s*([0-9]{4}[-:][0-9]{2}[-:][0-9]{2}[T ][0-9]{2}:[0-9]{2}(?::[0-9]{2})?[^<]*)<"
+)
+_XMP_DATE_ATTRIBUTE = re.compile(
+    rb"(?:exif:DateTimeOriginal|xmp:CreateDate|photoshop:DateCreated)=\"([^\"]+)\""
+)
+_PNG_CREATION_TIME_KEY = b"tEXtCreation Time\x00"
+_EARLIEST_CAPTURE_YEAR = 1990
+
+
+def parse_capture_time(value: str) -> datetime | None:
+    """Read a capture time written as ISO 8601 or EXIF's ``YYYY:MM:DD HH:MM:SS``.
+
+    Times without an offset stay naive local time, like EXIF dates. Fractions of a
+    second are dropped so every source sorts and compares alike.
+    """
+    text = value.strip()
+    if re.match(r"^\d{4}:\d{2}:\d{2}", text):
+        text = text[:10].replace(":", "-") + text[10:]
+    text = re.sub(r"(\d{2}:\d{2}:\d{2})[.,]\d+", r"\1", text)
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        try:
+            # PNG's suggested form: RFC 1123, "Wed, 20 Nov 2024 07:57:04 GMT".
+            parsed = parsedate_to_datetime(text)
+        except (TypeError, ValueError, IndexError):
+            return None
+        if parsed is None:
+            return None
+    if not _EARLIEST_CAPTURE_YEAR <= parsed.year <= datetime.now().year + 1:
+        return None
+    return parsed
+
+
+def embedded_capture_time(file_path: Path, head: bytes | None = None) -> datetime | None:
+    """The capture time a file's XMP packet or PNG text chunk records, if any."""
+    if head is None:
+        try:
+            with open(file_path, "rb") as fh:
+                head = fh.read(_EMBEDDED_DATE_HEAD_BYTES)
+        except OSError:
+            return None
+    for pattern in (_XMP_DATE, _XMP_DATE_ATTRIBUTE):
+        for match in pattern.finditer(head):
+            parsed = parse_capture_time(match.group(1).decode("ascii", errors="ignore"))
+            if parsed:
+                return parsed
+    return _png_creation_time(head)
+
+
+def _png_creation_time(head: bytes) -> datetime | None:
+    start = head.find(_PNG_CREATION_TIME_KEY)
+    if start < 4:
+        return None
+    length = int.from_bytes(head[start - 4:start], "big")
+    value = head[start + len(_PNG_CREATION_TIME_KEY):start + 4 + length]
+    if not value or len(value) > 64:
+        return None
+    return parse_capture_time(value.decode("latin-1"))
+
+
 def describe_image(file_path: Path) -> dict:
     """Read dimensions, format, EXIF, capture date and HDR class in one open.
 
@@ -147,6 +220,7 @@ def describe_image(file_path: Path) -> dict:
         dims = hdr_processor.get_hdr_dimensions(file_path)
         if dims:
             info["width"], info["height"] = dims
+        info["taken_at"] = embedded_capture_time(file_path)
         return info
     try:
         with Image.open(file_path) as img:
@@ -158,6 +232,8 @@ def describe_image(file_path: Path) -> dict:
                 info["taken_at"] = _exif_date(exif_data)
     except Exception as e:  # noqa: BLE001 - unreadable files are reported by validation
         logger.debug("Could not read image header for %s: %s", file_path, e)
+    if info["taken_at"] is None and info["format"]:
+        info["taken_at"] = embedded_capture_time(file_path)
     return info
 
 

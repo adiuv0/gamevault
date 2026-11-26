@@ -89,6 +89,15 @@ def test_already_on_server_is_not_uploaded(world):
     assert report.already == 1 and report.uploaded == 6
 
 
+def test_capture_times_go_along_when_asking_the_server(world):
+    # A copy the server already has may have arrived without a time; the local
+    # file's name still has it, so the server is told.
+    _settings, _state, server, *_ = world
+    server.hashes.add(sha(b"elden-1"))
+    sync(world)
+    assert server.reported_times[sha(b"elden-1")] == "2024-03-01T20:30:00"
+
+
 def test_same_picture_in_two_places_goes_up_once(world):
     _settings, state, _server, _steam, specialk = world
     write_file(specialk / "HollowKnight" / "copy.png", b"hk-1")

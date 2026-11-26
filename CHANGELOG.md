@@ -7,6 +7,26 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-11-26
+
+### Fixed
+
+- **Captures are dated by when they were taken, not when they were uploaded.**
+  Special K and the Windows capture path write no EXIF; they record the moment
+  in an XMP packet (older Special K builds: a PNG `Creation Time` chunk), which
+  GameVault did not read. Files uploaded that way, through the browser or by
+  earlier releases, were stored with no capture time and sorted onto the day
+  they were uploaded. Uploads and Special K imports now read it, and a
+  background repair (migration `m022`, which only queues it) dates the files
+  already in the library, then regroups it so the newly dated copies pair by
+  time.
+- **Steam JPGs without a date take their capture's time.** Steam's own
+  screenshot files carry no date inside. A JPG grouped with a dated copy of the
+  same press now takes that copy's time; a browser upload of a Steam folder
+  file (`20250704194207_1.jpg`) is dated by its name; and GameVault Sync now
+  reports each file's time when it checks what the server has, which dates a
+  stored copy that has none.
+
 ## [1.4.0] - 2026-11-26
 
 The Timeline now tells you how you play, not only what you captured.

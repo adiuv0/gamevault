@@ -5,6 +5,7 @@ import json as _json
 import logging
 import os
 import shutil
+import re
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -76,6 +77,29 @@ def _parse_iso(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+_STEAM_NAME_DATE = re.compile(r"^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})_\d+$")
+_GENERIC_NAME_DATE = re.compile(
+    r"(\d{4})[-_.](\d{2})[-_.](\d{2})[ _T-](\d{2})[-_.:h](\d{2})[-_.:m](\d{2})"
+)
+
+
+def capture_time_from_filename(name: str | None) -> datetime | None:
+    """A capture time spelled out in an uploaded file's own name, if any."""
+    if not name:
+        return None
+    stem = Path(name).stem
+    for pattern in (_STEAM_NAME_DATE, _GENERIC_NAME_DATE):
+        match = pattern.search(stem)
+        if match:
+            try:
+                parsed = datetime(*(int(part) for part in match.groups()))
+            except ValueError:
+                continue
+            if 1990 <= parsed.year <= datetime.now().year + 1:
+                return parsed
+    return None
 
 
 def _generate_filename(game_name: str, taken_at: datetime | None, original_ext: str) -> str:
@@ -297,6 +321,10 @@ async def process_upload(
                 taken_at = datetime.fromisoformat(img_data["taken_at"])
             if not taken_at:
                 taken_at = _parse_iso(taken_at_hint)
+            if not taken_at:
+                # Steam's own screenshot folder names each file after the moment
+                # it was taken (20250213131307_1.jpg) and writes no EXIF.
+                taken_at = capture_time_from_filename(original_name)
 
             # Generate final filename and save
             filename = _generate_filename(game["name"], taken_at, ext)

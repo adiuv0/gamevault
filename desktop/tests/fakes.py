@@ -93,6 +93,7 @@ class FakeServer:
 
     def __init__(self):
         self.hashes: set[str] = set()
+        self.reported_times: dict[str, str] = {}
         self.games: dict[int, str] = {}
         self.steam_ids: dict[int, int] = {}
         self.uploads: list[tuple[int, str, str | None]] = []
@@ -139,8 +140,9 @@ class FakeClient:
         self._guard("health")
         return self.s.instance
 
-    def existing_hashes(self, hashes):
+    def existing_hashes(self, hashes, capture_times=None):
         self._guard("check")
+        self.s.reported_times.update(capture_times or {})
         return {h for h in hashes if h in self.s.hashes}
 
     def game_by_steam_app_id(self, app_id, name_hint=None):
