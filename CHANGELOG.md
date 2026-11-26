@@ -7,6 +7,19 @@ and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-26
+
+### Fixed
+
+- **Screenshot counts no longer count one press twice.** Counts already treated
+  a grouped JPG + JXR as one capture, but copies uploaded without a capture time
+  (their names hold the upload time instead) were never grouped, so a game with
+  Steam JPGs and Special K JXRs of the same shots showed close to double. Such
+  copies now pair with the one capture of another type whose picture matches,
+  only when that match is unambiguous both ways. A background scan
+  (migration `m020`, which only queues it) regroups existing libraries after
+  the update; game, sidebar, Timeline and Settings totals drop as it runs.
+
 ## [1.3.0] - 2026-11-26
 
 A new look. The interface no longer borrows a code-hosting site's dark theme:
